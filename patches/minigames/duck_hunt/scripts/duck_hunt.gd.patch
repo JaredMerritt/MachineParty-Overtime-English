@@ -699,7 +699,7 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  func _on_countdown_expired():
  	super._on_countdown_expired()
  
-@@ -534,3 +1033,116 @@ func _on_countdown_expired():
+@@ -534,3 +1033,131 @@ func _on_countdown_expired():
  func _on_unpaused():
  
  	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -712,6 +712,18 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +# 2026-08-30 纯读码 + 四个探针，**没找到**病因，四条假说全被测量否掉
 +# （出生点几何 / spawn_limit / 我们改过移动代码 / 下标越界，见 HANDOFF T52）。
 +# 读到这儿就该停手上测量了 —— 同 T49 的做法。
++#
++# ═══════════════════════════════════════════════════════════════════════════
++# 🩸 2026-09-01 更正：**下面这套 A/B/C/D/E 的前提已经被玩家的一句话推翻。**
++# ═══════════════════════════════════════════════════════════════════════════
++# 玩家补充：「鸭子走到石墙处 wasd 无反应，**但是右键下蹲正常**，位置刚好猎人狙不到。」
++# `update_crouch()` 是 `_process` 的**最后一行**，排在 PauseMenu / game_focused /
++# active 三道闸和 `movement_input` 赋值之后 —— **下蹲能用就等于三道闸全过、输入有值**。
++# 所以 A/B/C/D/E 全部排除，真正的病灶在 `move_and_slide()` 那一侧：**被几何卡住**。
++#
++# 修法与新判据都在 `duck_player.gd` 的 `_mp8_check_stuck()`（有输入却不动 → 退回一米，
++# 并把卡住坐标打进日志）。**本点名器保留，但它现在只用来排除"角色/激活"那一类**，
++# 不再是主判据 —— 别再拿它的"全绿"下任何结论。
 +#
 +# 鸭子能不能动只有一个闸：`duck_player.active`，由 `play_state.enter()` 里
 +# `set_active_rpc.rpc(true)` 打开，而那个循环遍历的是 **`players`**。
@@ -804,15 +816,18 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +		print("[MP8] 🩸 猎鸭自检（本机 %d）：角色在，但 active 还是 false —— 激活没到（T52-C）" % me)
 +		return
 +
-+	# 全绿的时候更要打这一行 —— 因为「全绿」本身就是结论：
-+	# 角色在、激活了、还是动不了 → 问题不在我们这套，在**输入层**。
-+	# 所以顺手把两个输入闸也读出来，省得靠排除法猜：
-+	#   game_focused=false → 窗口失焦（点到第二屏 / OBS / Discord 就会），
-+	#                        原版 `_process` 这时直接 return，wasd 一个字都不读，
-+	#                        而且**不清零 movement_input**，人就定在原地 = 玩家说的"卡住"；
-+	#   PauseMenu.active   → 暂停菜单开着。
-+	# ⚠️ 还有一种全绿：**他本回合是猎人**。猎人是固定机位狙击手，wasd 本来就不动，
-+	#    第一个小回合还要等 8 秒装枪 —— 没看清角色揭示的人很容易当成 bug 来报。
++	# 🩸 **这一行的结论 2026-09-01 改了。**
++	# 老注释写的是「全绿 ⇒ 问题在输入层」——**那是错的**，见本文件上方那段更正：
++	# 玩家报「右键下蹲正常」，而下蹲与移动读的是同一段 `_process`，
++	# 所以全绿恰恰是**卡墙**那个 bug 的正常长相，不是"不关我们事"的证据。
++	#
++	# 现在这行只剩两个用途：
++	#   1. 排除「角色没造出来 / 没复制到这台 / 激活没到」这三种（A/B/C）；
++	#   2. 顺带记下 game_focused 与 PauseMenu —— 它们**不再是嫌疑**，
++	#      但留着能在日志里一眼确认"确实不是失焦"。
++	# **真正的判据在 duck_player.gd 的 `_mp8_check_stuck()`** —— 它会在
++	# "按着方向键连续 3 秒没挪动"时打一行带坐标的日志并把人退回一米。
++	# ⚠️ 仍要留意的一种全绿：**他本回合是猎人**，猎人本来就不该能走。
 +	print("[MP8] 猎鸭自检（本机 %d）：角色在、已激活，%s；窗口聚焦=%s 暂停=%s" % [
 +		me, "猎人（wasd 本来就不动）" if is_hunter else "鸭子",
 +		str(GameManager.game_focused), str(PauseMenu.active)])

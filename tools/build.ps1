@@ -117,6 +117,66 @@ Start-Process $exe -ArgumentList $pargs -NoNewWindow -Wait `
 
 if (-not (Test-Path $newPck)) { throw "打包失败：没有产出 new.pck" }
 
+# ── [3b] 砍掉 gdre 多写的 32 字节包尾 ────────────────────────────────
+# gdre 的 --pck-patch 会在包尾补 28 个 \0 + "GDPC"。那是 Godot **内嵌式 PCK**
+# （附在 exe 尾巴上那种）的尾标记；独立 .pck 用不到 —— 原版 Steam 发的
+# Machine Party.pck 一个字节都没有。引擎从头部就找得到包，所以整个忽略它。
+#
+# 但**外部工具认这个**。MachinePartyModLoader 的索引解析器有一条硬判据：
+#     if self.fmt >= 3 and pos != len(region): return None
+# 即「索引必须正好结束在文件末尾」。多这 32 字节它就报
+#     "Could not locate the file index"
+# 直接装不上我们的包。后果：装了 Overtime 的玩家没法再装 MPML，
+# 也就用不了 MachineParty+ / 第一人称 / 离线机器人那一整套 —— 只能二选一。
+#
+# 2026-09-03 实测：砍掉之后 MPML 立刻装得上，游戏照常跑
+# （headless 单开 + play.ps1 -Room -Count 8 有窗口完整大厅 0 脚本错误
+#  + 两种装法混装同房联机）。
+#
+# ⚠️ **必须按模式判定，不能无脑砍 32 字节。** gdre 换版本后未必还写这个尾巴，
+#    那时无脑砍就是砍掉真数据、把包弄坏。认不出模式就原样放过 ——
+#    代价只是 MPML 装不上，不会坏包。
+$TRAILER = 32
+$tail = New-Object byte[] $TRAILER
+$fsr = [System.IO.File]::OpenRead($newPck)
+try {
+    $pckLen = $fsr.Length
+    if ($pckLen -gt $TRAILER) {
+        $fsr.Seek($pckLen - $TRAILER, 'Begin') | Out-Null
+        $fsr.Read($tail, 0, $TRAILER) | Out-Null
+    }
+} finally { $fsr.Close() }
+
+# 期望：前 28 字节全 0，后 4 字节是 "GDPC"（0x47 0x44 0x50 0x43）
+$looksLikeTrailer = ($pckLen -gt $TRAILER) -and
+                    ($tail[28] -eq 0x47) -and ($tail[29] -eq 0x44) -and
+                    ($tail[30] -eq 0x50) -and ($tail[31] -eq 0x43)
+if ($looksLikeTrailer) {
+    for ($i = 0; $i -lt 28; $i++) { if ($tail[$i] -ne 0) { $looksLikeTrailer = $false; break } }
+}
+
+if ($looksLikeTrailer) {
+    $fsw = [System.IO.File]::Open($newPck, 'Open', 'Write')
+    try { $fsw.SetLength($pckLen - $TRAILER) } finally { $fsw.Close() }
+
+    # 自检：头部 0x20 处记的索引偏移必须仍落在文件内。砍错了这里会当场炸，
+    # 而此时 new.pck 还没换上去，线上的包是完好的。
+    $fsc = [System.IO.File]::OpenRead($newPck)
+    try {
+        $hdr = New-Object byte[] 40
+        $fsc.Read($hdr, 0, 40) | Out-Null
+        $newLen = $fsc.Length
+    } finally { $fsc.Close() }
+    $dirOff = [System.BitConverter]::ToUInt64($hdr, 32)
+    if ($dirOff -ge $newLen) {
+        throw "砍包尾后自检失败：索引偏移 $dirOff 超出文件长度 $newLen —— 没有换包，线上仍是旧的"
+    }
+    Write-Host ("      砍掉包尾 {0} 字节内嵌式尾标记（28×00 + GDPC）—— 不砍的话玩家装不了 MPML" -f $TRAILER)
+} else {
+    Write-Host "      ⚠️ 包尾不是预期的「28×00 + GDPC」，原样放过（不砍，安全）" -ForegroundColor Yellow
+    Write-Host "         gdre 可能换了写法。后果：玩家装不了 MachinePartyModLoader。去看 build.ps1 的 [3b] 段。" -ForegroundColor Yellow
+}
+
 Write-Host "[4/4] 换上新 PCK"
 $live = Join-Path $gt "Machine Party.pck"
 if (Test-Path $live) { Remove-Item $live -Force }

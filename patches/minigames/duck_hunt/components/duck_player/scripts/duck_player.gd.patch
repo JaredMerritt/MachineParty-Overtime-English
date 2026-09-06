@@ -1,7 +1,109 @@
 diff --git a/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd b/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd
 --- a/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd
 +++ b/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd
-@@ -280,6 +280,20 @@ func set_crouching_rpc(_crouching: bool):
+@@ -45,6 +45,46 @@ var health: int = 0
+ 
+ var movement_input: Vector3
+ 
++# ═══════════════════════════════════════════════════════════════════════════
++# [MP8] T52 卡墙自救（2026-09-02）
++# ═══════════════════════════════════════════════════════════════════════════
++#
++# 玩家 2026-09-01 的原话：「鸭子走到石墙处，突然发现 wasd 无反应，
++# **但是右键下蹲正常**，可以确定不是点到其他窗口，且位置刚好猎人狙击不到，导致卡关。」
++#
++# 🩸 「右键下蹲正常」这一句把整个输入层一次排除干净 —— 因为 `update_crouch()` 是
++# `_process` 的**最后一行**，排在 `PauseMenu.active` / `game_focused` / `active`
++# 三道闸和 `movement_input` 赋值**之后**。下蹲能用 ⇒ 三道闸全过、`movement_input` 有值。
++# 问题只可能在 `move_and_slide()` 那一侧：**人被几何卡住了。**
++#
++# ⚠️ 这条推翻了本 mod 1.5 里那个点名器的前提 —— 它只会打印「角色在、已激活、
++#    窗口聚焦=true」，而那**正是这个 bug 的样子**。判据本身问错了，已一并改。
++#
++# 排掉的假说（别再走）：**不是下蹲穿墙**。probe81 量过，鸭子有两个身体碰撞体，
++# `StandingCollision`（高 5.00 半径 0.70）与 `CrouchCollision`（高 3.60 **半径同样 0.70**），
++# 下蹲只关前者。**只变矮、不变窄**，所以既穿不进墙也挤不进缝。
++#
++# 现在这套不去找那堵具体的墙 —— 地图上未必只有一处，而后果是**整局卡关**
++# （玩家还说「位置刚好猎人狙击不到」，连被打死解脱都做不到）。所以做通用兜底：
++#
++#   **有输入、但连续 N 秒几乎没动 → 传回 1 米前的面包屑位置。**
++#
++# 面包屑取"离上一个面包屑超过 1 米时更新"，所以它永远在你来路上一米左右 ——
++# 传回去 = 沿原路退一步，必定脱困，而且位移小到几乎看不出来。
++#
++# ⚠️ 只在**自己那台**跑：鸭子的移动权威是玩家本人（`set_multiplayer_authority`），
++#    别人那份 `_physics_process` 是关掉的，服务器上也测不到这件事。
++# ⚠️ 顶着墙站 3 秒也会触发，代价是被推回一米 —— 几乎察觉不到，
++#    而漏掉一次真卡死就是一整局报废。这个不对称是故意选的。
++const MP8_STUCK_SECONDS: float = 3.0    # 判定卡住需要的持续时间
++const MP8_STUCK_EPSILON: float = 0.05   # 一帧位移小于这个就算"没动"
++const MP8_CRUMB_DISTANCE: float = 1.0   # 面包屑间距
++
++var _mp8_stuck_t: float = 0.0
++var _mp8_prev_pos: Vector3 = Vector3.ZERO
++var _mp8_crumb: Vector3 = Vector3.ZERO
++var _mp8_crumb_set: bool = false
++
+ 
+ var run_blend: float = 0.0
+ 
+@@ -183,9 +223,54 @@ func _physics_process(delta: float) -> void :
+ 	move_and_slide()
+ 	update_bump()
+ 
++	_mp8_check_stuck(delta)
++
+ 	update_animations(delta)
+ 	play_footstep_sound(delta)
+ 
++# [MP8] T52：有输入却不动 → 沿来路退一米。说明见文件上方那段。
++func _mp8_check_stuck(delta: float) -> void :
++
++	if not _mp8_crumb_set:
++		_mp8_crumb = global_position
++		_mp8_prev_pos = global_position
++		_mp8_crumb_set = true
++		return
++
++	var moved: float = global_position.distance_to(_mp8_prev_pos)
++	_mp8_prev_pos = global_position
++
++	# 走开够远了就丢一颗新面包屑（它始终在来路上约一米处）
++	if global_position.distance_to(_mp8_crumb) > MP8_CRUMB_DISTANCE:
++		_mp8_crumb = global_position
++
++	# 没按方向键就不算卡住 —— 站着不动是玩家自己的选择
++	if movement_input.length() <= Globals.Epsilon:
++		_mp8_stuck_t = 0.0
++		return
++
++	if moved > MP8_STUCK_EPSILON:
++		_mp8_stuck_t = 0.0
++		return
++
++	_mp8_stuck_t += delta
++	if _mp8_stuck_t < MP8_STUCK_SECONDS:
++		return
++
++	# 走到这儿：按着方向键、连续 MP8_STUCK_SECONDS 秒没挪动
++	# ⚠️ 坐标照打不误 —— 这是我们唯一能拿到「那堵墙在哪」的途径，
++	#    本机复现不出来，只能靠玩家日志。
++	print("[MP8] 🩸 猎鸭卡住自救：%s 在 (%.1f, %.1f, %.1f) 按着方向键 %.1f 秒没动，退回 (%.1f, %.1f, %.1f)（T52）" % [
++		player_presence.network_name if player_presence else "?",
++		global_position.x, global_position.y, global_position.z,
++		_mp8_stuck_t,
++		_mp8_crumb.x, _mp8_crumb.y, _mp8_crumb.z,
++	])
++
++	_mp8_stuck_t = 0.0
++	teleport_rpc.rpc(_mp8_crumb)
++
++
+ func play_footstep_sound(delta):
+ 	if velocity.length() > 0.01:
+ 		footstep_counter += delta
+@@ -280,6 +365,20 @@ func set_crouching_rpc(_crouching: bool):
  @rpc("any_peer", "call_local", "reliable")
  func shot_rpc(_damage: int):
  
@@ -22,3 +124,16 @@ diff --git a/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd b
  	health -= _damage
  
  	if health > 0:
+@@ -343,6 +442,12 @@ func teleport_rpc(_position: Vector3):
+ 
+ 	global_position = _position
+ 
++	# [MP8] T52：换了地方，面包屑与卡住计时一并重置，免得把人传回上一轮的位置
++	_mp8_crumb = _position
++	_mp8_prev_pos = _position
++	_mp8_crumb_set = true
++	_mp8_stuck_t = 0.0
++
+ 
+ 
+ func reveal_role():

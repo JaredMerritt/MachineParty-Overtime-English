@@ -1,7 +1,7 @@
 diff --git a/minigames/green_pea/components/coach_handler/green_pea_coach.gd b/minigames/green_pea/components/coach_handler/green_pea_coach.gd
 --- a/minigames/green_pea/components/coach_handler/green_pea_coach.gd
 +++ b/minigames/green_pea/components/coach_handler/green_pea_coach.gd
-@@ -24,6 +24,20 @@ class_name GreenPeaCoach extends Node3D
+@@ -24,6 +24,63 @@ class_name GreenPeaCoach extends Node3D
  
  signal execution_finished()
  
@@ -19,10 +19,53 @@ diff --git a/minigames/green_pea/components/coach_handler/green_pea_coach.gd b/m
 +
 +	return seat
 +
++# ═══════════════════════════════════════════════════════════════════════════
++# [MP8] T55 错落延迟按人数摊薄（2026-09-02，玩家 09-01 报的）
++# ═══════════════════════════════════════════════════════════════════════════
++#
++# 玩家原话：「新增的位置（第五个人第六个人）在主人重新拿起报纸后拿起叉子的速度
++#            会相较于原来的四人慢很多，影响游戏平衡性。」
++#
++# 原版这两个循环把 `await` 写在**循环体内**：
++#
++#     for player in players:
++#         player.continue_eating_rpc.rpc()
++#         await get_tree().create_timer(randf_range(0, 0.3)).timeout
++#
++# 所以第 i 个人要等**前面 i 个人的随机延迟累加完**才收到指令 ——
++# 期望 0.15×i 秒，最坏 0.3×i 秒。人数一翻倍，最后那个人的等待也翻倍：
++#
++#     座位 1  0.00 s   座位 4  0.45 s（原版最差）
++#     座位 5  0.60 s   座位 6  0.75 s   座位 8  1.05 s   （均值，最坏 ×2）
++#
++# 再叠上 `continue_eating_rpc` 自己固定的 0.2 s + 0.3 s 补间，
++# 8 号位从「教练恢复看报」到「叉子能用」最坏要 2.6 秒。
++# 而教练那边是 `anim_tree_coach.set(...blend_amount, 0)`，**瞬间**就恢复看报 ——
++# 视觉信号对所有人同时出现，实际解锁却拖了一条长尾。这就是玩家说的「慢很多」。
++#
++# ⚠️ 严格说「总进食时长」大致是抵消的（暂停那个循环用同一份顺序，靠后的人也被暂停得晚，
++#    处决期间多吃了差不多的时间）。但**补偿发生在没人在吃的处决过程中**，
++#    **损失发生在回合刚恢复、正抢时间的时候** —— 所以玩家的体感是对的。
++#
++# 🩸 又一次「原版按 4 人写的东西，成本随人数线性增长」（第六节 D 组第 55 条那一类）。
++#    这个错落是**故意做的**（大家依次回神，看着自然），所以不能删，只能摊薄。
++#
++# 做法：每档延迟 = randf_range(0, 总预算 / 人数)，让**整条斜坡的长度与人数无关**。
++# 4 人时 1.2/4 = 0.3，与原版 `randf_range(0, 0.3)` 逐值一致 —— ≤4 人一个字没改。
++#
++# ⚠️ 用 `players.size()` 而不是活人数：两个循环都是遍历整个数组（`continue` 那个
++#    连死人都不跳过），斜坡长度由数组长度决定，用活人数会算短。
++const MP8_STAGGER_BUDGET: float = 1.2   # 原版 4 人的总斜坡长度：4 × 0.3
++
++
++func _mp8_stagger() -> float :
++
++	return randf_range(0.0, MP8_STAGGER_BUDGET / float(maxi(players.size(), 1)))
++
  var is_first_newspaper_sound = true
  
  func _ready() -> void :
-@@ -73,7 +87,11 @@ func shoot_player(seat_position_to_shoot: int):
+@@ -73,7 +130,11 @@ func shoot_player(seat_position_to_shoot: int):
  	anim_coach.play("coach_deagle_ready_up", 0.5)
  	await get_tree().create_timer(1.1, false).timeout
  
@@ -35,7 +78,7 @@ diff --git a/minigames/green_pea/components/coach_handler/green_pea_coach.gd b/m
  	anim_coach.play(anim_name, 0.2)
  	gun_shot_visuals(seat_position_to_shoot)
  	await get_tree().create_timer(4, false).timeout
-@@ -102,7 +120,13 @@ func gun_shot_visuals(seat_position_to_shoot: int):
+@@ -102,7 +163,13 @@ func gun_shot_visuals(seat_position_to_shoot: int):
  			anim_gun_fire.play("shoot")
  			shaker_camera.force_stop_shake()
  			shaker_camera.play_shake()
@@ -50,3 +93,23 @@ diff --git a/minigames/green_pea/components/coach_handler/green_pea_coach.gd b/m
  			player.blood_decal_parent.visible = true
  
  func pause_eating_for_players(position_being_shot: int):
+@@ -110,14 +177,17 @@ func pause_eating_for_players(position_being_shot: int):
+ 		for player in players:
+ 			if player and !player.is_dead && player.player_seat_position != position_being_shot:
+ 				player.pause_eating_rpc.rpc()
+-			await get_tree().create_timer(randf_range(0, 0.3)).timeout
++			# [MP8] T55：原为 randf_range(0, 0.3)，见 _mp8_stagger 上的说明。
++			# 暂停这条也要一起摊薄 —— 两个循环用同一份预算，抵消关系才不会被破坏。
++			await get_tree().create_timer(_mp8_stagger()).timeout
+ 
+ func continue_eating_for_players():
+ 
+ 	if multiplayer.is_server():
+ 		for player in players:
+ 			player.continue_eating_rpc.rpc()
+-			await get_tree().create_timer(randf_range(0, 0.3)).timeout
++			# [MP8] T55：原为 randf_range(0, 0.3)。这条是玩家真正报的那一处。
++			await get_tree().create_timer(_mp8_stagger()).timeout
+ 
+ func deagle_slide_forward():
+ 	anim_deagle_slide.play("forward")

@@ -11,12 +11,91 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +# [MP8] mod 版本号。**发布新版就改这里**，它会被追加进 Globals.game_version，
 +# 直接决定"谁能跟谁联机"（见 _ready() 里那段版本握手）。
 +# 格式随意但要短：主菜单右下角显示的是 `原版号+本标签`，太长会顶出去。
-+const MP8_VERSION_TAG: String = "overtime-1.5"
++const MP8_VERSION_TAG: String = "overtime-1.6"
 +
  enum NetworkBackendType{
  	Enet, Steam
  }
-@@ -42,14 +47,562 @@ signal player_removed_from_join_queue(network_id)
+@@ -18,7 +23,77 @@ var game_scene: PackedScene
+ 
+ var players: Dictionary
+ var players_loaded: Array
+-var max_player_count: int = MAX_PLAYERS
++# [MP8] 容量守卫的开关，在 _ready() 末尾置位。
++#
++# 防的是下面这个过程 —— 它只在**装了别的 mod** 时才可能发生，
++# 单独跑 Overtime 时这段代码一次都不会触发：
++#
++#   1. 开房：steam_backend.join_host() 拿 max_player_count 去 Steam.createLobby()，8 人，正常
++#   2. 某个 mod 在运行时把 NetworkManager.max_player_count 写成 4
++#      （已知案例：MachineParty+ 的「Make Lobby Public」，它的 MAX_PLAYERS_CAP 硬编码为 4）
++#   3. 退房回主菜单：create_backend() 只重建 backend，**本 autoload 不重建**，那个 4 活下来了
++#   4. 再开一局：createLobby(..., 4) —— 新房间只能进 4 个人
++#   5. 没有任何代码把它改回来，重启游戏才好
++#
++# 这个 bug 的毒在于**跨房间存活、没有可见成因、且完全静默**：
++# 污染发生在上一局、发作在下一局，房主看到的是一个完全正常的大厅，
++# 只是第 5 个人进不来。
++#
++# ⚠️ 守卫本身修的是第 2 步，但真正的价值是那行 push_warning ——
++# 玩家报「我房间只能进 4 个人」时，日志里直接点名是谁、压到了几，
++# 而不是一场跨会话的猎巫。
++#
++# 只挡「变小」，不挡「变大」：将来真有人做 12 人 mod，放行。
++#
++# 上锁点选在 _ready() 末尾是安全的：autoload 是逐个 add_child、逐个 _ready 的，
++# 加载器（若有）排在本节点之前，各 mod 的初始化都跑在这一行之前；
++# 我们自己的 -trailer 分支（把容量降到 5）也在上锁之前，不受影响。
++var _mp8_cap_locked: bool = false
++
++# 上锁后我们认定的容量。钉死在这个值 —— **大小都挡**。
++#
++# 原先只挡「变小」，有个棘轮毛病：某个 mod 写了 9 之后下限就变成 9，
++# 之后连写回 8 都被挡；再极端点写个 100，座位数组直接被撑爆。
++# 而「放行变大」本来是给假想中的 12 人 mod 留的口子 —— 但那种 mod
++# 必然要整份替换 network_manager.gd（MAX_PLAYERS 是 const，到处内联），
++# 根本不会在运行时写这个变量。口子留了没人用，只留下毛病，所以关掉。
++var _mp8_cap_want: int = MAX_PLAYERS
++
++# push_warning 的限流。某个 mod 若每帧写一次，不限流就是每帧一条日志、
++# 几分钟能把 godot.log 撑到几百 MB。同一个值只报第一次，
++# 之后每 5 秒最多补一条并带上被压掉的条数。
++var _mp8_cap_warn_at: float = -1.0
++var _mp8_cap_warn_val: int = -0x7FFFFFFF
++var _mp8_cap_warn_skipped: int = 0
++
++var max_player_count: int = MAX_PLAYERS:
++	set(v):
++		if _mp8_cap_locked and v != _mp8_cap_want:
++			_mp8_cap_warn(v)
++			return
++		max_player_count = v
++
++
++func _mp8_cap_warn(v: int) -> void :
++
++	var now: float = float(Time.get_ticks_msec()) / 1000.0
++
++	# 同一个值、5 秒内 —— 只记数不刷屏
++	if v == _mp8_cap_warn_val and _mp8_cap_warn_at >= 0.0 and now - _mp8_cap_warn_at < 5.0:
++		_mp8_cap_warn_skipped += 1
++		return
++
++	var tail: String = ""
++	if _mp8_cap_warn_skipped > 0:
++		tail = "（前 %.0f 秒内还有 %d 次同样的写入被压掉了）" % [now - _mp8_cap_warn_at, _mp8_cap_warn_skipped]
++
++	push_warning("[MP8] 有外部代码想把房间容量从 %d 改成 %d，已忽略%s（见 _mp8_cap_locked）" % [
++		_mp8_cap_want, v, tail
++	])
++
++	_mp8_cap_warn_at = now
++	_mp8_cap_warn_val = v
++	_mp8_cap_warn_skipped = 0
+ 
+ signal backend_ready()
+ signal on_server_created()
+@@ -42,14 +117,670 @@ signal player_removed_from_join_queue(network_id)
  
  func _ready() -> void :
  
@@ -78,6 +157,73 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +
 +	_mp8_perf_start()
 +	_mp8_version_hooks()  # [MP8] T53 版本互报
++	_mp8_lobby_guard_start()  # [MP8] Steam 房间人数上限的重新宣示
++
++	# [MP8] 容量守卫上锁 —— 必须是 _ready() 的最后一件事（理由见 _mp8_cap_locked 的注释）。
++	# [MP8] 上锁**之前**先把容量拉回我们认定的值。
++	#
++	# 为什么必须有这一步（2026-09-03 实测出来的洞，不是推演）：
++	# 引擎的 autoload 是两趟 —— 先全部 _init（并注册全局常量），再全部 _ready。
++	# 加载器（MPML）排第一，它的 _ready 里同步调各 mod 的 _mod_ready；
++	# 那一刻本节点的 _ready 还没跑、锁还没上，但全局常量 `NetworkManager`
++	# 已经指向本对象了 —— 也就是**存在一个能绕过守卫的窗口**。
++	# 实测：mod 在 _mod_ready 里写 4，写得进去，而且一直残留到开房，
++	# 于是新房间只能进 4 个人，且没有任何提示。
++	#
++	# 所以：不管那个窗口里谁写过什么，这里一律拉回来，然后才上锁。
++	_mp8_cap_want = MAX_DEBUG_PLAYERS if args.has("-trailer") else MAX_PLAYERS
++	if max_player_count != _mp8_cap_want:
++		push_warning("[MP8] 上锁前发现容量被改成了 %d（多半是某个 mod 在 _mod_ready 里写的），拉回 %d" % [max_player_count, _mp8_cap_want])
++	max_player_count = _mp8_cap_want
++	_mp8_cap_locked = true
++
++	# [MP8] 开机横幅 —— **无条件打印**，不受 _mp8_audit_on / -debug-tools 门控。
++	#
++	# 为什么要它：本 mod 的排查日志绝大多数是 opt-in 的（发布版天然安静，见
++	# `_mp8_audit_on` 那段）。好处是玩家的日志不会被刷屏，代价是**玩家报 bug 时，
++	# 日志里认不出他到底在跑什么** —— 哪个 mod 版本、走的哪条分发路线、
++	# 还装了谁家的 mod。这三样正是分诊第一步要问的。
++	#
++	# 所以这里打一次、只打一次，六行，把「他是谁」钉死在每一份日志的开头。
++	_mp8_boot_banner()
++
++
++# [MP8] 见 _ready() 末尾。无条件执行，每次启动只跑一次。
++func _mp8_boot_banner() -> void :
++
++	var loader: Node = get_tree().root.get_node_or_null("ModLoader")
++	var mods: Array = []
++	# 只有同时具备这两个方法才敢认定是 MPML —— 别的加载器
++	# （比如 godot-mod-loader 系）也可能把 autoload 叫 ModLoader，
++	# 只凭节点名就报「装了 MPML」是误报。
++	var is_mpml: bool = loader != null \
++		and loader.has_method("mod_list") and loader.has_method("loader_version")
++
++	if is_mpml:
++		mods = loader.call("mod_list")
++
++	# 分发路线：走 MPML 覆盖包，mods 列表里就有 overtime；
++	# 有 ModLoader 但没有 overtime = 玩家打了 PCK、另外又装了加载器（两者并存）。
++	var via: String = "PCK 重打"
++	if loader != null and not is_mpml:
++		via = "PCK 重打 + 另装了某个加载器（不是 MPML）"
++	if is_mpml:
++		var has_overtime: bool = false
++		for m in mods:
++			if str(m).begins_with("overtime"):
++				has_overtime = true
++		via = "MPML 覆盖包" if has_overtime else "PCK 重打 + 另装了 MPML"
++
++	print("[MP8] ======== Machine Party · Overtime ========")
++	print("[MP8] mod 版本   : %s" % MP8_VERSION_TAG)
++	print("[MP8] 握手串     : %s" % Globals.game_version)
++	print("[MP8] 人数上限   : %d（原版 4）" % MAX_PLAYERS)
++	print("[MP8] 装法       : %s" % via)
++	if is_mpml:
++		print("[MP8] 同装 mod   : %s" % (", ".join(PackedStringArray(mods)) if not mods.is_empty() else "（只有加载器）"))
++	print("[MP8] 日志在     : %s/logs/godot.log" % OS.get_user_data_dir())
++	print("[MP8] 报 bug 请连这段一起贴 -> https://github.com/DarkJadeStone/MachineParty-Overtime/issues")
++	print("[MP8] =========================================")
 +
 +# [MP8] UID 解析自检。逐个检查崩溃小游戏里用到的 uid://，看能不能查到路径、能不能真的载出来。
 +# 对照组是立足之本用的 res:// 路径（已验证该游戏能正常跑）。
@@ -171,11 +317,52 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +# 正式游玩（Steam 双击，什么都不传）天然安静。`mp8noaudit` 保留为强制关。
 +var _mp8_audit_on: bool = false
 +
++# [MP8] L1a —— 把主菜单提示弹窗的 Label 换成 AUTOWRAP_WORD_SMART。
++#
++# 原版是 `AUTOWRAP_WORD`：**只在词边界断行**。中文没有空格，于是一整句中文
++# 压根不换行，横向溢出后被外面那个 clip_contents 的 ScrollContainer 裁掉两头
++# （实测：「版本对不上，两边必须同版。你：v2.1.2+overtime-1.6」显示成
++#  「对不上，两边必须同版。你：v2.1.2+overtim」，头尾都没了）。
++#
++# 这不是我们引入的问题 —— 原版所有中文提示（LOC_ROOM_DISBANDED 之类）都受影响，
++# 只是那些串短、碰巧没超一行。改成 WORD_SMART 对它们同样是净改善。
++# 代价：很长的 ASCII 串会被从中间切开（v2.1.2+ov / ertime-1.6），可读，不好看。
++#
++# ⚠️ 只改换行方式，**不动尺寸**。把那个 512×192 的框撑大（L1b）也试过：能撑，
++# 但天真地给个固定高度会让 Label 比框还高、上下都冒出去，得按文本实际高度算。
++# 收益只是「能放更多字」，而文案已经按 ≤105 px 的预算写死了，所以不做。
++func _mp8_fix_dialog_label(handler) -> void :
++
++	if handler == null or not is_instance_valid(handler):
++		return
++	var lbl = handler.get("message_label")
++	if lbl == null or not is_instance_valid(lbl) or not (lbl is Label):
++		print("[MP8] 弹窗 Label 没找到，跳过换行修正（不影响功能）")
++		return
++	(lbl as Label).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
++
++
 +func _mp8_on_node_added(node: Node) -> void :
 +
 +	if node is MultiplayerMenuLobbyHandler:
 +		_mp8_extend_lobby.call_deferred(node)
 +		return
++
++	# [MP8] L1a：主菜单那个提示弹窗的换行方式（见 _mp8_fix_dialog_label）
++	if node is DialogMessageHandler:
++		_mp8_fix_dialog_label.call_deferred(node)
++		return
++
++	# [MP8] 开局快照 —— **无条件**打一行（理由同 _mp8_boot_banner）。
++	# 玩家报「XX 卡住了」「少了个人」时，这一行把「哪个小游戏、几个人、本端是房主还是客机」
++	# 钉在日志里。没有它，光看报告分不清是那个小游戏的问题、还是某个人数档的问题 ——
++	# 而这两者在本项目里是完全不同的排查路径。
++	if node is Minigame:
++		print("[MP8] 开局：%s ｜ %d 人 ｜ 本端=%s" % [
++			String(node.name),
++			PlayerManager.player_presences.size(),
++			("房主" if multiplayer.is_server() else "客机"),
++		])
 +
 +	# [MP8-AUDIT] 只读侦察：小游戏进树时把出生点相关的节点/数组全打出来，不改任何东西
 +	if node is Minigame and _mp8_audit_on:
@@ -580,7 +767,20 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
  func is_active() -> bool:
  
  	if not multiplayer:
-@@ -269,3 +822,270 @@ func remove_player_rpc(_network_id: int):
+@@ -81,6 +812,12 @@ func set_game_scene(_game_scene: PackedScene):
+ 
+ func create_backend():
+ 
++	# [MP8] 换后端 = 上一局的连线状态作废。版本互报的两张账本跟着清，
++	# 否则残留的 network_id 会让下一局的「有人被挡在门外」判错
++	# （见 _mp8_on_raw_peer_disconnected）。
++	_mp8_peer_versions.clear()
++	_mp8_peers_accepted.clear()
++
+ 	if active_backend:
+ 
+ 		active_backend.free()
+@@ -269,3 +1006,420 @@ func remove_player_rpc(_network_id: int):
  		var player_info = active_backend.connected_players[_network_id]
  		active_backend.disconnected_players[_network_id] = player_info
  		active_backend.connected_players.erase(_network_id)
@@ -679,11 +879,17 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +# 光凭这个分不出「房主是原版」还是「房主 mod 版本不同」。
 +# 所以房主在**每个 peer 连上的那一刻**先报一次自己的完整版本串，客机收到后回报自己的。
 +#
-+# 判据是**收没收到**，不是收到了什么：
-+#   收到 → 对面装了 Overtime 1.5+，串里有确切版本，能算出谁新谁旧；
-+#   没收到 → 对面要么是原版，要么是 1.4 及更早（那时还没有这套握手）。
-+#            ⚠️ 这两者**分不开**，所以文案必须两种都写，不能只说「没装」。
-+#            这是一次性的过渡代价，1.6 起两边都会报，就精确了。
++# 判据是**收没收到**，不是收到了什么：收到 → 串里有确切版本，能算出谁新谁旧；
++# 没收到 → 对面没有这套握手。⚠️「没装」与「版本太老」**分不开**，
++# 所以文案只能说「未回报版本」，不能断言「对方没装」。
++#
++# 🩸 **两个方向的精确度不一样（2026-09-03 实测，别记混）**：
++#   · **房主判断客机**：1.5 的客机**会**回报（它的 mp8_hello_rpc 回给服务器，而房主就是服务器）
++#     → 修好之后**立刻**就能精确点名 1.5 的人。没收到 = 原版或 ≤1.4。
++#   · **客机判断房主**：1.5 的房主**永远不会**回报 —— 它的 hello 挂在 `on_peer_connected` 上，
++#     而那个信号对被拒的人根本不发（就是本次修的 bug）。
++#     所以 **1.5↔1.6 这一次不匹配，客机侧只能落到情形 ③**，无论我们这边怎么改。
++#     没收到 = 原版 / ≤1.4 / **或 1.5**。要两边都 ≥ MP8_HELLO_SINCE 才精确。
 +#
 +# ── 第四种情形（我没装、房主装了）为什么只能显示在房主屏幕上 ──
 +# 那台客机跑的是**原版代码**，我们一行都改不到，它必然显示原版那句话。
@@ -696,37 +902,73 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +
 +signal mp8_join_blocked(text: String)   # 房主侧：有人被版本挡住了，带上给房主看的话
 +
-+const MP8_HELLO_GRACE: float = 2.0      # 等对面回报的时间；超时即判定「没有 1.5+」
-+
 +var _mp8_host_version: String = ""              # 客机侧：房主报来的完整版本串
 +var _mp8_peer_versions: Dictionary = {}         # 房主侧：network_id -> 对方版本串
++var _mp8_peers_accepted: Dictionary = {}        # 房主侧：真正被收编过的 peer（见下）
 +
 +
++# 🩸 2026-09-03 实测修正：钩子原先挂的是 `on_peer_connected`，**那个信号对被拒的人根本不发**。
++#
++# 原版后端的入房链条（enet_backend.gd / steam_backend.gd 形状完全相同）：
++#     multiplayer.peer_connected      ← 引擎层，**每个连上来的人都发**
++#       → _on_player_connected() → send_client_data_rpc.rpc_id(对方)
++#       → 对方回 receive_client_data_rpc(自己的 client_data)
++#           if client_game_version != Globals.game_version:
++#               refuse_client_rpc.rpc_id(对方, VersionMismatch)
++#               return                                   ← 被拒的人走这条，到此为止
++#       → acknowledge_client_data_rpc()
++#             on_peer_connected.emit()                   ← **只有通过版本检查的人才走到这里**
++#
++# 后果（实测）：版本不符的人一个 hello 都收不到，
++#   · 房主侧的「有人被挡在门外」（情形 ④）**从来没触发过**；
++#   · 客机侧 `_mp8_host_version` 恒为空 → `mp8_mismatch_text()` 永远落到情形 ③，
++#     ①②⑤ 三个分支**不可达**。
++# 对照实验坐实：原版客机被拒时它的日志里连「方法不存在」都没有（= 房主没发过 hello），
++# 而同版本成功入房时房主的 `_mp8_peer_versions` 里确实有对方版本（= 机制本身没坏）。
++#
++# 修法：改挂**引擎层**的 `multiplayer.peer_connected`。
++# 我们在 autoload 的 _ready() 里连，比后端节点（`set_active_backend` 时才创建）连得早，
++# 所以我们的 hello 会**先于** `send_client_data_rpc` 出门；两者同为 reliable、同一条信道，
++# 于是 hello 必定先于拒绝到达对方。
++#
++# ⚠️ 同时废掉了原来那个「等 2 秒再看」的形状：实测从 peer_connected 到
++# peer_disconnected 只有 **2 毫秒**（本机 ENet，大厅场景帧率极高），等 2 秒时人早走光了。
++# 判定改挂 `peer_disconnected` —— 那是确定性的时刻，不是猜的时长。
 +func _mp8_version_hooks() -> void :
 +
-+	on_peer_connected.connect(_mp8_on_peer_connected)
-+	on_peer_disconnected.connect(func(nid): _mp8_peer_versions.erase(nid))
++	multiplayer.peer_connected.connect(_mp8_on_raw_peer_connected)
++	multiplayer.peer_disconnected.connect(_mp8_on_raw_peer_disconnected)
++
++	# 游戏层的 on_peer_connected = 「这个人通过了版本检查、被收编了」。
++	# 拿它记账，`peer_disconnected` 时就能分辨「正常离开」还是「被挡在门外」。
++	on_peer_connected.connect(func(nid): _mp8_peers_accepted[nid] = true)
 +
 +
-+# 房主：谁连上就先报一次自己的版本，然后等对方回报。
-+func _mp8_on_peer_connected(network_id: int) -> void :
++# 房主：任何人一连上（**在版本检查之前**）就先报一次自己的版本。
++func _mp8_on_raw_peer_connected(network_id: int) -> void :
 +
 +	if not multiplayer.is_server():
 +		return
 +
 +	mp8_hello_rpc.rpc_id(network_id, Globals.game_version)
 +
-+	await get_tree().create_timer(MP8_HELLO_GRACE).timeout
-+	if not is_inside_tree():
-+		return
 +
-+	# 回报到了且版本一致 → 他能正常进来，不用说什么
++# 房主：peer 断开。若它从没被收编过，说明它是被版本挡下的 —— 这是情形 ④ 的触发点。
++func _mp8_on_raw_peer_disconnected(network_id: int) -> void :
++
 +	var theirs: String = String(_mp8_peer_versions.get(network_id, ""))
-+	if theirs == Globals.game_version:
++	_mp8_peer_versions.erase(network_id)
++
++	if not multiplayer.is_server():
 +		return
 +
-+	# 走到这儿：对方的版本串与我们不等 → 原版后端**一定**会拒掉他。
-+	# 不必等真的拒绝发生，此刻就能把原因说清楚。
++	# 正常玩过一场再离开的人：收编过，不是被拒
++	if _mp8_peers_accepted.has(network_id):
++		_mp8_peers_accepted.erase(network_id)
++		return
++
++	# 收编过的名单里没有他 → 他连上了却没进来。ENet/Steam 两个后端里，
++	# 唯一会让人「连上但不收编」的分支就是版本不符那一条。
 +	mp8_join_blocked.emit(_mp8_blocked_text_for_host(theirs))
 +
 +
@@ -768,86 +1010,194 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +
 +# ── 客机侧：被拒时显示什么 ──────────────────────────────────────────────
 +# 由 lobby_scene.gd 的 _on_join_refused 调用，取代 tr("LOC_TAG_VERSION_MISMATCH")。
++#
++# 🩸 **改这里之前先读这一段（2026-09-03 实测，全部有截图存档）。**
++#
++# 落点是主菜单的 `DialogMessageHandler`（`GameManager.main_menu_dialog_message`
++# → `main_menu` 的一个 Label）。那个 Label 待在一个 **clip_contents=true 的
++# ScrollContainer** 里，外面套着固定 512×192 的 Panel，而且**没有可见滚动条**。
++#
++#   · **硬预算：Label 高 ≤ 105 px 才完整可见。** 超出的部分被静默裁掉。
++#     中文行高 36 px（3 行 = 105）；英文行高 29 px（3 行 = 87，**4 行 = 117 就裁掉半行**）。
++#   · 1.5 那版文案是「两段 + 两行版本串」，实测**只显示第一句** ——
++#     「怎么办」和版本串玩家一个字都没看到过。整个 T53 的价值从没送达。
++#   · 由此推出一条硬取舍：**英文在「开头标识」与「动作句」之间只能二选一**，
++#     两样都要必定 4 行。中文字密，两样放得下。
++#
++# ⚠️ 另一条（同样实测）：Label 的 autowrap 原本是 `AUTOWRAP_WORD`，**只在词边界断行**。
++#    中文没有空格，于是一整句中文**不换行**，横向溢出被裁掉两头。
++#    1.5 的中文文案没炸纯属运气 —— 里面正好有 `Overtime`、`1.4` 这些 ASCII 词提供了断点。
++#    现已由 `_mp8_fix_dialog_label()` 在运行时改成 `AUTOWRAP_WORD_SMART`（见那个函数）。
++#
++# **改完必须重新量一遍**：本机就能验，不需要真的跑出版本不匹配 ——
++# 写 `GameManager.main_menu_dialog_message` 再调一次 `check_for_message()`
++# 就是一模一样的渲染路径。（记得先置 `Globals.splash_screen_viewed = true`，
++# 否则画面停在开场 logo，主菜单 UI 根本没露面。）
++
++# 「从哪一版开始，房主会主动回报自己的版本」。
++# 🩸 **发版时手动核对这个数**：它等于本次修复实际发出去的那个版本号，
++# 不会自己跟着 MP8_VERSION_TAG 走。填错只会让情形 ③ 那句话里的数字不准，不影响功能。
++const MP8_HELLO_SINCE: String = "1.6"
++
++
++# "v2.1.2+overtime-1.5" -> "1.5"（没有 tag 就回空串）
++func _mp8_tag_num(full_version: String) -> String:
++	return _mp8_tag_of(full_version).trim_prefix("overtime-")
++
++
++# "v2.1.2+overtime-1.5" -> "v2.1.2"
++func _mp8_base_of(full_version: String) -> String:
++	var i: int = full_version.find("+overtime-")
++	return full_version if i < 0 else full_version.substr(0, i)
++
++
 +func mp8_mismatch_text() -> String:
 +
 +	var zh: bool = _mp8_zh()
 +	var mine: String = Globals.game_version
 +	var theirs: String = _mp8_host_version
 +
-+	# ③ 房主一声没吭 → 原版，或者 1.4 及更早（分不开，两种都写上）
++	# ③ 房主没回报版本 → 原版，或者早于 MP8_HELLO_SINCE（那些版本不回报）。
++	#    这两者分不开，所以只陈述可观测的事实「未回报」，不断言「房主没装」。
 +	if theirs.is_empty():
 +		if zh:
-+			return ("连接失败：房主那边没有 Overtime，或者版本是 1.4 及更早。\n\n"
-+				+ "装了 Overtime 就进不了原版房间，这是设计如此。要一起玩：让房主也装同一版，"
-+				+ "或者你用启动器「卸载还原」回到原版。\n\n你：" + mine)
-+		return ("Failed to connect: the host does not have Overtime, or is on 1.4 or older.\n\n"
-+			+ "With Overtime installed you cannot join a vanilla lobby — that is by design. "
-+			+ "Either have the host install the same version, or use the launcher's Uninstall "
-+			+ "to restore vanilla.\n\nYou: " + mine)
++			return ("连接失败：版本不一致。房主未回报 Overtime 版本，可能未安装或低于 "
++				+ MP8_HELLO_SINCE + "。\n您的版本：" + mine)
++		return ("Version mismatch: the host reported no Overtime version.\nYour build: " + mine)
 +
 +	var my_tag: String = _mp8_tag_of(mine)
 +	var their_tag: String = _mp8_tag_of(theirs)
 +	var cmp: int = _mp8_cmp_tag(my_tag, their_tag)
 +
-+	# ⑤ mod 版本一样却还是被拒 → 差的是游戏本体（比如一边更新了 Steam 版本）
++	# 版本行只列**有差异的那一段**：①② 差在 mod 版本，⑤ 差在游戏本体。
++	# 两条完整串放不进 3 行，而且这几种情形玩家两边版本都知道，不需要转发完整串。
++	# （只有情形 ③ 保留完整串 —— 那正是要发给房主去核对的东西。）
++
++	# ⑤ mod 版本相同却仍被拒 → 差的是游戏本体
 +	if cmp == 0:
 +		if zh:
-+			return ("连接失败：Overtime 版本是一样的，不一样的是**游戏本体**。\n\n"
-+				+ "让 Steam 把两边更新到同一版即可。\n\n你：" + mine + "\n房主：" + theirs)
-+		return ("Failed to connect: your Overtime versions match — the base game versions do not.\n\n"
-+			+ "Update both sides to the same game version on Steam.\n\nYou: " + mine
-+			+ "\nHost: " + theirs)
++			return ("连接失败：Overtime 版本相同，游戏本体版本不同。\n您 "
++				+ _mp8_base_of(mine) + " ／ 房主 " + _mp8_base_of(theirs))
++		return ("Version mismatch: same Overtime build, different game version.\nYou "
++			+ _mp8_base_of(mine) + " · Host " + _mp8_base_of(theirs))
 +
-+	# ① 我旧
++	# ① 我的版本较旧
 +	if cmp < 0:
 +		if zh:
-+			return ("连接失败：你的 Overtime 比房主的旧。\n\n"
-+				+ "去下载新版、用启动器重装一次就行（不用先卸载）。\n\n你：" + mine
-+				+ "\n房主：" + theirs)
-+		return ("Failed to connect: your Overtime is older than the host's.\n\n"
-+			+ "Download the newer release and run the launcher again — no need to uninstall first."
-+			+ "\n\nYou: " + mine + "\nHost: " + theirs)
++			return ("连接失败：您的 Overtime 版本低于房主，请下载新版重新安装。\n您 "
++				+ _mp8_tag_num(mine) + " ／ 房主 " + _mp8_tag_num(theirs))
++		return ("Version mismatch: your Overtime build is older.\nYou "
++			+ _mp8_tag_num(mine) + " · Host " + _mp8_tag_num(theirs))
 +
-+	# ② 我新
++	# ② 我的版本较新
 +	if zh:
-+		return ("连接失败：你的 Overtime 比房主的新。\n\n"
-+			+ "请房主更新到和你一样的版本；同一房间里所有人必须是同一版。\n\n"
-+			+ "你：" + mine + "\n房主：" + theirs)
-+	return ("Failed to connect: your Overtime is newer than the host's.\n\n"
-+		+ "Ask the host to update to the same version — everyone in a lobby must be on the same one."
-+		+ "\n\nYou: " + mine + "\nHost: " + theirs)
++		return ("连接失败：您的 Overtime 版本高于房主，请房主更新至相同版本。\n您 "
++			+ _mp8_tag_num(mine) + " ／ 房主 " + _mp8_tag_num(theirs))
++	return ("Version mismatch: your Overtime build is newer.\nYou "
++		+ _mp8_tag_num(mine) + " · Host " + _mp8_tag_num(theirs))
 +
 +
 +# ── 房主侧：④ 有人进不来时，给房主的一行提示 ────────────────────────────
 +# 这是第四种情形（对方没装 mod）**唯一**能说话的地方，见本节开头的说明。
 +func _mp8_blocked_text_for_host(their_version: String) -> String:
 +
++	# ⚠️ 这条的落点是**大厅消息条**（lobby_handler.send_lobby_message），
++	#    与客机那个弹窗是两个控件，长度上限**没量过**。先按短的写。
 +	var zh: bool = _mp8_zh()
++	var tag: String = MP8_VERSION_TAG.trim_prefix("overtime-")
 +
++	# 不写死「低于 X」：这条是给房主看的，而房主自己的 tag 与 MP8_HELLO_SINCE
++	# 在开发期并不相等，写两个数会自相矛盾（实测：「低于 1.6。本房间为 1.5。」）。
 +	if their_version.is_empty():
 +		if zh:
-+			return ("有人没装 Overtime（或版本 1.4 及更早），已被挡在门外。让他装 "
-+				+ MP8_VERSION_TAG + " 这一版。")
-+		return ("Someone without Overtime (or on 1.4 or older) was blocked. "
-+			+ "Ask them to install " + MP8_VERSION_TAG + ".")
++			return ("一名玩家因版本不一致被拒绝加入：对方未安装 Overtime，或版本过旧。"
++				+ "本房间为 " + tag + "。")
++		return ("A player was refused: no Overtime, or a build too old. This lobby is on "
++			+ tag + ".")
 +
-+	var their_tag: String = _mp8_tag_of(their_version)
++	var their_tag: String = _mp8_tag_num(their_version)
 +	if their_tag.is_empty():
 +		if zh:
-+			return "有人用原版进不来，已被挡在门外。让他装 " + MP8_VERSION_TAG + " 这一版。"
-+		return "Someone on vanilla was blocked. Ask them to install " + MP8_VERSION_TAG + "."
++			return "一名玩家因版本不一致被拒绝加入：对方使用原版。本房间为 " + tag + "。"
++		return "A player was refused: they are on vanilla. This lobby is on " + tag + "."
 +
-+	var cmp: int = _mp8_cmp_tag(their_tag, MP8_VERSION_TAG)
++	var cmp: int = _mp8_cmp_tag(_mp8_tag_of(their_version), MP8_VERSION_TAG)
 +	if cmp == 0:
 +		if zh:
-+			return ("有人被挡在门外：Overtime 版本相同，是游戏本体版本不同（对方 "
-+				+ their_version + "）。")
-+		return ("Someone was blocked: same Overtime, different base game version ("
-+			+ their_version + ").")
++			return ("一名玩家因版本不一致被拒绝加入：Overtime 版本相同，游戏本体版本不同"
++				+ "（对方 " + _mp8_base_of(their_version) + "）。")
++		return ("A player was refused: same Overtime build, different game version (theirs "
++			+ _mp8_base_of(their_version) + ").")
 +
 +	if zh:
-+		return ("有人的 Overtime 是 " + their_tag + "，比房间" + ("旧" if cmp < 0 else "新")
-+			+ "，已被挡在门外。全房间必须同为 " + MP8_VERSION_TAG + "。")
-+	return ("Someone on Overtime " + their_tag + " was blocked ("
-+		+ ("older" if cmp < 0 else "newer") + " than this lobby). Everyone must be on "
-+		+ MP8_VERSION_TAG + ".")
++		return ("一名玩家因版本不一致被拒绝加入：对方 Overtime " + their_tag
++			+ "，本房间 " + tag + "。")
++	return ("A player was refused: their Overtime " + their_tag
++		+ ", this lobby " + tag + ".")
++
++
++# ═════════════ [MP8] Steam 房间人数上限的重新宣示 ═════════════
++#
++# 容量守卫（_mp8_cap_locked）只管得住 NetworkManager.max_player_count 这个**变量**。
++# 但 Steam 房间的成员上限是**Steam 侧的状态**，由 Steam.setLobbyMemberLimit() 设定，
++# 守卫够不着。
++#
++# 已知案例：MachineParty+ 的「Make Lobby Public」会执行
++#     max_players = clampi(max_players, MIN_PLAYERS, MAX_PLAYERS_CAP)   # CAP 硬编码 4
++#     Steam.setLobbyMemberLimit(id, max_players)
++# 房主一按那个开关，房间就被 Steam 夹到 4 人 —— 第 5 个人会被 Steam 直接拒收，
++# 而且我们这边任何日志都不会响（因为不是我们的变量被改）。
++# 它的 UI 上那个 stepper 最大也只到 4，所以「想开 8 人公开房」在它那儿
++# 根本表达不出来 —— 改回去不算违背房主意愿。
++#
++# 做法：房主侧每 2 秒核一次，低于我们的容量就设回去，并打一行日志。
++# 不打架：MP+ 只在 publish() 里设一次 member limit，它那个 2 秒定时器只改 lobby data。
++#
++# ⚠️ 全程用 has_method / has_signal 守着 —— 这版 GodotSteam 暴露了哪些方法
++# 我没法静态确认，缺哪个就安静跳过，绝不因为它崩。
++var _mp8_lobby_timer: Timer = null
++var _mp8_lobby_last_fix: int = -1
++
++
++func _mp8_lobby_guard_start() -> void :
++
++	_mp8_lobby_timer = Timer.new()
++	_mp8_lobby_timer.name = "MP8LobbySizeGuard"
++	_mp8_lobby_timer.wait_time = 2.0
++	_mp8_lobby_timer.autostart = true
++	_mp8_lobby_timer.timeout.connect(_mp8_enforce_lobby_size)
++	add_child(_mp8_lobby_timer)
++
++
++func _mp8_enforce_lobby_size() -> void :
++
++	if active_backend_type != NetworkBackendType.Steam:
++		return
++	if not (multiplayer and multiplayer.has_multiplayer_peer() and multiplayer.is_server()):
++		return
++	if active_backend == null:
++		return
++
++	# lobby_id 只在 Steam 后端子类上，基类 MultiplayerBackend 没有 —— 鸭子类型取值
++	var lobby_id: int = int(active_backend.get("lobby_id") if active_backend.get("lobby_id") != null else 0)
++	if lobby_id <= 0:
++		return
++
++	if not (Engine.has_singleton("Steam") or ClassDB.class_exists("Steam")):
++		return
++
++	# 有 getter 就先读、只在真的被压小时才改；没有 getter 就无脑设（幂等）
++	if Steam.has_method("getLobbyMemberLimit"):
++		var cur: int = int(Steam.getLobbyMemberLimit(lobby_id))
++		if cur >= max_player_count or cur <= 0:
++			return
++		if not Steam.has_method("setLobbyMemberLimit"):
++			return
++		Steam.setLobbyMemberLimit(lobby_id, max_player_count)
++		if _mp8_lobby_last_fix != cur:
++			_mp8_lobby_last_fix = cur
++			push_warning("[MP8] Steam 房间上限被别的 mod 压到 %d（已知案例：MachineParty+ 的「Make Lobby Public」），已设回 %d" % [cur, max_player_count])
++	else:
++		if Steam.has_method("setLobbyMemberLimit"):
++			Steam.setLobbyMemberLimit(lobby_id, max_player_count)
++

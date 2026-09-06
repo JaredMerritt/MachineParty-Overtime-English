@@ -40,13 +40,20 @@ eight.*</sub>
 
 ## 校验下载的文件 / Verifying your download
 
-**1.5** 各文件的 SHA256：
+**1.6** 各文件的 SHA256：
 
 ```
-3F970C4A8CB8DD930277AFFDD1D217B99A771FC6FDBD8F974B7CA3F505F7CF71  Machine-Party-Overtime-1.5.zip
-F6C6E5032F318DF7ADF01CA3FE886ED35DEEF4BD491616A388580A93C6D8BB5A  overtime_launcher.exe
-3AD3C6E409EE31AEBBCA821EC909ED83ED3CE0893F26A76D491C1795DB736A5A  overtime_install.exe
+A4F83EA68E7F7DF58817A4C3123ED289672CF2DC4B1C5781B2CA42423FDC2719  Machine-Party-Overtime-1.6.zip
+E0BE592B8E432648263C8ABFE74A7AE1A8BD3E2268A11E0131788F8C3753010B  overtime_launcher.exe
+6E145C8D42865BA19348825BC12B6C37180752FF92253A9257B7C0E4454179D6  overtime_install.exe
+E3BC32E343D85E893177505638465A78B0969A3573BABE562385FF2BD5050BAC  Machine-Party-Overtime-1.6-MPML.zip
 ```
+
+最后那个是 MPML 备选安装包，只有走那条路的玩家需要，见下面「[跟 mod loader 的关系](#跟-mod-loader-的关系16-起多了一条备选装法)」。
+
+⚠️ 这几行是用来**校验你下载到的那一份**的，不是「自己编一遍应该得到同一个哈希」的意思 ——
+zip 与 exe 都会把打包时间写进文件，同一份输入连打两次哈希就不一样。
+自己编出来的东西怎么对，见 [`docs/BUILD.md`](docs/BUILD.md)。
 
 在 PowerShell 里核对：
 
@@ -94,6 +101,84 @@ Get-FileHash <文件> -Algorithm SHA256
 ---
 
 ## 更新日志
+
+### 1.6 —— 新增「重开本轮」投票，修复猎鸭卡死与餐桌礼仪延迟
+
+下载地址：
+https://github.com/DarkJadeStone/MachineParty-Overtime/releases/tag/v1.6
+普通玩家下载「Machine-Party-Overtime-1.6.zip」即可。已经安装旧版的玩家不需要先卸载：完全退出游戏，解压新版压缩包，运行里面的「overtime_launcher.exe」，点击“启用 Overtime”即可完成更新。
+本次玩法调整只涉及猎鸭与餐桌礼仪，其余小游戏没有改动。
+
+- **新增「重开本轮」投票**：任何玩家按 F5 或通过暂停菜单发起，房间过半同意后进入 5 秒自动确认倒计时（期间可撤票取消），确认后回到本轮开始并回滚本轮分数。门槛设为过半而不是全票，避免掉线或挂机的玩家让投票永远无法通过。
+- **猎鸭**：修复角色被场地几何卡死、方向键无反应的问题。本地复现不出该问题，本轮加了自动脱困：按住方向键连续 3 秒几乎无位移时，自动退回约一米前的位置。卡住位置的坐标会写入游戏日志 —— 再遇到请用启动器的「游戏日志」按钮反馈，这是定位该问题的唯一途径。
+- **餐桌礼仪**：修复新增的第 5~8 个座位在恢复进食后拿叉明显变慢的问题（原为座位唤醒等待逐人累加，第 8 座最坏约 2.6 秒）。现改为每人独立计时，总延迟与人数无关；4 人及以下与原版逐值一致。
+- **版本提示**：进不去房间时的「版本不符」提示原本分不清原因（1.5 曾重写但没有生效）。现在能分清五种情形并列出双方版本号：您的版本低于或高于房主、对方没装或版本过旧、双方版本相同但游戏本体不同；顺带修复中文提示不换行的问题。
+- **房间上限保护**：8 人上限由程序固定，其他 Mod 试图压回 4 人的写入会被忽略；Steam 房间人数上限也会定期核对并恢复。
+- **新增 MPML 备选安装（实验性）**：给想与 MachineParty+ 等其他 Mod 共存的玩家准备（需先装 MachinePartyModLoader，再下载本次 Release 的第二个附件 `Machine-Party-Overtime-1.6-MPML.zip`，把里面的 `overtime` 文件夹放进游戏 `mods` 目录）。主推仍是 exe 启动器，两种装法可以同房，但每台机器只能选一种；挂载前核对原版文件，游戏更新后自动拒绝挂载，不会拿旧脚本盖新游戏。
+
+「重开本轮」与版本提示均已通过本机 8 实例联机验证。猎鸭卡死与餐桌礼仪的修复受限于本地无法复现 / 静态检查覆盖不到，需经真实对局最终确认 —— 上线后如有问题请继续反馈。
+
+⚠️ 1.6 与 1.5 及更早版本不能互通，同一房间的所有玩家都需要更新至 1.6。
+如果进入房间时提示“您当前的游戏版本与该房间不符”，请查看主菜单右下角，所有人的版本都应显示：
+v2.1.2+overtime-1.6
+如果压缩包是群友或朋友转发的，也请把新版重新发给他们，避免房间里混入旧版本。
+
+> **English — 1.6: a "restart this round" vote, plus fixes for Duck Hunt and Table Manners.**
+>
+> Download:
+> https://github.com/DarkJadeStone/MachineParty-Overtime/releases/tag/v1.6
+> Most players only need `Machine-Party-Overtime-1.6.zip`. If you already have an older version
+> you do **not** need to uninstall first: quit the game completely, extract the new archive, run
+> `overtime_launcher.exe` inside it, and click **Enable Overtime**.
+>
+> This update changes gameplay in **Duck Hunt and Table Manners only**. No other minigame was
+> adjusted.
+>
+> - **New: a "restart this round" vote.** Any player can start one with F5 or from the pause menu.
+>   Once more than half the lobby agrees, a 5-second confirmation countdown begins (withdrawing a
+>   vote during it cancels the restart); on confirmation the round returns to its start and the
+>   score earned in it is rolled back. The threshold is a majority rather than unanimity, so a
+>   disconnected or idle player cannot make the vote impossible to pass.
+> - **Duck Hunt**: fixed a character getting stuck in the arena geometry with the movement keys
+>   doing nothing. The problem cannot be reproduced locally, so this version adds an automatic
+>   escape: hold a direction for 3 seconds with almost no movement and you are returned to where
+>   you were about a metre earlier. The stuck coordinates are written to the game log — if it
+>   happens again, please send the log using the launcher's **Game log** button. That log is the
+>   only way to pin this down.
+> - **Table Manners**: fixed the new seats 5–8 being noticeably slower to pick the fork back up
+>   after eating resumes (the per-seat wake-up wait used to accumulate player by player — about
+>   2.6 seconds at worst for seat 8). Each player is now timed independently, so the total delay no
+>   longer depends on the player count; with four players or fewer the values match the original
+>   game exactly.
+> - **Version mismatch messages**: the "version does not match" notice used to give no clue as to
+>   why (1.5 rewrote it, but the rewrite never actually took effect). It now distinguishes five
+>   cases and prints both version strings: your version is older or newer than the host's, the
+>   other side has no mod or too old a one, or both mod versions match but the base game differs.
+>   A Chinese line-wrapping bug in the same dialog is fixed as well.
+> - **Player-cap protection**: the 8-player cap is now pinned by the mod, and writes from other
+>   mods trying to force it back to 4 are ignored. The Steam lobby capacity is re-checked and
+>   restored periodically as well.
+> - **New: an alternative MPML install (experimental)** for players who want Overtime alongside
+>   other mods such as MachineParty+. It requires MachinePartyModLoader to be installed first, and
+>   the `overtime` folder from `Machine-Party-Overtime-1.6-MPML.zip` — the second asset on this
+>   release — to be placed in the game's `mods` directory. The `.exe` launcher is still the
+>   recommended route. The two install methods can share a lobby, but each machine has to pick one.
+>   The package verifies the original game files before mounting and refuses to mount after a game
+>   update, so it can never lay old scripts over a newer game.
+>
+> The restart vote and the version messages were both verified locally with 8 connected instances.
+> The Duck Hunt and Table Manners fixes could not be — the first cannot be reproduced locally and
+> the second is beyond what static checking covers — so both need confirmation from real matches.
+> Please keep the reports coming.
+>
+> ⚠️ **1.6 is not compatible with 1.5 or earlier** — everyone in the lobby must update to 1.6.
+> If joining shows "your client version does not match the host version", check the bottom right
+> of the main menu; everyone should read:
+> `v2.1.2+overtime-1.6`
+> If someone forwarded you the archive, please send them the new one too, so no old version ends
+> up in the lobby.
+
+---
 
 ### 1.5 —— 碎骨者：装置挂在身上却不处决
 
@@ -426,27 +511,41 @@ v2.1.2+overtime-1.5
 
 | 项 | 说明 |
 | --- | --- |
-| **暂不兼容 mod loader 及其他改 PCK 的 mod** | 本 mod 靠重打游戏数据包（`.pck`）安装，**跟 [MachinePartyModLoader](https://github.com/Krunk-theduck/MachinePartyModLoader) 等同样改 PCK 的工具互斥，请二选一**。原因见下 |
+| **两种装法二选一，不能叠加** | 主推的启动器装法靠重打游戏数据包（`.pck`），**跟 [MachinePartyModLoader](https://github.com/Krunk-theduck/MachinePartyModLoader) 及其他同样改 PCK 的工具互斥**。1.6 起另有一条 **MPML 备选装法**（实验性），走那条就能和 MachineParty+、第一人称等基于加载器的 mod 共存。**同一台机器只能选一种**；但两种装法的人**可以进同一个房间**。原因与选法见下 |
 | 角色配色只有 5 种 | 游戏自带 5 个颜色，8 人局**必然有人重色**。mod 没有加新颜色 |
 | 局时变长 | 淘汰制小游戏人多则轮数多。人工筛选 8 人最多 7 轮，整局时长约为 4 人局的两倍 |
 | 部分小游戏在 4 人以下也有视觉变化 | 少数小游戏的场地扩充没有按人数设闸门，2~4 人局会看到多出来的椅子/平台。不影响玩法 |
 | 猎鸭 8 人是「6 鸭 2 猎」 | 原版是 3 鸭 1 猎。8 人保持同样的比例，不是 7 鸭 1 猎 |
 | 摄像机偶尔拍到布景外 | 部分小游戏为容纳 8 人把镜头拉远，边角可能露出原本在取景框外的布景 |
 
-### 为什么不能跟 mod loader 共存
+### 跟 mod loader 的关系（1.6 起多了一条备选装法）
 
-人数上限写在 `const MAX_PLAYERS` 里，而 **GDScript 的常量是编译期内联的** —— 每一个调用点在编译时就把 `4` 焊死了，运行时没有任何办法改它，只能替换数据包里已编译的字节码。所以本 mod 只能走"重打 PCK"这条路。
+人数上限写在 `const MAX_PLAYERS` 里，而 **GDScript 的常量是编译期内联的** —— 每一个调用点在编译时就把 `4` 焊死了，运行时没有任何办法改它，只能替换数据包里已编译的字节码。所以主推的启动器装法只能走"重打 PCK"这条路。
 
 而 MachinePartyModLoader 那类加载器是用 `extends` 继承原脚本来做覆盖 —— 这个设计在多 mod 叠加上明显更好，**但继承够不到一个已经内联的常量**：子类里声明 `MAX_PLAYERS = 8`，改不了那些已经编译进 `4` 的代码。
 
-这是结构性冲突，不是打个补丁能绕过去的。**如果有办法在脚本首次加载前替换掉整个编译后的资源（而不是继承它），我很乐意改成散装文件的 mod** —— 欢迎来 [issue](../../issues) 里告诉我。
+**1.6 起换了个思路：不继承，整份替换。** 加载器的 autoload 排在最前，它的 `_init()` 窗口里游戏自己的脚本一行都还没被加载过 —— 那一刻把 54 个已编译脚本作为资源包挂进 `res://`，就等于赶在编译期常量生效之前把整份字节码换掉了。这条路不需要引用原版任何一行代码，也就不碰"不分发游戏源码"那条红线。
+
+**所以现在有两条装法，按你要什么选：**
+
+| | 主推：`overtime_launcher.exe` | 备选：MPML 包（实验性） |
+| --- | --- | --- |
+| 怎么装 | 下载 `Machine-Party-Overtime-x.y.zip`，解压运行，点「启用 Overtime」 | 先自行安装 MachinePartyModLoader，再下载 `Machine-Party-Overtime-x.y-MPML.zip`（同一个 Release 里的第二个附件），把里面的 `overtime` 文件夹放进游戏的 `mods` 目录 |
+| 能和别的 mod 共存吗 | ❌ 不能 | ✅ 能（MachineParty+、第一人称、离线机器人等） |
+| 切回原版 | ✅ 一键，且逐字节可证 | 由加载器管（删掉 `mods` 里的 `overtime` 即可） |
+| 游戏更新之后 | 提示重装 | **自动拒绝挂载** —— 挂载前逐个核对 54 个原版文件的 md5，不会拿旧脚本盖新游戏 |
+
+**两条路装出来的是同一版 mod**，联机握手串逐字相同，可以同房；**但一台机器只能选一种** —— 启动器改过的数据包，加载器认不出来（补丁数据被追加在索引之后，而加载器要求索引正好结束在文件末尾）。想从启动器那条换到 MPML 这条，先用启动器切回原版，再装加载器。
+
+我们**不打包加载器本身**：它的仓库没有 LICENSE，未经作者许可无权再分发，请到[它的 Releases](https://github.com/Krunk-theduck/MachinePartyModLoader/releases) 自取。
 
 ## 仓库里有什么（以及为什么不是完整脚本）
 
 ```
-patches/      51 个差异补丁（.patch），相对游戏自己的脚本
+patches/      54 个差异补丁（.patch），相对游戏自己的脚本
 installer/    单文件安装器的完整 C# 源码
-tools/        构建链：打补丁 → 编译 → 出 exe
+mpml/         MPML 备选装法的适配层源码（我们自己写的，可逐行读）
+tools/        构建链：打补丁 → 编译 → 出 exe →（可选）出 MPML 包
 docs/         逐个小游戏的改动说明、构建说明、迁移到新版本的说明
 ```
 
@@ -454,10 +553,14 @@ docs/         逐个小游戏的改动说明、构建说明、迁移到新版本
 15 个小游戏逐个写明：为了 8 个人改了什么、得分动没动、哪些是故意保持原版的。
 （English: [`docs/MINIGAMES.en.md`](docs/MINIGAMES.en.md)）
 
-**为什么发的是差异补丁而不是完整的 `.gd` 文件**：那 51 个文件是「游戏反编译源码 +
-我们的改动」混在一起的（合计约 31,000 行），完整发出来等于公开约 14,300 行游戏自己的源代码。
-本项目的红线是**不分发游戏原始资产**，所以只发我们自己写的那部分（16,746 行）
-加上必要的上下文。
+**为什么发的是差异补丁而不是完整的 `.gd` 文件**：那 54 个文件是「游戏反编译源码 +
+我们的改动」混在一起的（合计 34,538 行），完整发出来等于公开约 15,100 行游戏自己的源代码。
+本项目的红线是**不分发游戏原始资产**，所以只发我们自己写的那部分（19,442 行）
+加上必要的上下文（2,237 行）。
+
+**`mpml/` 下那两个文件是例外，它们是整份公开的** —— 适配层 `main.gd` 不 `extends`
+任何原版脚本、一行游戏代码都没有，所以不受上面那条红线约束。这也是有意的：
+Release 里那个 `-MPML.zip` 附件如果连源码都没有，就成了一个只能"信我"的二进制。
 
 你拿自己那份正版解包出脚本，跑一条命令就能把补丁打上，得到的结果与作者本机
 **逐字节相同**（出包时每次都会自动验证这一点）。步骤见
@@ -473,6 +576,8 @@ powershell -ExecutionPolicy Bypass -File tools\apply_patches.ps1
 powershell -ExecutionPolicy Bypass -File tools\build.ps1 -CompileOnly
 # 4. 出安装器
 powershell -ExecutionPolicy Bypass -File tools\build_installer.ps1
+# 5.（可选，只有走 MPML 备选装法才需要）出 MPML 包
+powershell -ExecutionPolicy Bypass -File tools\build_mpml_mod.ps1
 ```
 
 细节、前置条件和常见报错见 [`docs/BUILD.md`](docs/BUILD.md)。
