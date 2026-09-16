@@ -3,9 +3,12 @@
 // The same source builds two exes (see tools\build_installer.ps1)
 //   mp8_install.exe    console version, with the full set of command-line arguments
 //   mp8_launcher.exe   windowed version (/define:GUI /target:winexe), just double-click to use
-// All patch bytecode is **embedded**, so neither one needs any runtime installed or any other tool downloaded.
+// Patch bytecode ships in overtime_scripts.dat next to the exe, so neither one needs any runtime installed or any other tool downloaded.
+// The exe only embeds a small manifest with every script's hash and refuses a data file that doesn't match it.
+// The scripts used to be embedded, but ~700 KB of compressed bytecode inside the exe made antivirus
+// machine learning read it as a packed payload.
 //
-// It doesn't contain or distribute any original game assets. The only embedded files are the .gdc files the mod itself changed.
+// It doesn't contain or distribute any original game assets. The only shipped scripts are the .gdc files the mod itself changed.
 //
 // ── How restoring only needs to store a few KB ───────────────────────────────────────
 // Patching works by "appending the new content to the end of the PCK + pointing that index entry at it",
@@ -30,6 +33,16 @@ using System.Drawing;
 using System.Threading;
 using System.Windows.Forms;
 #endif
+
+// ── Version info shown in the exe's Properties → Details ───────────────────────────────
+// An unsigned exe with blank version info looks more suspicious to antivirus heuristics, so every field is filled in.
+[assembly: AssemblyTitle("Machine Party Overtime")]
+[assembly: AssemblyProduct("Machine Party Overtime")]
+[assembly: AssemblyCompany("Jared Merritt")]
+[assembly: AssemblyCopyright("Copyright © 2026 DarkJade335, Jared Merritt")]
+[assembly: AssemblyVersion(Core.FileVersion)]
+[assembly: AssemblyFileVersion(Core.FileVersion)]
+[assembly: AssemblyInformationalVersion(Core.ReleaseNum)]
 
 // ═════════════════════════════════════════════════════════════════════════
 // Bilingual text
@@ -68,6 +81,9 @@ static class Core
     // It also decides the output folder name under dist\ and the release package name (see tools\build_installer.ps1),
     // so a rebuild doesn't overwrite the already-released dist\overtime-1.3\ along with its zip.
     public const string ReleaseNum = "1.7-en";
+    // Windows only accepts digits in a file version, so this is ReleaseNum's numbers padded to four parts.
+    // build_installer.ps1 refuses to build if the two disagree.
+    public const string FileVersion = "1.7.0.0";
 
     public const string AppId   = "4108000";
     public const string GameRel = @"steamapps\common\party project\Machine Party_Windows";
@@ -77,6 +93,7 @@ static class Core
     // Before 0.9 it was called mp8_restore.dat. Machines that installed an old version still have that name,
     // so reading accepts both names, but writing only uses the new one.
     public const string OldResName = "mp8_restore.dat";
+    public const string ScriptsName = "overtime_scripts.dat";          // Compiled patches, shipped next to the exe
 
     // Where the existing restore data is (new name first). Returns an empty string if there isn't any.
     public static string FindRes(string gameDir)
@@ -378,42 +395,74 @@ static class Core
         return idx;
     }
 
-    // Embedded resources. mp8.manifest has one line per file, "<index>|<res:// path>", and the content is in mp8.<index>
-    public static SortedDictionary<string, byte[]> LoadEmbedded()
+    // Thrown when overtime_scripts.dat is missing or isn't the one this exe was built with, so callers can tell it apart from game data problems
+    public class ScriptsFileException : Exception
     {
-        var asm = Assembly.GetExecutingAssembly();
+        public ScriptsFileException(string message) : base(message) { }
+    }
+
+    public static string ScriptsPath
+    {
+        get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ScriptsName); }
+    }
+
+    // The embedded mp8.manifest has one line per script, "<offset>|<size>|<sha256>|<res:// path>".
+    // The scripts sit back to back in overtime_scripts.dat in manifest order, and every byte of that file must belong to one of them.
+    public static SortedDictionary<string, byte[]> LoadPatches()
+    {
         // ⚠️ Use SortedDictionary, not Dictionary. The write order decides the append order,
         //    which in turn decides the output bytes. Only a fixed order gives "the same input produces the same pack".
         var map = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
 
         string manifest;
-        using (var s = asm.GetManifestResourceStream("mp8.manifest"))
+        using (var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("mp8.manifest"))
         {
             if (s == null)
-                throw new Exception(L.T("This exe has no embedded patches (they were left out when packaging)",
-                                        "This exe has no embedded patches (packaging error)"));
+                throw new Exception(L.T("This exe has no patch manifest (it was left out when packaging)",
+                                        "This exe has no patch manifest (packaging error)"));
             using (var r = new StreamReader(s, Encoding.UTF8)) manifest = r.ReadToEnd();
         }
 
-        foreach (string raw in manifest.Split('\n'))
-        {
-            string line = raw.Trim();
-            if (line.Length == 0 || line.StartsWith("#")) continue;
-            int bar = line.IndexOf('|');
-            if (bar < 0) throw new Exception("bad manifest line: " + line);
-            string id = line.Substring(0, bar);
-            string path = line.Substring(bar + 1).Trim();
-            if (path.StartsWith("res://")) path = path.Substring(6);   // PCK index entries don't include res://
+        string path = ScriptsPath;
+        if (!File.Exists(path))
+            throw new ScriptsFileException(L.T(
+                "Can't find " + ScriptsName + ". It has to be in the same folder as this program.\n" +
+                "Extract the whole zip into a folder first, then run the launcher from that folder. Opening it straight from inside the zip doesn't work.",
+                ScriptsName + " is missing. It must be in the same folder as this program.\n" +
+                "Extract the whole zip first, then run the launcher from there."));
+        byte[] data = File.ReadAllBytes(path);
 
-            using (var s = asm.GetManifestResourceStream("mp8." + id))
+        string mismatch = L.T(
+            ScriptsName + " doesn't match this program. It's damaged or comes from a different Overtime release.\n" +
+            "Download the release again and keep the files from the same zip together.",
+            ScriptsName + " does not match this program (damaged, or from another release).\n" +
+            "Download the release again and keep both files from the same zip together.");
+
+        long pos = 0;
+        using (var sha = SHA256.Create())
+        {
+            foreach (string raw in manifest.Split('\n'))
             {
-                if (s == null) throw new Exception("missing embedded patch: mp8." + id);
-                var buf = new byte[s.Length];
-                int off = 0;
-                while (off < buf.Length) off += s.Read(buf, off, buf.Length - off);
-                map[path] = buf;
+                string line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#")) continue;
+                string[] f = line.Split(new[] { '|' }, 4);
+                if (f.Length != 4) throw new Exception("bad manifest line: " + line);
+                long offset = long.Parse(f[0], CultureInfo.InvariantCulture);
+                int size = int.Parse(f[1], CultureInfo.InvariantCulture);
+                string res = f[3].Trim();
+                if (res.StartsWith("res://")) res = res.Substring(6);   // PCK index entries don't include res://
+
+                if (offset != pos || size < 0 || offset + size > data.Length) throw new ScriptsFileException(mismatch);
+                var buf = new byte[size];
+                Buffer.BlockCopy(data, (int)offset, buf, 0, size);
+                string got = BitConverter.ToString(sha.ComputeHash(buf)).Replace("-", "");
+                if (!string.Equals(got, f[2], StringComparison.OrdinalIgnoreCase)) throw new ScriptsFileException(mismatch);
+
+                map[res] = buf;
+                pos += size;
             }
         }
+        if (pos != data.Length) throw new ScriptsFileException(mismatch);
         return map;
     }
 
@@ -432,7 +481,7 @@ static class Core
     // ═══════════════════════════════════════════════════════════════════
     // Current state
     // ═══════════════════════════════════════════════════════════════════
-    public enum Kind { Missing, Vanilla, OursInstalled, OldVersion, Unknown }
+    public enum Kind { Missing, Vanilla, OursInstalled, OldVersion, NoScripts, Unknown }
 
     public class State
     {
@@ -468,13 +517,13 @@ static class Core
 
         try
         {
-            var patches = LoadEmbedded();
+            var patches = LoadPatches();
             using (var fs = new FileStream(st.PckPath, FileMode.Open, FileAccess.Read))
             {
                 var idx = ReadIndex(fs);
 
                 // Deciding "is our version the one installed" doesn't hash the whole pack (635 MB takes over ten seconds).
-                // It only compares the md5 recorded in the index with the embedded patches' md5 — if they match, we wrote it.
+                // It only compares the md5 recorded in the index with the shipped patches' md5 — if they match, we wrote it.
                 int hit = 0, total = 0;
                 bool allPresent = true;
                 foreach (var kv in patches)
@@ -515,6 +564,11 @@ static class Core
                                   "Neither vanilla nor this mod (another mod? game updated?)");
                 }
             }
+        }
+        catch (ScriptsFileException ex)
+        {
+            st.Kind = Kind.NoScripts;
+            st.Note = ex.Message;
         }
         catch (Exception ex)
         {
@@ -761,6 +815,9 @@ static class Core
 
         PreflightWritable(gameDir, live);
 
+        // Loaded before anything is touched, so a missing or wrong data file can't leave an old install half undone
+        var patches = LoadPatches();
+
         // Already installed → first restore it exactly, then patch again from the clean pack.
         // Otherwise the patches would pile up layer on layer and the pack would keep growing.
         if (cur.Length > 0)
@@ -836,7 +893,6 @@ static class Core
         }
         else say(L.T("      ✓ It's vanilla " + GameVersion, "      OK, vanilla " + GameVersion));
 
-        var patches = LoadEmbedded();
         say(L.T("[3/4] Writing " + patches.Count + " patches…",
                 "[3/4] Writing " + patches.Count + " patches..."));
 
@@ -1184,6 +1240,11 @@ static class Installer
                 break;
             case Core.Kind.Missing:
                 Line(L.T("State:    can't find the PCK", "State:    PCK not found"), ConsoleColor.Red); break;
+            case Core.Kind.NoScripts:
+                Line(L.T("State:    unknown, the patch data next to this program is missing or damaged",
+                         "State:    unknown (patch data missing or damaged)"), ConsoleColor.Red);
+                Console.WriteLine("        " + st.Note.Replace("\n", "\n        "));
+                break;
             default:
                 Line(L.T("State:    can't recognise it", "State:    unrecognised"), ConsoleColor.Yellow);
                 if (st.Note.Length > 0) Console.WriteLine("        " + st.Note);
@@ -1578,6 +1639,24 @@ class MainForm : Form
                 toggleBtn.ForeColor = Muted;
                 break;
 
+            case Core.Kind.NoScripts:
+                SetState(L.T("Patch data missing or damaged", "Patch data unusable"), Bad, st.Note);
+                // Switching back to vanilla only needs the restore data in the game folder, so that stays available
+                if (st.CanUninstall)
+                {
+                    toggleBtn.Text = L.T("Switch back to vanilla", "Switch to vanilla");
+                    toggleBtn.BackColor = Slate;
+                    toggleBtn.FlatAppearance.MouseOverBackColor = SlateHot;
+                }
+                else
+                {
+                    toggleBtn.Text = L.T("Enable Overtime", "Enable Overtime");
+                    toggleBtn.Enabled = false;
+                    toggleBtn.BackColor = Ghost;
+                    toggleBtn.ForeColor = Muted;
+                }
+                break;
+
             default:
                 SetState(L.T("Can't recognise the current game data", "Unrecognised game data"), Caution,
                          st.Note.Length > 0 ? st.Note
@@ -1614,7 +1693,8 @@ class MainForm : Form
         }
 
         // OldVersion goes through install (Install first uses the restore data to go back to vanilla, then applies the new patches), not uninstall
-        bool remove = (st.Kind == Core.Kind.OursInstalled) || (st.Kind == Core.Kind.Unknown && st.CanUninstall);
+        bool remove = (st.Kind == Core.Kind.OursInstalled)
+                   || ((st.Kind == Core.Kind.Unknown || st.Kind == Core.Kind.NoScripts) && st.CanUninstall);
         string dir = Dir;
 
         busy = true;

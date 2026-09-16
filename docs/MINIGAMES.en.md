@@ -1,7 +1,5 @@
 # What changed in each of the 15 minigames
 
-*[中文版本](MINIGAMES.md)*
-
 This document answers three questions for every minigame in the rotation: **what was adapted to fit
 8 players**, **whether scoring changed**, and **what was deliberately left alone**.
 

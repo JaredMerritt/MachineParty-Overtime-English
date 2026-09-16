@@ -56,6 +56,13 @@ if (-not (Test-Path $applyStampPath)) {
     $drift += "patch\ has no apply stamp (it wasn't produced by tools\apply_patches.ps1)"
 } else {
     $applyStamp = Read-JsonFile $applyStampPath
+    # An older apply_patches.ps1 could record a run where git skipped every patch. Compiling that would ship vanilla scripts.
+    $applySrc = ConvertTo-Lookup $applyStamp.src
+    $applyOut = ConvertTo-Lookup $applyStamp.output
+    $unpatched = @($applyOut.Keys | Where-Object { $applySrc.ContainsKey($_) -and $applySrc[$_] -eq $applyOut[$_] })
+    if ($unpatched.Count -gt 0) {
+        throw "$($unpatched.Count) file(s) in patch\ are still the unpatched game scripts, for example $($unpatched[0]). Re-run tools\apply_patches.ps1 -Force"
+    }
     foreach ($pair in @(
         @{ Name = "patch\";   Want = (ConvertTo-Lookup $applyStamp.output);  Have = (Get-TreeHashes -Root $p -Extension ".gd") },
         @{ Name = "patches\"; Want = (ConvertTo-Lookup $applyStamp.patches); Have = (Get-TreeHashes -Root (Join-Path $root "patches") -Extension ".patch") }

@@ -98,7 +98,7 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
  	minigame = minigame_instance
  
  	minigame.host_loaded.connect(_on_host_minigame_loaded)
-@@ -479,7 +532,158 @@ func load_minigame(minigame_identifier: Globals.MinigameIdentifier, _is_round: b
+@@ -479,8 +532,159 @@ func load_minigame(minigame_identifier: Globals.MinigameIdentifier, _is_round: b
  
  	GameManager.minigame_loaded.emit(minigame_identifier)
  	GameManager.current_minigame_identifier = minigame_identifier
@@ -257,6 +257,7 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	_mp8_vote_round_open = false
 +	_mp8_vote_clear()
 +
+ 	if is_current_game_cutscene():
 @@ -643,9 +847,62 @@ func _on_peer_disconnected(_network_id: int):
  		)
  		intermission_manager.screen_briefing.update_player_data_rpc.rpc(total_score_by_network_id)

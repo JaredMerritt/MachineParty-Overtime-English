@@ -1,46 +1,39 @@
 # Machine Party-Overtime
 
-把《Machine Party》（机械狂欢）的联机上限提到 **8 人** —— 并且逐个小游戏重做了场地、算分
-与部分玩法，不只是把人数常量改大。免费、开源、可自己编译。
+Raises the multiplayer cap of *Machine Party* to **8 players** — and reworks arenas, scoring and some
+mechanics minigame by minigame, rather than just making the player-count constant bigger. Free, open
+source, and you can build it yourself.
 
-🎬 **演示视频（B 站）**：https://www.bilibili.com/video/BV1Lo8b6QEh7/
+🎬 **See it in action (Bilibili)**: https://www.bilibili.com/video/BV1Lo8b6QEh7/
 
-> ## ⚠️ 本 mod 完全免费。如果你为它花过钱，说明你被骗了。
-> **This mod is completely FREE. If you paid for it, you were scammed.**
-> 只从本仓库的 [Releases](../../releases) 页面下载；任何人都无权拿它收费。
+> ## ⚠️ This mod is completely FREE. If you paid for it, you were scammed.
+> Download it only from this repository's [Releases](../../releases) page. Nobody is authorised to sell it.
 
-> **English**: An open-source mod that raises the multiplayer cap of *Machine Party* from 4 to 8
-> players — and reworks arenas, scoring and some mechanics per minigame to make eight actually work. It patches only the game's own scripts — **no game assets are redistributed**, and you
-> must own a legitimate copy. Download the installer from the
-> [Releases](../../releases) page, run it, and it patches your local copy (with an automatic
-> backup and one-command uninstall). Everyone in a lobby must install the **same** version.
-> See it in action: https://www.bilibili.com/video/BV1Lo8b6QEh7/
-> See [`docs/MINIGAMES.en.md`](docs/MINIGAMES.en.md) for a per-minigame changelog and
-> [`docs/BUILD.md`](docs/BUILD.md) to build it yourself. Not affiliated with or endorsed by
-> the game's developer or publisher.
+It patches only the game's own scripts — **no game assets are redistributed**, and you must own a
+legitimate copy. Everyone in a lobby must install the **same** version. See
+[`docs/MINIGAMES.en.md`](docs/MINIGAMES.en.md) for a per-minigame changelog and
+[`docs/BUILD.md`](docs/BUILD.md) to build it yourself. Not affiliated with or endorsed by the game's
+developer or publisher.
 
 ---
 
-![吸烟小憩：8 人一排坐满长凳](images/03_smoke_break_bench.png)
+![Smoke Break: 8 players filling a row of benches](images/03_smoke_break_bench.png)
 
 | | |
 | --- | --- |
-| ![大厅：8 个席位](images/01_lobby_8seats.png) | ![扶梯深渊：8 条独立扶梯](images/04_escalator_pit_8lanes.png) |
-| ![餐桌礼仪：8 副餐位](images/02_green_pea_dinner_table.png) | ![结算：8 个名次槽](images/10_scoreboard_8slots.png) |
+| ![Lobby: 8 seats](images/01_lobby_8seats.png) | ![Escalator Pit: 8 separate escalators](images/04_escalator_pit_8lanes.png) |
+| ![Table Manners: 8 place settings](images/02_green_pea_dinner_table.png) | ![Results: 8 placement slots](images/10_scoreboard_8slots.png) |
 
-<sub>实机截图（1920×1080，未修图）。上：吸烟小憩。左上起顺时针：大厅席位、扶梯深渊、
-结算榜、餐桌礼仪。**场地是重做的，不是把人数常量改大** —— 座位、餐位、扶梯、
-名次槽都实打实扩到了 8 套。</sub>
-
-<sub>*Real in-game captures, unretouched. Arenas are rebuilt, not just a constant bumped:
-seats, place settings, escalator lanes and scoreboard slots are all genuinely extended to
-eight.*</sub>
+<sub>*Real in-game captures (1920×1080, unretouched). Top: Smoke Break. Clockwise from top left:
+lobby seats, Escalator Pit, results board, Table Manners. **The arenas are rebuilt, not just a
+constant bumped** — seats, place settings, escalators and scoreboard slots are all genuinely
+extended to eight.*</sub>
 
 ---
 
-## 校验下载的文件 / Verifying your download
+## Verifying your download
 
-**1.6** 各文件的 SHA256：
+SHA256 of each **1.6** file:
 
 ```
 A4F83EA68E7F7DF58817A4C3123ED289672CF2DC4B1C5781B2CA42423FDC2719  Machine-Party-Overtime-1.6.zip
@@ -49,554 +42,447 @@ E0BE592B8E432648263C8ABFE74A7AE1A8BD3E2268A11E0131788F8C3753010B  overtime_launc
 E3BC32E343D85E893177505638465A78B0969A3573BABE562385FF2BD5050BAC  Machine-Party-Overtime-1.6-MPML.zip
 ```
 
-最后那个是 MPML 备选安装包，只有走那条路的玩家需要，见下面「[跟 mod loader 的关系](#跟-mod-loader-的关系16-起多了一条备选装法)」。
+The last one is the alternative MPML install package, only needed by players taking that route. See
+[Mod loaders and the alternative MPML install](#mod-loaders-and-the-alternative-mpml-install) below.
 
-⚠️ 这几行是用来**校验你下载到的那一份**的，不是「自己编一遍应该得到同一个哈希」的意思 ——
-zip 与 exe 都会把打包时间写进文件，同一份输入连打两次哈希就不一样。
-自己编出来的东西怎么对，见 [`docs/BUILD.md`](docs/BUILD.md)。
+⚠️ These lines are for **checking the copy you downloaded**. They don't mean "building it yourself
+should give the same hash" — zips and exes both record their build time, so the same input built twice
+gives different hashes. For checking your own build, see [`docs/BUILD.md`](docs/BUILD.md).
 
-在 PowerShell 里核对：
+Check a file in PowerShell:
 
 ```powershell
-Get-FileHash <文件> -Algorithm SHA256
+Get-FileHash <file> -Algorithm SHA256
 ```
 
-对得上 = 你手里的文件就是本仓库构建出来的那个、中间没有被人改过。
-⚠️ 但这**不代表**文件本身安全 —— 源码公开、可自行构建（见 [`docs/BUILD.md`](docs/BUILD.md)）才是更强的保证。
+A match proves the file you have is the one built here and that nobody modified it in between.
+⚠️ It does **not** by itself prove the file is safe. The public source and building it yourself
+([`docs/BUILD.md`](docs/BUILD.md)) are the stronger guarantee.
 
-**这一条对本 mod 特别重要**：很多人是从别人那里转发拿到 zip 的，从没打开过本页面。
-哈希是他们唯一能自查「这个文件有没有被别人动过手脚」的手段。
+**This matters more than usual for this mod.** Many players receive the zip forwarded by someone else
+and never open this page, so the hash is the only way they can check nobody tampered with the file.
 
-> **English** — a match proves the file you have is the one built here and that nobody modified it
-> in between. It does **not** by itself prove the file is safe; the public source and building it
-> yourself ([`docs/BUILD.md`](docs/BUILD.md)) are the stronger guarantee. This matters more than
-> usual here: many players receive the zip forwarded by someone else and never open this page.
+## About antivirus warnings
 
-## 关于杀毒软件告警 / About antivirus warnings
+The launcher is a small **unsigned** .NET executable (a signing certificate costs money), rebuilt for
+every release, that rewrites the game's data pack. That combination trips some antivirus heuristics
+and machine-learning checks, and what they report are generic buckets (`Wacatac.B!ml`,
+`Gen:Variant.MSILHeracles`) rather than a named malware family.
 
-启动器是**未签名**的小体积 .NET 程序（代码签名证书要花钱），每次发版都重新编译、内嵌 54 个补丁资源、
-并且会改写游戏的数据包。这套组合会触发部分杀软的启发式与机器学习判定 —— 报出来的通常是
-`Wacatac.B!ml`、`Gen:Variant.MSILHeracles` 这类**通用分类桶**，而不是具体的恶意软件家族。
+The patch scripts now ship in `overtime_scripts.dat` next to the launcher instead of inside it. About
+700 KB of compressed bytecode made up 93% of the old exe and looked like a packed payload to
+machine-learning scanners. The exe is now about 60 KB, it embeds the SHA256 of every script, and it
+refuses a data file that doesn't match.
 
-本程序从立项起就在一批自我限制下开发，全部可在源码中核对：
+The launcher has been built under a set of self-imposed restrictions from the start, all checkable in
+the source:
 
-- **零网络调用** —— 没有 `System.Net` / `HttpClient` / `WebClient` / `Socket` / `WebRequest`
-- 没有 P/Invoke、`Marshal`、`Assembly.Load`、`Reflection.Emit`，没有任何动态代码
-- 注册表**只读**（只为找到你的 Steam 库路径），从不写入
-- 「游戏日志」按钮**只是打开一个文件夹**，从不读取、打包或上传你的任何文件
-- **不常驻**：改完游戏数据就退出，无服务、无计划任务、无开机自启
-- 卸载**逐字节精确且可证明**：还原后的数据包 SHA256 与原版指纹一致，对不上就拒绝改动
+- **Zero network calls** — no `System.Net` / `HttpClient` / `WebClient` / `Socket` / `WebRequest`
+- No P/Invoke, `Marshal`, `Assembly.Load` or `Reflection.Emit`, and no dynamic code of any kind
+- The registry is **read only** (just to find your Steam library paths), never written
+- The **Game log** button **only opens a folder**. It never reads, packages or uploads any of your files
+- **Nothing stays resident**: it exits after changing the game data, with no services, scheduled tasks or autostart
+- Uninstalling is **byte-exact and provable**: the restored data pack's SHA256 must match the vanilla fingerprint, or nothing is changed
 
-安装器是**单个公开文件** [`installer/Installer.cs`](installer/Installer.cs)，可以逐行读完。
-完整讨论见 [issue #2](../../issues/2)。
-
-> **English** — the launcher is a small **unsigned** .NET executable (a signing certificate costs
-> money), rebuilt for every release, carrying 54 embedded patch resources and rewriting the game's
-> data pack. That combination trips some antivirus heuristics, and what they report are generic
-> buckets (`Wacatac.B!ml`, `Gen:Variant.MSILHeracles`) rather than a named malware family.
-> It makes **zero network calls**, stays resident nowhere, writes nothing to the registry, never
-> reads or uploads your files, and uninstalls byte-exactly. The installer is a single public file
-> you can read line by line. Full breakdown in [issue #2](../../issues/2).
+The installer is a **single public file**, [`installer/Installer.cs`](installer/Installer.cs), that you
+can read line by line. Full discussion in [issue #2](../../issues/2).
 
 ---
 
-## 更新日志
+## Changelog
 
-### 1.6 —— 新增「重开本轮」投票，修复猎鸭卡死与餐桌礼仪延迟
+### 1.6 — a "restart this round" vote, plus fixes for Duck Hunt and Table Manners
 
-下载地址：
+Download:
 https://github.com/DarkJadeStone/MachineParty-Overtime/releases/tag/v1.6
-普通玩家下载「Machine-Party-Overtime-1.6.zip」即可。已经安装旧版的玩家不需要先卸载：完全退出游戏，解压新版压缩包，运行里面的「overtime_launcher.exe」，点击“启用 Overtime”即可完成更新。
-本次玩法调整只涉及猎鸭与餐桌礼仪，其余小游戏没有改动。
 
-- **新增「重开本轮」投票**：任何玩家按 F5 或通过暂停菜单发起，房间过半同意后进入 5 秒自动确认倒计时（期间可撤票取消），确认后回到本轮开始并回滚本轮分数。门槛设为过半而不是全票，避免掉线或挂机的玩家让投票永远无法通过。
-- **猎鸭**：修复角色被场地几何卡死、方向键无反应的问题。本地复现不出该问题，本轮加了自动脱困：按住方向键连续 3 秒几乎无位移时，自动退回约一米前的位置。卡住位置的坐标会写入游戏日志 —— 再遇到请用启动器的「游戏日志」按钮反馈，这是定位该问题的唯一途径。
-- **餐桌礼仪**：修复新增的第 5~8 个座位在恢复进食后拿叉明显变慢的问题（原为座位唤醒等待逐人累加，第 8 座最坏约 2.6 秒）。现改为每人独立计时，总延迟与人数无关；4 人及以下与原版逐值一致。
-- **版本提示**：进不去房间时的「版本不符」提示原本分不清原因（1.5 曾重写但没有生效）。现在能分清五种情形并列出双方版本号：您的版本低于或高于房主、对方没装或版本过旧、双方版本相同但游戏本体不同；顺带修复中文提示不换行的问题。
-- **房间上限保护**：8 人上限由程序固定，其他 Mod 试图压回 4 人的写入会被忽略；Steam 房间人数上限也会定期核对并恢复。
-- **新增 MPML 备选安装（实验性）**：给想与 MachineParty+ 等其他 Mod 共存的玩家准备（需先装 MachinePartyModLoader，再下载本次 Release 的第二个附件 `Machine-Party-Overtime-1.6-MPML.zip`，把里面的 `overtime` 文件夹放进游戏 `mods` 目录）。主推仍是 exe 启动器，两种装法可以同房，但每台机器只能选一种；挂载前核对原版文件，游戏更新后自动拒绝挂载，不会拿旧脚本盖新游戏。
+Most players only need `Machine-Party-Overtime-1.6.zip`. If you already have an older version you do
+**not** need to uninstall first: quit the game completely, extract the new archive, run
+`overtime_launcher.exe` inside it, and click **Enable Overtime**.
 
-「重开本轮」与版本提示均已通过本机 8 实例联机验证。猎鸭卡死与餐桌礼仪的修复受限于本地无法复现 / 静态检查覆盖不到，需经真实对局最终确认 —— 上线后如有问题请继续反馈。
+This update changes gameplay in **Duck Hunt and Table Manners only**. No other minigame was adjusted.
 
-⚠️ 1.6 与 1.5 及更早版本不能互通，同一房间的所有玩家都需要更新至 1.6。
-如果进入房间时提示“您当前的游戏版本与该房间不符”，请查看主菜单右下角，所有人的版本都应显示：
-v2.1.2+overtime-1.6
-如果压缩包是群友或朋友转发的，也请把新版重新发给他们，避免房间里混入旧版本。
+- **New: a "restart this round" vote.** Any player can start one with F5 or from the pause menu. Once
+  more than half the lobby agrees, a 5-second confirmation countdown begins (withdrawing a vote during
+  it cancels the restart). On confirmation the round returns to its start and the score earned in it
+  is rolled back. The threshold is a majority rather than unanimity, so a disconnected or idle player
+  cannot make the vote impossible to pass.
+- **Duck Hunt**: fixed a character getting stuck in the arena geometry with the movement keys doing
+  nothing. The problem cannot be reproduced locally, so this version adds an automatic escape: hold a
+  direction for 3 seconds with almost no movement and you are returned to where you were about a
+  metre earlier. The stuck coordinates are written to the game log. If it happens again, please send
+  the log using the launcher's **Game log** button. That log is the only way to pin this down.
+- **Table Manners**: fixed the new seats 5–8 being noticeably slower to pick the fork back up after
+  eating resumes (the per-seat wake-up wait used to accumulate player by player — about 2.6 seconds at
+  worst for seat 8). Each player is now timed independently, so the total delay no longer depends on
+  the player count. With four players or fewer the values match the original game exactly.
+- **Version mismatch messages**: the "version does not match" notice used to give no clue as to why
+  (1.5 rewrote it, but the rewrite never actually took effect). It now distinguishes five cases and
+  prints both version strings: your version is older or newer than the host's, the other side has no
+  mod or too old a one, or both mod versions match but the base game differs. A Chinese line-wrapping
+  bug in the same dialog is fixed as well.
+- **Player-cap protection**: the 8-player cap is now pinned by the mod, and writes from other mods
+  trying to force it back to 4 are ignored. The Steam lobby capacity is re-checked and restored
+  periodically as well.
+- **New: an alternative MPML install (experimental)** for players who want Overtime alongside other
+  mods such as MachineParty+. It requires MachinePartyModLoader to be installed first, and the
+  `overtime` folder from `Machine-Party-Overtime-1.6-MPML.zip` — the second asset on this release — to
+  be placed in the game's `mods` directory. The `.exe` launcher is still the recommended route. The two
+  install methods can share a lobby, but each machine has to pick one. The package verifies the
+  original game files before mounting and refuses to mount after a game update, so it can never lay
+  old scripts over a newer game.
 
-> **English — 1.6: a "restart this round" vote, plus fixes for Duck Hunt and Table Manners.**
->
-> Download:
-> https://github.com/DarkJadeStone/MachineParty-Overtime/releases/tag/v1.6
-> Most players only need `Machine-Party-Overtime-1.6.zip`. If you already have an older version
-> you do **not** need to uninstall first: quit the game completely, extract the new archive, run
-> `overtime_launcher.exe` inside it, and click **Enable Overtime**.
->
-> This update changes gameplay in **Duck Hunt and Table Manners only**. No other minigame was
-> adjusted.
->
-> - **New: a "restart this round" vote.** Any player can start one with F5 or from the pause menu.
->   Once more than half the lobby agrees, a 5-second confirmation countdown begins (withdrawing a
->   vote during it cancels the restart); on confirmation the round returns to its start and the
->   score earned in it is rolled back. The threshold is a majority rather than unanimity, so a
->   disconnected or idle player cannot make the vote impossible to pass.
-> - **Duck Hunt**: fixed a character getting stuck in the arena geometry with the movement keys
->   doing nothing. The problem cannot be reproduced locally, so this version adds an automatic
->   escape: hold a direction for 3 seconds with almost no movement and you are returned to where
->   you were about a metre earlier. The stuck coordinates are written to the game log — if it
->   happens again, please send the log using the launcher's **Game log** button. That log is the
->   only way to pin this down.
-> - **Table Manners**: fixed the new seats 5–8 being noticeably slower to pick the fork back up
->   after eating resumes (the per-seat wake-up wait used to accumulate player by player — about
->   2.6 seconds at worst for seat 8). Each player is now timed independently, so the total delay no
->   longer depends on the player count; with four players or fewer the values match the original
->   game exactly.
-> - **Version mismatch messages**: the "version does not match" notice used to give no clue as to
->   why (1.5 rewrote it, but the rewrite never actually took effect). It now distinguishes five
->   cases and prints both version strings: your version is older or newer than the host's, the
->   other side has no mod or too old a one, or both mod versions match but the base game differs.
->   A Chinese line-wrapping bug in the same dialog is fixed as well.
-> - **Player-cap protection**: the 8-player cap is now pinned by the mod, and writes from other
->   mods trying to force it back to 4 are ignored. The Steam lobby capacity is re-checked and
->   restored periodically as well.
-> - **New: an alternative MPML install (experimental)** for players who want Overtime alongside
->   other mods such as MachineParty+. It requires MachinePartyModLoader to be installed first, and
->   the `overtime` folder from `Machine-Party-Overtime-1.6-MPML.zip` — the second asset on this
->   release — to be placed in the game's `mods` directory. The `.exe` launcher is still the
->   recommended route. The two install methods can share a lobby, but each machine has to pick one.
->   The package verifies the original game files before mounting and refuses to mount after a game
->   update, so it can never lay old scripts over a newer game.
->
-> The restart vote and the version messages were both verified locally with 8 connected instances.
-> The Duck Hunt and Table Manners fixes could not be — the first cannot be reproduced locally and
-> the second is beyond what static checking covers — so both need confirmation from real matches.
-> Please keep the reports coming.
->
-> ⚠️ **1.6 is not compatible with 1.5 or earlier** — everyone in the lobby must update to 1.6.
-> If joining shows "your client version does not match the host version", check the bottom right
-> of the main menu; everyone should read:
-> `v2.1.2+overtime-1.6`
-> If someone forwarded you the archive, please send them the new one too, so no old version ends
-> up in the lobby.
+The restart vote and the version messages were both verified locally with 8 connected instances. The
+Duck Hunt and Table Manners fixes could not be — the first cannot be reproduced locally and the second
+is beyond what static checking covers — so both need confirmation from real matches. Please keep the
+reports coming.
+
+⚠️ **1.6 is not compatible with 1.5 or earlier** — everyone in the lobby must update to 1.6.
+If joining shows "your client version does not match the host version", check the bottom right of the
+main menu. Everyone should read `v2.1.2+overtime-1.6`.
+If someone forwarded you the archive, please send them the new one too, so no old version ends up in
+the lobby.
 
 ---
 
-### 1.5 —— 碎骨者：装置挂在身上却不处决
+### 1.5 — Spine Breaker devices that latch on but never execute
 
-下载地址：
+Download:
 https://github.com/DarkJadeStone/MachineParty-Overtime/releases/tag/v1.5
-普通玩家下载「Machine-Party-Overtime-1.5.zip」即可。已经安装旧版的玩家不需要先卸载：完全退出游戏，解压新版压缩包，运行里面的「overtime_launcher.exe」，点击“启用 Overtime”即可完成更新。
-本次玩法更新只涉及「碎骨者」，其他小游戏的玩法没有调整。
 
-* 修复装置扑到玩家身上后一直不处决的问题。
-* 修复该状态下玩家按键没有反应、无法将装置扔出的问题。
-* 修复由此造成的残局永久卡死：被挂住的玩家既不会死亡，也无法摆脱装置，最后只剩两人时游戏无法继续结算。
-* 退休的装置由熄灯改为绿色慢闪。现在红色快闪代表引信正在燃烧，绿色慢闪代表装置已经退休、不会再次行动。
+Most players only need `Machine-Party-Overtime-1.5.zip`. If you already have an older version you do
+**not** need to uninstall first: quit the game completely, extract the new archive, run
+`overtime_launcher.exe` inside it, and click **Enable Overtime**.
 
-前三个现象实际来自同一个问题：装置之前发出的一次“重新寻找目标”请求会延迟执行。在等待期间，它可能已经扑到了玩家身上；但旧请求到点后，仍会把它强行派去追赶其他人。
-这会导致装置实际已经离开，玩家背上的模型和状态却没有解除。服务器也不再认为那台装置真正挂在玩家身上，因此既不会继续处决，也找不到可以扔出的装置，最终让该玩家永久留在场内、整局无法结束。
-现在，已经挂在玩家身上或正在处决的装置不会再被重新分配目标。引信会正常倒计时，玩家也可以正常将其扔出。
-另外，只剩两名玩家时，按设计会有一台装置退休，只留下另一台进行最后的 1v1。旧版退休后直接熄灯，看起来很像装置又卡住了；1.5 改为绿色慢闪，可以直接区分“正常退休”和“仍在追击”。
-这个问题先后由三位玩家在评论区独立反馈，描述的“蜘蛛挂在身上不咬人”“红蜘蛛扔不出去”“最后两人无法结束”已经确认是同一个问题。修复已通过本机 8 实例定向验证，成功拦截了三次错误的目标重派，正常处决和复位流程也能继续运行。
-⚠️ 1.5 与 1.4 及更早版本不能互通，同一房间的所有玩家都必须更新至 1.5。
-如果进入房间时提示“您当前的游戏版本与该房间不符”，请查看主菜单右下角，所有人的版本都应显示：
-v2.1.2+overtime-1.5
-如果压缩包是群友或朋友转发的，也请把新版重新发给他们，避免房间里混入旧版本。
+This update changes gameplay in **Spine Breaker only**. No other minigame was adjusted.
 
-> **English — 1.5: Spine Breaker devices that latch on but never execute.**
->
-> Download:
-> https://github.com/DarkJadeStone/MachineParty-Overtime/releases/tag/v1.5
-> Most players only need `Machine-Party-Overtime-1.5.zip`. If you already have an older version
-> you do **not** need to uninstall first: quit the game completely, extract the new archive, run
-> `overtime_launcher.exe` inside it, and click **Enable Overtime**.
->
-> This update changes gameplay in **Spine Breaker only**. No other minigame was adjusted.
->
-> * Fixed a device latching onto a player and then never executing them.
-> * Fixed the player being unable to act in that state — inputs did nothing and the device could
->   not be thrown off.
-> * Fixed the permanent stall this caused: the pinned player neither died nor got free, so once
->   only two players were left the round could never settle.
-> * A retired device now blinks slowly in green instead of going dark. Red and fast means the fuse
->   is burning; green and slow means the device has retired and will not act again.
->
-> The first three are the same bug. A device's earlier "find a new target" request is executed
-> after a delay. During that wait it may already have latched onto a player — but when the old
-> request comes due, it is still sent off to chase someone else.
->
-> The device has effectively left, yet the model and state on the player's back are never cleared.
-> The server also no longer considers that device to be riding the player, so it neither continues
-> the execution nor finds a device that can be thrown — leaving that player stuck on the field
-> forever and the round unable to end.
->
-> Now a device that is already riding a player, or currently executing one, is no longer
-> reassigned. The fuse counts down normally and the player can throw it off as usual.
->
-> Separately, when only two players remain one device retires by design, leaving the other for the
-> final 1v1. Previously it simply went dark, which looked a lot like the device had frozen again;
-> 1.5 makes it blink slowly in green so "retired normally" and "still hunting" can be told apart
-> at a glance.
->
-> Three players reported this independently in the comments — "the spider hangs on and won't
-> bite", "the red spider can't be thrown", "the last two players can't finish" — all confirmed to
-> be the same bug. The fix was verified locally with 8 instances, intercepting three incorrect
-> target reassignments, with normal execution and reset flows still running.
->
-> ⚠️ **1.5 is not compatible with 1.4 or earlier** — everyone in the lobby must update to 1.5.
-> If joining shows "your client version does not match the host version", check the bottom right
-> of the main menu; everyone should read:
-> `v2.1.2+overtime-1.5`
-> If someone forwarded you the archive, please send them the new one too, so no old version ends
-> up in the lobby.
+- Fixed a device latching onto a player and then never executing them.
+- Fixed the player being unable to act in that state — inputs did nothing and the device could not be
+  thrown off.
+- Fixed the permanent stall this caused: the pinned player neither died nor got free, so once only two
+  players were left the round could never settle.
+- A retired device now blinks slowly in green instead of going dark. Red and fast means the fuse is
+  burning. Green and slow means the device has retired and will not act again.
+
+The first three are the same bug. A device's earlier "find a new target" request is executed after a
+delay. During that wait it may already have latched onto a player — but when the old request comes
+due, it is still sent off to chase someone else.
+
+The device has effectively left, yet the model and state on the player's back are never cleared. The
+server also no longer considers that device to be riding the player, so it neither continues the
+execution nor finds a device that can be thrown — leaving that player stuck on the field forever and
+the round unable to end.
+
+Now a device that is already riding a player, or currently executing one, is no longer reassigned. The
+fuse counts down normally and the player can throw it off as usual.
+
+Separately, when only two players remain one device retires by design, leaving the other for the final
+1v1. Previously it simply went dark, which looked a lot like the device had frozen again. 1.5 makes it
+blink slowly in green so "retired normally" and "still hunting" can be told apart at a glance.
+
+Three players reported this independently in the comments — "the spider hangs on and won't bite", "the
+red spider can't be thrown", "the last two players can't finish" — all confirmed to be the same bug.
+The fix was verified locally with 8 instances, intercepting three incorrect target reassignments, with
+normal execution and reset flows still running.
+
+⚠️ **1.5 is not compatible with 1.4 or earlier** — everyone in the lobby must update to 1.5.
+If joining shows "your client version does not match the host version", check the bottom right of the
+main menu. Everyone should read `v2.1.2+overtime-1.5`.
+If someone forwarded you the archive, please send them the new one too, so no old version ends up in
+the lobby.
 
 ---
 
-### 1.4 —— 残骸平台：修好 8 人局无法结束
+### 1.4 — Debris Platforms rounds that could never end
 
-本次更新只修改了「残骸平台」，其他小游戏没有改动。
+This update changes **Debris Platforms only**. No other minigame was touched.
 
-- 修复 8 人局无法结束的问题：场上玩家已经全部消失，游戏却不结算，垃圾仍不断掉落并持续拖低帧数。
-- 修复压缩机与平台错配：部分平台堆满残骸后压缩机不下来，反而是其他位置的压缩机被触发。
-- 压缩机淘汰现在统一由房主判定，避免不同客户端按各自视角分别处理玩家死亡，并防止同一名玩家被重复判死。
-- 增加结算保险：如果以后再次出现「玩家已经出局，但房主没有登记」的情况，大约 3 秒后会自动修正，
-  不再让整局永久卡死。
+- **Fixed 8-player rounds that could not end**: every player on the field was already gone, yet the
+  round never settled — junk kept falling and the frame rate kept dropping.
+- **Fixed compactors being matched to the wrong platform**: some platforms would pile up with debris
+  while the compactor above them never came down, and a compactor somewhere else fired instead.
+- **Compactor eliminations are now decided by the host**, so clients no longer each resolve a player's
+  death according to their own view, and the same player can no longer be counted out twice.
+- **Added a settlement safety net**: if a player ever ends up "out, but not registered by the host"
+  again, it is corrected automatically after about 3 seconds instead of hanging the whole round forever.
 
-这个问题是 1.3 加入 8 方位独立视角时引入的：当时压缩机被错误地跟着摄像机一起重新分配了，
-现在已经把画面与玩法判定彻底分开。已通过本机 8 实例复现旧问题，并确认修复后能够正常进入结算。
+This was introduced in 1.3 together with the 8-direction independent camera: the compactors were
+incorrectly reassigned along with the camera. Visuals and gameplay decisions are now fully separated.
+Reproduced locally with 8 instances, and confirmed the round settles again after the fix.
 
-如果你还在使用 1.3，1.4 的启动器也已经包含 1.3.1 的「误判游戏正在运行」修复。
+If you are still on 1.3, the 1.4 launcher also includes the 1.3.1 fix for the false "the game is
+running" report.
 
-另外，评论区反馈的「碎骨者只剩最后两人时无法投掷」未包含在本次更新，仍在排查。
+The "Spine Breaker: cannot throw when only two players remain" report from the comments is **not**
+included in this update — still being investigated.
 
-⚠️ **1.4 与 1.3、1.3.1 均不能互通**，同一房间的所有玩家都需要更新至 1.4。
-（主菜单右下角会显示 `v2.1.2+overtime-1.4`，一眼能对。）
-
-> **English — 1.4: Debris Platforms rounds that could never end.**
->
-> This update changes **Debris Platforms only**. No other minigame was touched.
->
-> - **Fixed 8-player rounds that could not end**: every player on the field was already gone, yet
->   the round never settled — junk kept falling and the frame rate kept dropping.
-> - **Fixed compactors being matched to the wrong platform**: some platforms would pile up with
->   debris while the compactor above them never came down, and a compactor somewhere else fired
->   instead.
-> - **Compactor eliminations are now decided by the host**, so clients no longer each resolve a
->   player's death according to their own camera angle, and the same player can no longer be
->   counted out twice.
-> - **Added a settlement safety net**: if a player ever ends up "out, but not registered by the
->   host" again, it is corrected automatically after about 3 seconds instead of hanging the whole
->   round forever.
->
-> This was introduced in 1.3 together with the 8-direction independent camera: the compactors were
-> incorrectly reassigned along with the camera. Visuals and gameplay decisions are now fully
-> separated. Reproduced locally with 8 instances, and confirmed the round settles again after the fix.
->
-> If you are still on 1.3, the 1.4 launcher also includes the 1.3.1 fix for the false
-> "the game is running" report.
->
-> The "Spine Breaker: cannot throw when only two players remain" report from the comments is
-> **not** included in this update — still being investigated.
->
-> ⚠️ **1.4 is not compatible with 1.3 or 1.3.1** — everyone in the lobby has to update to 1.4.
-> (The main menu bottom right reads `v2.1.2+overtime-1.4`.)
+⚠️ **1.4 is not compatible with 1.3 or 1.3.1** — everyone in the lobby has to update to 1.4.
+(The main menu bottom right reads `v2.1.2+overtime-1.4`, so it's easy to check.)
 
 ---
 
-### 1.3.1 —— 只换启动器：修好「明明没开游戏，却说游戏正在运行」
+### 1.3.1 — launcher only: fixes "the game is running" when it isn't
 
-⚠️ **这一版只改启动器，游戏内容一个字节都没变。**
+⚠️ **This release changes the launcher only. Not one byte of game content changed.**
 
-- **已经装好 1.3 的人不用做任何事**，主菜单右下角仍然是 `v2.1.2+overtime-1.3`；
-- **1.3.1 和 1.3 能一起玩**，不需要全房间同步更新；
-- 只有**装不上**的人才需要下这一版。
+- **If you already have 1.3 installed, do nothing** — the main menu still reads `v2.1.2+overtime-1.3`.
+- **1.3.1 and 1.3 play together**, so a lobby does not have to update in lockstep.
+- Only download this if the installer refused to work for you.
 
-- **修复**：少数玩家点「启用 Overtime」时必定弹出「游戏正在运行，先完全退出」，
-  但游戏其实根本没开，重启电脑、重装游戏都没用，等于永远装不上。
-  原因是旧版只按**进程名**判断游戏在不在跑 —— 系统里只要存在任何一个叫
-  `Machine Party.exe` 的进程（上次没退干净的残留进程、崩溃后被系统挂住的进程、
-  或者别的目录下一个同名程序），就会被拦下。现在改为**直接检查游戏数据包本身有没有被占用**，
-  并且只有当同名进程**确实位于你选中的那个游戏目录里**时才拦截。
-- **提示更清楚**：真的被占用时，弹窗会直接列出占用进程的 PID 和完整路径，
-  照着去任务管理器结束它就行，不用再猜是什么东西占着。
-- **安装日志**：修复同一批记录被写进文件两遍、以及每次启动多记一行的问题，日志现在干净可读。
-- **界面**：右上角多显示一行「安装器」版本号，反馈问题时能一眼说清自己用的是哪一版。
+Changes:
 
-> **English — 1.3.1: launcher only — fixes "the game is running" when it isn't.**
->
-> ⚠️ **This release changes the launcher only. Not one byte of game content changed.**
->
-> - **If you already have 1.3 installed, do nothing** — the main menu still reads `v2.1.2+overtime-1.3`;
-> - **1.3.1 and 1.3 play together**, so a lobby does not have to update in lockstep;
-> - Only download this if the installer refused to work for you.
->
-> - **Fixed**: for a few players, "Enable Overtime" always popped up "The game is running.
->   Fully exit it first" even though the game was closed — and neither rebooting nor
->   reinstalling the game helped, making it impossible to install at all.
->   The old check went purely by **process name**: any process called `Machine Party.exe`
->   anywhere on the system (a leftover process that never exited, one Windows kept alive after
->   a crash, or an unrelated program with the same name) would block it. It now **checks whether
->   the game's PCK is actually locked**, and only treats a same-named process as the game when
->   it really lives inside the game folder you picked.
-> - **Clearer message**: when something genuinely is holding the file, the dialog now lists the
->   PID and full path of that process, so you can end it in Task Manager directly.
-> - **Install log**: fixed the same batch of lines being written to the file twice, plus one
->   redundant line per launch. The log is readable now.
-> - **UI**: the top right corner now also shows an "installer" build number, which makes bug
->   reports much easier to place.
+- **Fixed**: for a few players, "Enable Overtime" always popped up "The game is running. Fully exit it
+  first" even though the game was closed — and neither rebooting nor reinstalling the game helped,
+  making it impossible to install at all. The old check went purely by **process name**: any process
+  called `Machine Party.exe` anywhere on the system (a leftover process that never exited, one Windows
+  kept alive after a crash, or an unrelated program with the same name) would block it. It now
+  **checks whether the game's PCK is actually locked**, and only treats a same-named process as the
+  game when it really lives inside the game folder you picked.
+- **Clearer message**: when something genuinely is holding the file, the dialog now lists the PID and
+  full path of that process, so you can end it in Task Manager directly.
+- **Install log**: fixed the same batch of lines being written to the file twice, plus one redundant
+  line per launch. The log is readable now.
+- **UI**: the top right corner now also shows an "installer" build number, which makes bug reports much
+  easier to place.
 
 ---
 
-### 1.3 —— 加载期间掉线，以及多人局中的实际游玩问题
+### 1.3 — a disconnect during loading, plus issues that actually show up in multiplayer
 
-- **联机掉线**：修复玩家在小游戏加载过程中掉线后，本局全程静音、结束时全员黑屏的问题；
-  同时为 12 个小游戏补上异常收尾保护，并修正枪械工厂、吸烟小憩在该时机可能出现的清理报错。
-- **碎骨者**：修复正对玩家时无法投掷、第二台装置持续追踪已经背着装置的玩家，
-  以及投掷时误选别人背上或已经飞出的装置、导致投掷落空的问题。
-- **残骸平台**：调整场地与摄像机，8 人局中每名玩家使用独立的 45° 视角，减少互相遮挡；
-  静止残骸回收时间由 60 秒缩短至 30 秒。
-- **残骸平台**：修复多人争抢同一块残骸后，残骸可能永久穿过其中一名玩家的问题。
-- **猎鸭**：6 人局猎人射速降低 20%；修复 7 人独狼回合错误显示为「猎人削弱」的问题。
-- **猎鸭**：修复两名猎人同时命中同一只鸭时，死亡动画、血和音效可能重复触发的问题；计分本身不会重复。
-- **启动器**：新增「游戏日志」按钮，可以直接找到当前的 `godot.log`；原「打开日志」更名为「安装日志」。
-  按钮只打开本地文件夹，不会自动上传日志。
-- **日志清理**：开发用的 `[MP8-AUDIT]` 侦察日志改为按需开启，正式游玩时不再默认输出大量无用诊断信息。
-- **安装说明**：补充说明 Overtime 暂不兼容 MachinePartyModLoader，以及其他会修改游戏 PCK 的 Mod。
-  该限制并非 1.3 新增。
+- **Disconnects**: fixed a player dropping *during minigame loading* leaving the whole round silent and
+  every player on a black screen at the end. Twelve minigames also got a guard against running
+  end-of-round logic before the round started, and cleanup errors in Manufacture Gun and Smoke Break at
+  that same moment are fixed.
+- **Spine Breaker**: fixed being unable to throw while facing a player directly, a second device
+  endlessly chasing someone who was already carrying one, and throws picking a device on someone
+  else's back — or one already in flight — instead of your own, so the throw did nothing.
+- **Debris Platforms**: arena and cameras reworked so each of the 8 players gets their own 45° view,
+  greatly reducing players blocking each other. Idle debris is now recycled after 30 seconds instead
+  of 60.
+- **Debris Platforms**: fixed debris being able to pass through a player permanently after several
+  players contested the same piece.
+- **Duck Hunt**: hunter fire rate reduced by 20% in 6-player rounds. Fixed the 7-player lone-hunter
+  round showing "HUNTER NERFED" when the hunter is actually buffed.
+- **Duck Hunt**: fixed the death animation, blood and sound effects firing twice when two hunters hit
+  the same duck simultaneously. Scoring itself never double-counted.
+- **Launcher**: new **Game log** button that takes you straight to the current `godot.log`. The old
+  "Open log" is now **Install log**. The buttons only open a local folder — nothing is uploaded.
+- **Log cleanup**: the developer `[MP8-AUDIT]` diagnostic dump is now opt-in, so normal play no longer
+  floods the log with diagnostics nobody needs.
+- **Install notes**: documented that Overtime is not currently compatible with MachinePartyModLoader,
+  or with any other mod that modifies the game's PCK. This is not new in 1.3.
 
-⚠️ **1.3 与 1.2 不能互通**，同一房间的所有玩家都需要更新至 1.3。
-（主菜单右下角会显示 `v2.1.2+overtime-1.3`，一眼能对。）
-
-> **English — 1.3: a disconnect during loading, plus issues that actually show up in multiplayer.**
->
-> - **Disconnects**: fixed a player dropping *during minigame loading* leaving the whole round
->   silent and every player on a black screen at the end. Twelve minigames also got a guard
->   against running end-of-round logic before the round started, and cleanup errors in
->   Manufacture Gun and Smoke Break at that same moment are fixed.
-> - **Spine Breaker**: fixed being unable to throw while facing a player directly; a second
->   device endlessly chasing someone who was already carrying one; and throws picking a device
->   on someone else's back — or one already in flight — instead of your own, so the throw did nothing.
-> - **Debris Platforms**: arena and cameras reworked so each of the 8 players gets their own
->   45° view, greatly reducing players blocking each other. Idle debris is now recycled after
->   30 seconds instead of 60.
-> - **Debris Platforms**: fixed debris being able to pass through a player permanently after
->   several players contested the same piece.
-> - **Duck Hunt**: hunter fire rate reduced by 20% in 6-player rounds; fixed the 7-player
->   lone-hunter round showing "HUNTER NERFED" when the hunter is actually buffed.
-> - **Duck Hunt**: fixed the death animation, blood and sound effects firing twice when two
->   hunters hit the same duck simultaneously. Scoring itself never double-counted.
-> - **Launcher**: new "Game log" button that takes you straight to the current `godot.log`;
->   the old "Open log" is now "Install log". The buttons only open a local folder —
->   nothing is uploaded.
-> - **Log cleanup**: the developer `[MP8-AUDIT]` diagnostic dump is now opt-in, so normal play
->   no longer floods the log with diagnostics nobody needs.
-> - **Install notes**: documented that Overtime is not currently compatible with
->   MachinePartyModLoader, or with any other mod that modifies the game's PCK.
->   This is not new in 1.3.
->
-> ⚠️ **1.3 is not compatible with 1.2** — everyone in the lobby has to update to 1.3.
+⚠️ **1.3 is not compatible with 1.2** — everyone in the lobby has to update to 1.3.
+(The main menu bottom right reads `v2.1.2+overtime-1.3`, so it's easy to check.)
 
 ---
 
-### 1.2 —— 修好了两个会卡死整局的 bug，顺带把重复音效压下去
+### 1.2 — two game-breaking hangs fixed, plus duplicated sound effects
 
-**内部暗手：拿到针筒的人再拿到一支，整局会卡死。**
-猎杀阶段永远不开始 —— 扎不了人、其他人的视角不会拉近、灯也不会关，
-而那支针已经从柜子里被取走了，场上再没有第二支可找，只能干等到超时。
-根因是「已找到的针筒数」被按**人**去重了，而它本该按**针**计数。
+**Inside Job: if the player already holding a syringe picked up a second one, the round hung.**
+The hunt phase never started — nobody could stab, other players' cameras never zoomed in, the lights
+never went out. That syringe had already been taken from the cabinet, so there was no other one to
+find, and the round could only wait for the timeout. The root cause was that the "syringes found"
+counter was de-duplicated per **player** when it should have counted per **syringe**.
 
-**残骸平台：后半局不再掉石头。**
-停在平台上不动的残骸永远不会被回收（原版唯一的回收口是「掉出平台」），
-攒够 40 块之后就一块都不再掉，这一局的玩法直接消失。
-8 人局尤其严重：掉落点是每人一个，一个 tick 就投 8 块，十几秒就能把池子掏空。
-现在静止超过 1 分钟的残骸会被主动回收并重新投放。
+**Debris Platforms: debris stopped falling in the second half of a round.**
+Debris that came to rest on a platform was never recycled (in vanilla, the only way back was "fell off
+the platform"), so once 40 pieces had piled up nothing dropped again and the minigame simply stopped
+being played. It was much worse at 8 players: every player is a drop point, so each tick drops 8
+pieces and the pool empties within a dozen or so seconds. Debris idle for over a minute is now actively
+recycled and dropped again.
 
-**重复音效。** 多处音效由 8 台机器各广播一遍，每台最终叠着播 8 声
-（心电图滴答、换弹、拾枪、死亡音、送货区指示灯）。现在每端各响一声。
-顺带修掉「内部暗手一次搜索被算 7 次」的连锁广播。
+**Duplicated sound effects.** Several sounds were broadcast once by each of the 8 machines, so every
+client ended up playing them 8 times over (the heart monitor beep, reloading, picking up a gun, the
+death sound, the delivery area light). Now each client plays them once. This also fixed a chained
+broadcast that counted a single Inside Job search 7 times.
 
-⚠️ **1.2 与 1.1 不能互通**：版本号写进了联机握手，一起玩的人都要更新。
-（主菜单右下角会显示 `v2.1.2+overtime-1.2`，一眼能对。）
-
-> **English — 1.2: two game-breaking hangs fixed, plus duplicated sound effects.**
-> **Inside Job**: if the player who already held a syringe picked up the second one, the hunt
-> phase never started — nobody could stab, cameras never zoomed, lights never went out, and
-> the round could only time out. The syringe counter was de-duplicated per *player* when it
-> should have counted per *syringe*. **Debris Platforms**: debris that came to rest on the
-> platform was never recycled (the only recycler was "fell off the platform"), so after 40
-> pieces nothing dropped for the rest of the round — much worse at 8 players, where every
-> player is a spawn point. Debris idle for over a minute is now actively recycled.
-> **Duplicated SFX**: several sounds were broadcast once per machine and played 8 times over
-> on every client; now once each. **1.2 is not compatible with 1.1** — everyone in the lobby
-> has to update.
+⚠️ **1.2 is not compatible with 1.1**: the version string is part of the multiplayer handshake, so
+everyone in the lobby has to update. (The main menu bottom right reads `v2.1.2+overtime-1.2`.)
 
 ---
 
-### 1.1 —— 修好了「房主和客机看到的场地不一样」
+### 1.1 — fixed the host seeing a different arena from everyone else
 
-6 人局与 5 人局实测报出来的三处**主客机不同步**，全部修好。
-三处的共同点：那些东西是**每台机器各自摆的**，而摆的依据只有房主有 ——
-所以两边都不报错，只能靠人对着画面才看得出来。
+Three **host/client desyncs** found in real 5- and 6-player sessions, all fixed. All three had the same
+cause: those props are **placed locally by each machine**, from data only the host had. Neither side
+reported an error, so the only way to catch it was comparing screens.
 
-| 小游戏 | 之前是什么样 |
+| Minigame | What happened before |
 | --- | --- |
-| **枪械工厂** | 房主看到的走道是空的，**其他人的走道中间杵着一张桌子，还挡路**（有碰撞） |
-| **凿刻考验** | 记忆阶段（看巨幕）房主视野里其他人会隐身让开，**其他人看到的还是一排后脑勺** |
-| **吸烟小憩** | 8 个座位和两个木箱的摆位，房主和其他人不是同一套 |
+| **Manufacture Gun** | The host saw an empty walkway, while **everyone else had a workbench standing in the middle of theirs, blocking the way** (with collision) |
+| **Chisel Gauntlet** | During the memorise phase (watching the big screen), other players vanished out of the way on the host's screen, **but everyone else still saw a row of heads** |
+| **Smoke Break** | The layout of the 8 seats and the two crates differed between the host and everyone else |
 
-⚠️ **1.1 与 1.0 不能互通**：版本号写进了联机握手，一起玩的人都要更新。
-（主菜单右下角会显示 `v2.1.2+overtime-1.1`，一眼能对。）
-
-> **English — 1.1: fixed the host seeing a different arena from everyone else.**
-> Three desyncs found in real 5- and 6-player sessions. All three came from props that each
-> machine places locally from data only the host had, so nothing errored — you could only
-> catch it by comparing screens. **Manufacture Gun**: clients had an extra solid workbench
-> blocking the walkway. **Chisel Gauntlet**: during the memorise phase other players only
-> vanished on the host's screen. **Smoke Break**: seats and crates were laid out differently
-> for the host and everyone else. **1.1 is not compatible with 1.0** — the version string is
-> part of the multiplayer handshake, so everyone in the lobby has to update.
+⚠️ **1.1 is not compatible with 1.0**: the version string is part of the multiplayer handshake, so
+everyone in the lobby has to update. (The main menu bottom right reads `v2.1.2+overtime-1.1`.)
 
 ---
 
-## 这是什么
+## What this is
 
-原版联机上限 4 人。这个 mod 把上限改成 8 人，并且**逐个小游戏做了 8 人适配** ——
-不是简单地把人数常量改大（那样大部分小游戏会当场崩，或者出现两个人叠在同一个出生点、
-第 5~8 名看不到自己得分之类的问题）。
+The vanilla multiplayer cap is 4 players. This mod raises it to 8 and **adapts every minigame for 8
+players** — it isn't just a bigger player-count constant (that alone makes most minigames break on the
+spot, or puts two players on the same spawn point, or leaves places 5–8 unable to see their score).
 
-15 个可玩小游戏全部动过：出生点补位、道具/装置数量、场地摆位、算分名次、
-记分板位数、大厅席位与座椅。
+All 15 playable minigames were touched: extra spawn points, item and device counts, arena layout,
+placement scoring, scoreboard slots, and lobby seats and chairs.
 
-**适用游戏版本：v2.1.2（Steam）。** 游戏更新后不要硬装 —— 安装器会校验，
-版本对不上会拒绝安装并告诉你原因，不会把你的游戏搞坏。
+**Game version: v2.1.2 (Steam).** Don't force an install after a game update — the installer checks,
+and if the version doesn't match it refuses and tells you why. It won't break your game.
 
-## 怎么装
+## How to install
 
-到 [Releases](../../releases) 下载 **`Machine-Party-Overtime-x.y.zip`**，解压后
-**完全退出游戏**，运行里面的 **`overtime_launcher.exe`**，点「启用 Overtime」。
-装好后主菜单右下角版本号会变成 `v2.1.2+overtime-x.y`。
+Download **`Machine-Party-Overtime-x.y.zip`** from [Releases](../../releases) and extract it.
+**Fully exit the game**, run **`overtime_launcher.exe`** from the extracted folder, and click
+**Enable Overtime**. Once installed, the version in the bottom right of the main menu becomes
+`v2.1.2+overtime-x.y`.
 
-压缩包里只有两样东西：**启动器**（单文件，不需要装任何运行库）和一份说明。
+The zip holds the **launcher** (no runtime to install), `overtime_scripts.dat` with the patch
+scripts it needs next to it, a readme and the build record.
 
-**启动器不需要常驻** —— Overtime 不是运行时加载的，启用一次就改写完了，
-之后**照常从 Steam 启动游戏**；启动器上那个「启动游戏」按钮只是顺手。
-只有想切回原版、切回 Overtime、或看当前状态时才需要再打开它。
+**The launcher doesn't need to stay running.** Overtime isn't loaded at runtime. Enabling it rewrites
+the game data once, and after that you **launch the game from Steam as usual**. The launcher's **Play**
+button is just a convenience. You only need to open it again to switch back to vanilla, switch back to
+Overtime, or check the current state.
 
-**切换是一秒钟的事**：还原数据只有几 KB（做法见下面「怎么做到的」），
-想跟没装 mod 的朋友玩就点一下切回原版，玩完再点回来。
-切回原版后程序会校验结果与原版**逐字节相同**才算成功。
+**Switching takes a second.** The restore data is only a few KB (see how below), so to play with
+friends who don't have the mod, click once to switch back to vanilla and click again afterwards. After
+switching back, the launcher checks the result is **byte-for-byte identical** to vanilla before
+reporting success.
 
-完整说明（含 Windows SmartScreen 提示怎么过、手动指定游戏目录、常见问题）见
-[`installer/README.md`](installer/README.md)。
+The full guide (getting past Windows SmartScreen, picking the game folder by hand, FAQ) is in
+[`installer/README.md`](installer/README.md).
 
-### 三件必须知道的事
+### Three things you must know
 
-1. **你必须自己有正版游戏。** 安装器里没有任何游戏文件，它是在你自己那份游戏上打补丁。
-2. **一起玩的人必须都装，而且是同一版。** 版本号会被写进联机握手，对不上会被房主直接拒绝
-   —— 这是故意的：装了和没装的混在一起玩，会在半局中间以很难查的方式出问题。
-   代价是**装了 mod 就不能和原版朋友一起玩**，想一起玩就先 `--uninstall`。
-3. **随时能还原**，而且是精确还原（下面这段解释为什么只要几 KB）。
+1. **You need a legitimate copy of the game.** The installer contains no game files. It patches your
+   own copy.
+2. **Everyone playing together must install the same version.** The version is written into the
+   multiplayer handshake, and the host refuses mismatches outright. This is deliberate: mixing modded
+   and unmodded players fails mid-match in ways that are very hard to diagnose. The cost is that **with
+   the mod installed you can't play with vanilla friends**. Run `--uninstall` first if you want to.
+3. **You can restore at any time**, and the restore is exact (the next section explains why it only
+   takes a few KB).
 
-### 怎么做到「还原只存几 KB」
+### How restoring only needs a few KB
 
-打补丁的做法是**把新内容追加到数据包末尾，再把索引里那一条指过去** ——
-原文件的字节一个都没被覆盖，还躺在包里。所以还原不需要 605 MB 的整包备份，
-只要把索引那几个字段写回去、再把文件截断回原长度就行。
+Patching works by **appending the new content to the end of the data pack and pointing that index
+entry at it**. Not a single byte of the original file is overwritten, and it all still sits in the
+pack. So restoring doesn't need a 605 MB backup of the whole pack. It just writes those few index
+fields back and truncates the file to its original length.
 
-这样做反而**更安全**：还原完可以直接算 SHA256 跟原版指纹比对，
-**能证明是逐字节精确的**；整包拷贝反而没有这个保证。
-而且还原之前会先逐条确认「现在这份包正是我改过的那一份」——
-对不上（Steam 更新过、或你点过「验证游戏文件的完整性」）就拒绝动手，绝不瞎写。
+This is actually **safer**. After restoring, the SHA256 can be compared with the vanilla fingerprint,
+which **proves the restore is byte-for-byte exact**. A whole-pack copy gives no such guarantee. Before
+restoring, it also confirms entry by entry that the current pack is exactly the one it patched. If it
+isn't (Steam updated it, or you clicked "Verify integrity of game files"), it refuses to touch
+anything rather than write blindly.
 
-## 已知限制（装之前就该知道）
+## Known limitations (worth knowing before you install)
 
-| 项 | 说明 |
+| Item | Details |
 | --- | --- |
-| **两种装法二选一，不能叠加** | 主推的启动器装法靠重打游戏数据包（`.pck`），**跟 [MachinePartyModLoader](https://github.com/Krunk-theduck/MachinePartyModLoader) 及其他同样改 PCK 的工具互斥**。1.6 起另有一条 **MPML 备选装法**（实验性），走那条就能和 MachineParty+、第一人称等基于加载器的 mod 共存。**同一台机器只能选一种**；但两种装法的人**可以进同一个房间**。原因与选法见下 |
-| 角色配色只有 5 种 | 游戏自带 5 个颜色，8 人局**必然有人重色**。mod 没有加新颜色 |
-| 局时变长 | 淘汰制小游戏人多则轮数多。人工筛选 8 人最多 7 轮，整局时长约为 4 人局的两倍 |
-| 部分小游戏在 4 人以下也有视觉变化 | 少数小游戏的场地扩充没有按人数设闸门，2~4 人局会看到多出来的椅子/平台。不影响玩法 |
-| 猎鸭 8 人是「6 鸭 2 猎」 | 原版是 3 鸭 1 猎。8 人保持同样的比例，不是 7 鸭 1 猎 |
-| 摄像机偶尔拍到布景外 | 部分小游戏为容纳 8 人把镜头拉远，边角可能露出原本在取景框外的布景 |
+| **Pick one install method, they don't stack** | The recommended launcher install rewrites the game's data pack (`.pck`), so it **can't be combined with [MachinePartyModLoader](https://github.com/Krunk-theduck/MachinePartyModLoader) or any other tool that also modifies the PCK**. Since 1.6 there's also an **alternative MPML install** (experimental) that can coexist with loader-based mods such as MachineParty+ and first person. **Each machine can only use one**, but players using different methods **can join the same lobby**. The reasons and how to choose are below |
+| Only 5 character colours | The game ships 5 colours, so in an 8-player match **some players always share a colour**. The mod doesn't add new ones |
+| Longer matches | Elimination minigames have more rounds with more players. Burn Recycle with 8 players runs up to 7 rounds, and a full match takes about twice as long as a 4-player one |
+| Some minigames look different below 5 players | A few minigames' arena expansions aren't gated on player count, so 2–4 player matches show the extra chairs and platforms. Gameplay isn't affected |
+| 8-player Duck Hunt is 6 ducks and 2 hunters | Vanilla is 3 ducks and 1 hunter. 8 players keep the same ratio instead of 7 ducks and 1 hunter |
+| The camera sometimes shows past the set | Some minigames pull the camera back to fit 8 players, so the edges can reveal scenery that was originally out of frame |
 
-### 跟 mod loader 的关系（1.6 起多了一条备选装法）
+### Mod loaders and the alternative MPML install
 
-人数上限写在 `const MAX_PLAYERS` 里，而 **GDScript 的常量是编译期内联的** —— 每一个调用点在编译时就把 `4` 焊死了，运行时没有任何办法改它，只能替换数据包里已编译的字节码。所以主推的启动器装法只能走"重打 PCK"这条路。
+The player cap lives in `const MAX_PLAYERS`, and **GDScript inlines constants at compile time** — every
+use of it has `4` baked in when it's compiled, so there's no way to change it at runtime, only by
+replacing the compiled bytecode in the data pack. That's why the recommended launcher install has to
+rewrite the PCK.
 
-而 MachinePartyModLoader 那类加载器是用 `extends` 继承原脚本来做覆盖 —— 这个设计在多 mod 叠加上明显更好，**但继承够不到一个已经内联的常量**：子类里声明 `MAX_PLAYERS = 8`，改不了那些已经编译进 `4` 的代码。
+Loaders like MachinePartyModLoader override scripts by `extends`-ing the originals. That design is
+clearly better for stacking several mods, **but inheritance can't reach an inlined constant**. Declaring
+`MAX_PLAYERS = 8` in a subclass doesn't change code that was already compiled with `4`.
 
-**1.6 起换了个思路：不继承，整份替换。** 加载器的 autoload 排在最前，它的 `_init()` 窗口里游戏自己的脚本一行都还没被加载过 —— 那一刻把 54 个已编译脚本作为资源包挂进 `res://`，就等于赶在编译期常量生效之前把整份字节码换掉了。这条路不需要引用原版任何一行代码，也就不碰"不分发游戏源码"那条红线。
+**Since 1.6 there's a different approach: replace whole scripts instead of inheriting.** The loader's
+autoload runs first, and during its `_init()` not a single line of the game's own scripts has been
+loaded yet. Mounting the 54 compiled scripts into `res://` as a resource pack at that moment swaps the
+bytecode out before any compiled constants take effect. This route doesn't need to include a single
+line of vanilla code, so it stays within the "don't distribute game source" rule.
 
-**所以现在有两条装法，按你要什么选：**
+**So there are now two install methods. Choose by what you need:**
 
-| | 主推：`overtime_launcher.exe` | 备选：MPML 包（实验性） |
+| | Recommended: `overtime_launcher.exe` | Alternative: MPML package (experimental) |
 | --- | --- | --- |
-| 怎么装 | 下载 `Machine-Party-Overtime-x.y.zip`，解压运行，点「启用 Overtime」 | 先自行安装 MachinePartyModLoader，再下载 `Machine-Party-Overtime-x.y-MPML.zip`（同一个 Release 里的第二个附件），把里面的 `overtime` 文件夹放进游戏的 `mods` 目录 |
-| 能和别的 mod 共存吗 | ❌ 不能 | ✅ 能（MachineParty+、第一人称、离线机器人等） |
-| 切回原版 | ✅ 一键，且逐字节可证 | 由加载器管（删掉 `mods` 里的 `overtime` 即可） |
-| 游戏更新之后 | 提示重装 | **自动拒绝挂载** —— 挂载前逐个核对 54 个原版文件的 md5，不会拿旧脚本盖新游戏 |
+| How to install | Download `Machine-Party-Overtime-x.y.zip`, extract it, run the launcher and click **Enable Overtime** | Install MachinePartyModLoader yourself first, then download `Machine-Party-Overtime-x.y-MPML.zip` (the second asset on the same release) and put its `overtime` folder in the game's `mods` directory |
+| Works with other mods? | ❌ No | ✅ Yes (MachineParty+, first person, offline bots and so on) |
+| Switching back to vanilla | ✅ One click, provably byte-exact | Handled by the loader (delete `overtime` from `mods`) |
+| After a game update | Asks you to reinstall | **Refuses to mount automatically** — it checks the md5 of all 54 vanilla files before mounting, so it never lays old scripts over a newer game |
 
-**两条路装出来的是同一版 mod**，联机握手串逐字相同，可以同房；**但一台机器只能选一种** —— 启动器改过的数据包，加载器认不出来（补丁数据被追加在索引之后，而加载器要求索引正好结束在文件末尾）。想从启动器那条换到 MPML 这条，先用启动器切回原版，再装加载器。
+**Both routes install the same mod version.** The multiplayer handshake strings are identical, so they
+can share a lobby. **But each machine can only use one.** The loader can't read a data pack the launcher
+has patched (the patch data is appended after the index, and the loader requires the index to end
+exactly at the end of the file). To move from the launcher to MPML, switch back to vanilla with the
+launcher first, then install the loader.
 
-我们**不打包加载器本身**：它的仓库没有 LICENSE，未经作者许可无权再分发，请到[它的 Releases](https://github.com/Krunk-theduck/MachinePartyModLoader/releases) 自取。
+We **don't bundle the loader itself**. Its repository has no LICENSE, so we have no right to
+redistribute it without the author's permission. Get it from [its Releases](https://github.com/Krunk-theduck/MachinePartyModLoader/releases).
 
-## 仓库里有什么（以及为什么不是完整脚本）
+## What's in the repository (and why it isn't complete scripts)
 
 ```
-patches/      54 个差异补丁（.patch），相对游戏自己的脚本
-installer/    单文件安装器的完整 C# 源码
-mpml/         MPML 备选装法的适配层源码（我们自己写的，可逐行读）
-tools/        构建链：打补丁 → 编译 → 出 exe →（可选）出 MPML 包
-docs/         逐个小游戏的改动说明、构建说明、迁移到新版本的说明
+patches/      54 diffs (.patch) against the game's own scripts
+installer/    full C# source of the installer
+mpml/         source of the adapter for the alternative MPML install (our own code, readable line by line)
+tools/        build chain: apply patches → compile → build the exe → (optional) build the MPML package
+docs/         per-minigame changes, build guide, guide to moving to a new game version
 ```
 
-**想知道具体改了什么玩法？** 看 [`docs/MINIGAMES.md`](docs/MINIGAMES.md) ——
-15 个小游戏逐个写明：为了 8 个人改了什么、得分动没动、哪些是故意保持原版的。
-（English: [`docs/MINIGAMES.en.md`](docs/MINIGAMES.en.md)）
+**Want to know exactly what changed in gameplay?** See [`docs/MINIGAMES.en.md`](docs/MINIGAMES.en.md). It
+goes through all 15 minigames: what was changed for 8 players, whether scoring changed, and what was
+deliberately kept vanilla.
 
-**为什么发的是差异补丁而不是完整的 `.gd` 文件**：那 54 个文件是「游戏反编译源码 +
-我们的改动」混在一起的（合计 34,538 行），完整发出来等于公开约 15,100 行游戏自己的源代码。
-本项目的红线是**不分发游戏原始资产**，所以只发我们自己写的那部分（19,442 行）
-加上必要的上下文（2,237 行）。
+**Why diffs instead of complete `.gd` files.** Those 54 files mix the game's decompiled source with our
+changes (34,538 lines in total). Publishing them whole would release about 15,100 lines of the game's own
+source code. This project's rule is **not to distribute the game's original assets**, so only the part we
+wrote (19,442 lines) is published, plus the context the diffs need (2,237 lines).
 
-**`mpml/` 下那两个文件是例外，它们是整份公开的** —— 适配层 `main.gd` 不 `extends`
-任何原版脚本、一行游戏代码都没有，所以不受上面那条红线约束。这也是有意的：
-Release 里那个 `-MPML.zip` 附件如果连源码都没有，就成了一个只能"信我"的二进制。
+**The two files under `mpml/` are the exception and are published whole.** The adapter `main.gd` doesn't
+`extends` any vanilla script and contains no game code, so the rule above doesn't apply. That's
+deliberate too: if the `-MPML.zip` release asset came without source, it would be a binary you could
+only take on trust.
 
-你拿自己那份正版解包出脚本，跑一条命令就能把补丁打上，得到的结果与作者本机
-**逐字节相同**（出包时每次都会自动验证这一点）。步骤见
-[`docs/BUILD.md`](docs/BUILD.md)。
+Extract the scripts from your own legitimate copy, run one command to apply the patches, and the result
+is **byte-for-byte identical** to the author's (the build checks this every time). The steps are in
+[`docs/BUILD.md`](docs/BUILD.md).
 
-## 自己编译
+## Building it yourself
 
 ```powershell
-# 1. 用自己那份游戏解包出原版脚本（需要 gdre_tools v2.6.4）
-# 2. 打补丁
+# 1. Extract the vanilla scripts from your own copy of the game (needs gdre_tools v2.6.4)
+# 2. Apply the patches
 powershell -ExecutionPolicy Bypass -File tools\apply_patches.ps1
-# 3. 编译
+# 3. Compile
 powershell -ExecutionPolicy Bypass -File tools\build.ps1 -CompileOnly
-# 4. 出安装器
+# 4. Build the installer
 powershell -ExecutionPolicy Bypass -File tools\build_installer.ps1
-# 5.（可选，只有走 MPML 备选装法才需要）出 MPML 包
+# 5. (Optional, only for the alternative MPML install) build the MPML package
 powershell -ExecutionPolicy Bypass -File tools\build_mpml_mod.ps1
 ```
 
-细节、前置条件和常见报错见 [`docs/BUILD.md`](docs/BUILD.md)。
-游戏出新版本后怎么迁，见 [`docs/UPDATING.md`](docs/UPDATING.md)。
+Details, prerequisites and common errors are in [`docs/BUILD.md`](docs/BUILD.md).
+How to move to a new game version is in [`docs/UPDATING.md`](docs/UPDATING.md).
 
-## 红线（本项目的自我约束）
+## Ground rules (what this project won't do)
 
-- **只服务正版。** 不做任何让盗版联机的东西。
-- **不分发游戏原始资产。** 不发美术、音频、场景、完整脚本、数据包。
-- 不碰游戏 exe、不碰 Steam 相关的 dll、不改成就逻辑、不动任何与付费/授权相关的东西。
+- **Legitimate copies only.** Nothing that lets pirated copies play online.
+- **No redistribution of the game's original assets.** No art, audio, scenes, complete scripts or data packs.
+- Never touches the game exe or any Steam dll, never changes achievement logic, and never touches anything to do with purchases or licensing.
 
-## 授权与声明
+## License and disclaimer
 
-代码授权见 [`LICENSE`](LICENSE)（MIT，覆盖本仓库中我们自己写的部分）。
+See [`LICENSE`](LICENSE) for the code license (MIT, covering the parts of this repository we wrote).
 
-本 mod 是**非官方**的第三方修改，与游戏的开发商、发行商无任何关系，未获其背书。
-游戏本身的代码与资产版权归其权利人所有。
+This mod is an **unofficial** third-party modification. It has no connection with the game's developer or
+publisher and isn't endorsed by them. Copyright in the game's own code and assets belongs to its owners.
 
-出了任何问题，请先 `--uninstall` 还原成原版再向游戏官方反馈 ——
-**不要拿装了 mod 的状态去给官方报 bug。**
+If anything goes wrong, first `--uninstall` to restore vanilla, then report it to the game's developers —
+**don't report bugs to them while the mod is installed.**
 
-如果权利人希望本仓库下架，请在 Issues 里提出，会配合处理。
+If the rights holders want this repository taken down, please say so in Issues and it will be handled.

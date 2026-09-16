@@ -81,7 +81,7 @@ Not changed:
 | Part | What it does | Runs on |
 | --- | --- | --- |
 | [`patches/`](patches) — 54 unified diffs | Changes to the game's own decompiled GDScript. They raise the player cap from 4 to 8 and rework 15 minigames. 19,442 added lines, 397 removed vanilla lines. | Inside the game, on every player's machine, with full engine privileges |
-| [`installer/Installer.cs`](installer/Installer.cs) | Single-file .NET Framework 4 program, built as console `overtime_install.exe` and WinForms `overtime_launcher.exe`. Holds the compiled `.gdc` files as embedded resources and patches `Machine Party.pck` in place. | Player's PC |
+| [`installer/Installer.cs`](installer/Installer.cs) | Single-file .NET Framework 4 program, built as console `overtime_install.exe` and WinForms `overtime_launcher.exe`. Reads the compiled `.gdc` files from `overtime_scripts.dat` next to the exe, checks them against an embedded SHA256 manifest, and patches `Machine Party.pck` in place. | Player's PC |
 | [`mpml/overtime/`](mpml/overtime) | Alternative install through MachinePartyModLoader. Mounts a zip of the same 54 `.gdc` files over `res://` during the loader's `_init`. | Inside the game |
 | [`tools/`](tools) | PowerShell build chain: `git apply` → gdre_tools compile → PCK pack → `csc.exe` installer build → Godot headless MPML package | Builder's PC |
 
@@ -188,7 +188,7 @@ act, turn server-only calls into `@rpc("authority")`, and bound or `is_finite()`
 
 ### F4 — Release binaries can't be verified against the source (Medium)
 
-- **Opaque payload.** The gameplay code inside `overtime_launcher.exe` and the MPML zip is compiled
+- **Opaque payload.** The gameplay code shipped with `overtime_launcher.exe` and in the MPML zip is compiled
   GDScript bytecode, which can do anything the engine can.
 - **No proof of origin.** The exe is unsigned and builds aren't reproducible, so the README's SHA256
   values only prove a download matches the author's upload.
@@ -355,8 +355,10 @@ specifiers, escapes, indentation, diff prefixes, line counts, BOMs and line endi
   `StartsWith` check (`Installer.cs:981`, `:986`).
 - **Log tags renamed:** `[MP8-投票]` and `[MP8-重开]` are now `[MP8-VOTE]` and `[MP8-RESTART]`.
 
-**What wasn't translated.** `README.md`, `docs/BUILD.md`, `docs/UPDATING.md`, `docs/MINIGAMES.md` and
-`installer/README.md` are still Chinese or bilingual. `docs/MINIGAMES.en.md` already existed.
+**Documentation.** `README.md`, `installer/README.md` (shipped in the release zip), `docs/BUILD.md` and
+`docs/UPDATING.md` are now English only. Their changelog entries use the English text upstream already
+wrote, and anything that only existed in Chinese was translated. `docs/MINIGAMES.md` was removed in favour
+of the existing `docs/MINIGAMES.en.md`.
 
 ---
 
@@ -368,17 +370,32 @@ The build chain was hardened so an exe built from this repository can be checked
 - **[`tools/trust.psm1`](tools/trust.psm1)** is a new shared module. It hashes files, checks Authenticode
   publishers, enforces pinned tool hashes, vets patches, and reads exe resources without running the exe.
 - **[`apply_patches.ps1`](tools/apply_patches.ps1)** rejects any patch that isn't a plain edit of its own
-  target file before `git apply` sees it. It then writes a stamp of every patch, source and output hash.
+  target file before `git apply` sees it. It stops git from finding the surrounding repository, which made it
+  silently skip every patch, and fails if any output still matches its source. It then writes a stamp of every
+  patch, source and output hash.
 - **[`build.ps1`](tools/build.ps1)** requires `gdre_tools.exe` to match `tools/pins/gdre_tools.sha256`
   and `patch\` to match its stamp, then records a compile stamp.
 - **[`build_installer.ps1`](tools/build_installer.ps1)**:
   - requires a valid Microsoft signature on `csc.exe`
+  - requires `FileVersion` in `Installer.cs` to match `ReleaseNum`, so the exe's version info can't go stale
   - checks the whole stamp chain by hash, replacing a timestamp check that an edited `.gdc` could pass
   - stages resources in a fresh random folder and quotes compiler paths
-  - reads each finished exe back to prove it embeds exactly the staged payload
+  - ships the scripts in `overtime_scripts.dat` instead of inside the exe, see below
+  - reads each finished exe back to prove it embeds exactly the staged manifest, and that the manifest accepts the shipped data file
   - writes `BUILDINFO.json` (shipped in the zip) and `SHA256SUMS.txt`
 - **[`tools/verify_exe.ps1`](tools/verify_exe.ps1)** reports `IDENTICAL`, `MATCH`, `PAYLOAD ONLY`,
-  `MISMATCH` or `INCONSISTENT RECORD`.
+  `MISMATCH` or `INCONSISTENT RECORD`. It checks `overtime_scripts.dat` against the exe's own manifest,
+  and still understands the schema 1 records of builds that embedded their scripts.
+
+**Scripts moved out of the exe.** The first 1.7-en launcher was blocked by Windows Defender as
+`Trojan:Win32/Wacatac.B!ml` and flagged by 27 of 70 engines on VirusTotal, almost all generic or
+machine-learning verdicts. The 54 `.gdc` files are zstd-compressed by Godot, so the ~715 KB embedded in the
+~754 KB exe gave its code section an entropy of 7.94 out of 8, which looks like a packed payload.
+They now ship next to the exe in `overtime_scripts.dat`. The exe embeds only a manifest of each script's
+offset, size and SHA256, and [`LoadPatches`](installer/Installer.cs) refuses a data file with a wrong hash,
+a gap, an overlap or trailing bytes. The launcher shrank to 63 KB with a code-section entropy of 5.31.
+A missing or mismatched data file gets its own state, where switching back to vanilla still works and
+installing stops before anything is touched.
 
 **What was tested and what wasn't:**
 - **Tested:**
@@ -386,9 +403,13 @@ The build chain was hardened so an exe built from this repository can be checked
     reading, normalized hashing with timestamp, checksum, MVID and signature noise, and real edits.
   - The Microsoft signer check, pin enforcement, and rejection of seven crafted hostile patches.
   - `verify_exe.ps1`'s five verdicts. All scripts pass PowerShell's parser.
-- **Not tested:** the full build chain, which would mean compiling. In particular, whether two compiles
-  of `Installer.cs` produce equal normalized hashes, and whether GDRE Tools compiles deterministically,
-  are still unconfirmed.
+  - `build_installer.ps1` end to end, then `verify_exe.ps1` against the new build, a flipped byte, a trailing
+    byte, a missing data file, and the old embedded 1.7-en exe with its schema 1 record.
+  - The console build's `--status` against a real game install with the data file present, missing and
+    tampered. With it present, an install made by the old embedded exe is recognised as installed.
+- **Not tested:** whether two compiles of `Installer.cs` produce equal normalized hashes, and whether GDRE
+  Tools compiles deterministically, are still unconfirmed. The window build's new state was compiled but not
+  clicked through.
 
 ---
 

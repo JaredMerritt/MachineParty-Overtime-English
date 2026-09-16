@@ -1,87 +1,98 @@
-# 游戏出新版本之后怎么迁
+# Moving to a new game version
 
-这份是给「想自己把 mod 迁到新游戏版本」的人看的，也是作者自己的操作手册。
-v2.1.1 → v2.1.2 那次是照这个流程实战走通的。
+This is for anyone who wants to move the mod to a new game version themselves, and it's also the
+author's own runbook. The v2.1.1 → v2.1.2 update was done by following it.
 
-## 为什么游戏一更新 mod 就必须重打
+## Why the mod has to be rebuilt after every game update
 
-不是「保险起见」，是硬性的：游戏两个联机后端都会拿客户端报上来的
-`game_version` 和自己的比对，不一致直接拒绝入房。
-所以在旧基线上打出来的 mod，连不上任何用当前零售版的人 —— 必须在新基线上重打。
+It isn't "just to be safe", it's a hard requirement. Both of the game's multiplayer backends compare
+the `game_version` a client reports with their own and refuse entry to the lobby if they differ. A mod
+built on the old baseline can't connect to anyone running the current retail version, so it has to be
+rebuilt on the new baseline.
 
-安装器也会拦：它内嵌了原版 PCK 的 SHA256 与字节数，对不上就**拒装且不动你的文件**。
+The installer blocks it too. It embeds the vanilla PCK's SHA256 and size, and if they don't match it
+**refuses to install and leaves your files alone**.
 
-## 流程
+## Process
 
-### 1. 先搞清楚上游动了什么，别盲目重打
+### 1. Find out what upstream changed first, don't rebuild blindly
 
-把新旧两个 PCK 里每个文件的 md5 各 dump 一份再 diff。
+Dump the md5 of every file in both the old and new PCK, then diff them.
 
-> ⚠️ **别跳过 `res://.godot/`**：编译后的场景（`.scn`）藏在 `res://.godot/exported/` 下面，
-> 跳了就会漏看场景改动，容易得出「场景没变」的错误结论。
+> ⚠️ **Don't skip `res://.godot/`**: compiled scenes (`.scn`) live under `res://.godot/exported/`.
+> Skip it and you'll miss scene changes and wrongly conclude "the scenes didn't change".
 
-### 2. 看我们改的那 51 个脚本在不在改动清单里
+### 2. Check whether any of the 54 scripts we change are on the changed list
 
-- **不在** → 补丁大概率原样可用，走第 3 步。
-- **在** → 上游对那个文件的改动必须合进补丁，否则打上去等于把作者的修复回退掉。
+- **None are** → the patches will most likely work as they are. Go to step 3.
+- **Some are** → upstream's changes to those files have to be merged into the patches. Otherwise
+  applying them would roll back the developer's fixes.
 
-### 3. 重新解包 `src\`，重新打补丁
+### 3. Extract `src\` again and reapply the patches
 
 ```powershell
-tools\gdre\gdre_tools.exe --headless --recover="<新游戏目录>\Machine Party.pck" --output="src"
+tools\gdre\gdre_tools.exe --headless --recover="<new game folder>\Machine Party.pck" --output="src"
 powershell -ExecutionPolicy Bypass -File tools\apply_patches.ps1 -Force
 ```
 
-打不上的那些就是有冲突的文件，手工合。
+The patches that fail are the files with conflicts. Merge those by hand.
 
-### 4. 更新安装器里的版本指纹（三行）
+### 4. Update the version fingerprint in the installer (three lines)
 
-`installer/Installer.cs` 顶部：
+At the top of `Core` in `installer/Installer.cs`:
 
 ```csharp
-const string GameVersion  = "v2.1.2";
-const string VanillaSha   = "326CC398…3DFA8E";
-const long   VanillaSize  = 634798100L;
+public const string GameVersion = "v2.1.2";
+public const string VanillaSha  = "326CC398…3DFA8E";
+public const long   VanillaSize = 634798100L;
 ```
 
-三行必须同时改成**新版原版 PCK** 的值，否则会拿旧补丁去打新包。
+All three have to change together to the values of the **new vanilla PCK**, or old patches get applied
+to a new pack.
 
-新哈希这么取（对一份**没装过任何 mod** 的包）：
+Get the new values like this (from a pack with **no mod installed**):
 
 ```powershell
-Get-FileHash "<游戏目录>\Machine Party.pck" -Algorithm SHA256
-(Get-Item "<游戏目录>\Machine Party.pck").Length
+Get-FileHash "<game folder>\Machine Party.pck" -Algorithm SHA256
+(Get-Item "<game folder>\Machine Party.pck").Length
 ```
 
-### 5. 抬 mod 版本号
+### 5. Bump the mod version
 
-`patch/modules/multiplayer/network_manager.gd` 里的 `MP8_VERSION_TAG`。
+`MP8_VERSION_TAG` in `patch/modules/multiplayer/network_manager.gd`.
 
-> 代码里到处是 `MP8_` / `_mp8_` 前缀 —— 那是本项目的**内部代号**，
-> 早于「Overtime」这个名字。它们是不对外的标识符，刻意没有跟着改名：
-> 全库 3,446 处横跨 37 个已验证文件，改它们是纯风险、零收益。
+> The code is full of `MP8_` / `_mp8_` prefixes. That's the project's **internal code name**, which
+> predates the name "Overtime". They're internal identifiers and were deliberately not renamed. There
+> are thousands of them across dozens of verified files, so renaming them would be pure risk for no gain.
 
-它是**唯一**的版本号来源：安装器包名、内嵌版本、联机握手全从这里读。
+It's the **only** source of the mod version: the version the installer embeds and the multiplayer
+handshake both read it from here.
 
-> ⚠️ 改它会让**装了旧版的人进不了新版的房**。这是有意的设计（版本不一致会在半局中间
-> 以很难查的方式出问题），但也意味着**发新版要通知所有人一起更新**。
+The launcher's own release number is separate. It's `ReleaseNum` in `installer/Installer.cs`, with its
+numeric `FileVersion` right below it, and it names the `dist\` folder and the release zip.
+`build_installer.ps1` refuses to build if the two don't agree.
 
-### 6. 重新编译、出包
+> ⚠️ Changing `MP8_VERSION_TAG` means **people on the old version can't join lobbies on the new one**.
+> This is deliberate (mismatched versions fail mid-match in ways that are very hard to diagnose), but
+> it also means **a new release has to be announced so everyone updates together**.
+
+### 6. Recompile and package
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\build.ps1 -CompileOnly
 powershell -ExecutionPolicy Bypass -File tools\build_installer.ps1
 ```
 
-### 7. 实机验一遍再发
+### 7. Test it in the real game before releasing
 
-至少确认：主菜单版本号带 `+overtime`、能建房、大厅显示 8 席、进得去小游戏。
-理想是跑一局 5 人以上的真人局。
+At the very least, confirm the main menu version ends with `+overtime`, you can create a lobby, the
+lobby shows 8 seats, and minigames load. Ideally, play a real match with 5 or more people.
 
-## 如果游戏结构大改
+## If the game's structure changes a lot
 
-上面假设的是「小版本更新，脚本基本没动」。要是作者重构了某个小游戏，
-对应的补丁就得重写而不是合并 —— 那等于把那个小游戏的 8 人适配重做一遍。
+Everything above assumes a minor update where the scripts barely changed. If the developer rewrote a
+minigame, its patch has to be rewritten rather than merged, which means redoing that minigame's
+8-player adaptation.
 
-判断方法：`apply_patches.ps1` 报冲突的文件数。个位数是合并，
-半数以上打不上就是重构，做好重写的准备。
+How to tell: count the files `apply_patches.ps1` reports conflicts in. A handful means merging. If
+more than half fail to apply, it's a rewrite, so be ready to redo them.

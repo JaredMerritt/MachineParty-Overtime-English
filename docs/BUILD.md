@@ -1,147 +1,169 @@
-# 自己编译 Overtime
+# Building Overtime yourself
 
-从零编译出与 Release 里那个 `overtime_install.exe` 等价的安装器。全程在 Windows 上跑。
+Build an installer equivalent to the `overtime_install.exe` in a release, from scratch. Everything runs on Windows.
 
-## 为什么需要这一步
+## Why this step is needed
 
-本仓库公开的是**差异补丁**（`patches/*.patch`），不是完整脚本 ——
-完整脚本里绝大部分是游戏自己的反编译源码，我们不分发它（见 README 的红线一节）。
+This repository publishes **diffs** (`patches/*.patch`), not complete scripts. Most of a complete
+script is the game's own decompiled source, which we don't distribute (see the ground rules section
+of the README).
 
-所以构建的第一步是：**你用自己那份正版游戏解包出原版脚本**，补丁再打在它上面。
-打完的结果与作者本机**逐字节相同**（作者出包时每次都会自动验证这一点）。
+So the first build step is **extracting the vanilla scripts from your own legitimate copy of the
+game** and applying the patches on top. The result is **byte-for-byte identical** to the author's
+(the author's build checks this automatically every time).
 
-## 前置
+## Prerequisites
 
-| 需要 | 说明 |
+| Needed | Notes |
 | --- | --- |
-| 正版 Machine Party **v2.1.2**（Steam）| 版本必须对得上，否则补丁打不上 |
-| `git` | 用 `git apply` 打补丁 |
-| GDRE Tools（gdsdecomp）**v2.6.4** Windows 版 | 解包与编译 GDScript 字节码。去它的 GitHub Releases 页下载，解压到 `tools\gdre\`，确保有 `tools\gdre\gdre_tools.exe` |
-| PowerShell 5.1 | Win10/11 自带 |
-| .NET Framework 4 的 `csc.exe` | Win10/11 自带（`C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`），**不需要装 SDK** |
+| Legitimate Machine Party **v2.1.2** (Steam) | The version must match, or the patches won't apply |
+| `git` | Patches are applied with `git apply` |
+| GDRE Tools (gdsdecomp) **v2.6.4**, Windows build | Extracts and compiles GDScript bytecode. Download it from its GitHub Releases page and extract it to `tools\gdre\`, so that `tools\gdre\gdre_tools.exe` exists. Pin it once as described in `tools\pins\README.md` |
+| PowerShell 5.1 | Included with Windows 10 and 11 |
+| .NET Framework 4 `csc.exe` | Included with Windows 10 and 11 (`C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`), **no SDK needed** |
 
-> ⚠️ **gdre 版本必须是 v2.6.4。** 不同版本的反编译结果会有出入，行号一对不上，
-> 补丁就打不上了。
+> ⚠️ **gdre must be v2.6.4.** Different versions decompile slightly differently, and once the line
+> numbers don't match the patches won't apply.
 
-## 步骤
+## Steps
 
-### 1. 解包出原版脚本
+### 1. Extract the vanilla scripts
 
-游戏目录 = Steam 里右键游戏 → 管理 → 浏览本地文件。
+The game folder is Steam → right click the game → Manage → Browse local files.
 
 ```powershell
-tools\gdre\gdre_tools.exe --headless --recover="<游戏目录>\Machine Party.pck" --output="src"
+tools\gdre\gdre_tools.exe --headless --recover="<game folder>\Machine Party.pck" --output="src"
 ```
 
-跑完 `src\` 下应该有 `modules\multiplayer\network_manager.gd` 之类的文件。
+Afterwards `src\` should contain files such as `modules\multiplayer\network_manager.gd`.
 
-> `src\` 与 `patch\` 都在 `.gitignore` 里 —— 它们含游戏源码，**不要提交**。
+> `src\` and `patch\` are both in `.gitignore`. They contain game source, so **don't commit them**.
 
-### 2. 打补丁
+### 2. Apply the patches
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\apply_patches.ps1
 ```
 
-54 个全部成功才算过。有失败的话脚本会告诉你是「游戏版本不对」还是「gdre 版本不对」。
+It only passes if all 54 apply. If any fail, the script tells you whether the game version or the
+gdre version is wrong.
 
-### 3. 编译成字节码
+### 3. Compile to bytecode
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\build.ps1 -CompileOnly
 ```
 
-产物落在 `patch_gdc\`。`-CompileOnly` 表示只编译、不去动任何 PCK
-（出安装器只需要字节码，不需要那 605 MB 的数据包）。
+Output goes to `patch_gdc\`. `-CompileOnly` means compile only, without touching any PCK (building the
+installer only needs the bytecode, not the 605 MB data pack).
 
-### 4. 出安装器
+### 4. Build the installer
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\build_installer.ps1
 ```
 
-产物在 `dist\overtime-<版本>\`，两个 exe 各约 645 KB，补丁字节码全部内嵌：
+Output goes to `dist\overtime-<version>\`. The two exes are about 60 KB each. All patch bytecode goes
+next to them in `overtime_scripts.dat` (about 700 KB). The exe only embeds a manifest with each
+script's SHA256, and refuses a data file that doesn't match:
 
-| 文件 | csc 参数 | 进发布包吗 |
+| File | csc arguments | In the release zip? |
 | --- | --- | --- |
-| `overtime_launcher.exe` | `/target:winexe /define:GUI`（窗口版）| ✅ **发布包里只有它** |
-| `overtime_install.exe` | `/target:exe`（控制台版，同一份源码的另一个 `Main`）| ❌ 自己排查/脚本化安装用 |
+| `overtime_launcher.exe` | `/target:winexe /define:GUI` (window version) | ✅ **The only program in the release** |
+| `overtime_scripts.dat` | — (every `.gdc` back to back, in manifest order) | ✅ Must be in the same folder as the launcher |
+| `overtime_install.exe` | `/target:exe` (console version, a different `Main` in the same source) | ❌ For your own troubleshooting and scripted installs |
 
-同时还会打出 `Machine-Party-Overtime-<版本>.zip` —— 里面就是启动器 + README，
-**那个 zip 才是发给玩家的东西**。控制台版留在目录里供开发使用，别放进发布。
+It also builds `Machine-Party-Overtime-<version>.zip`, holding the launcher, `overtime_scripts.dat`,
+the README and `BUILDINFO.json`. **That zip is what goes to players.** The console version stays in the
+folder for development. Don't put it in a release.
 
-脚本带两道自检：产物目录里只允许 `.exe` / `.md`，且任一 exe 超过 5 MB 直接报错停下
-—— 那是「混进了游戏资产」的信号。
+> Why the scripts are no longer embedded: about 700 KB of compressed bytecode made up 93% of the exe,
+> giving it near-random entropy, and antivirus machine learning read it as a packed payload (the
+> original 1.7-en was `Wacatac.B!ml` on Defender and 27/70 on VirusTotal). With the scripts split out,
+> the exe's code section entropy dropped from 7.94 to 5.31.
 
-> 编译带 `/codepage:65001`：源码是无 BOM 的 UTF-8，中文字面量全靠它。
-> 本机的 csc 能自己认出来，但换台机器未必。
+The script has two self-checks. The output folder may only hold `.exe`, `.md`, `.zip`, `.json` and
+`.txt` files plus `overtime_scripts.dat`, and any exe or data file over 5 MB stops the build. Either
+one is a sign that game assets got mixed in.
 
-### 5.（可选）出 MPML 备选安装包
+> Compiling uses `/codepage:65001` because the source is UTF-8 without a BOM, and its non-ASCII
+> literals (dashes, arrows, check marks) depend on it. The local csc detects it on its own, but
+> another machine might not.
 
-只有想走 **MachinePartyModLoader 备选装法**（跟 MachineParty+、第一人称等共存那条路，
-见 README 的「跟 mod loader 的关系」）才需要这一步。主推的 `.exe` 路线到第 4 步就完了。
+For checking a built exe, see [`VERIFYING.md`](VERIFYING.md).
 
-**额外前置**：Godot 4 编辑器版可执行文件（本项目用 4.7.2）。这一步用它跑一段脚本，
-不用它打开工程。
+### 5. (Optional) Build the alternative MPML package
+
+Only needed for the **alternative MachinePartyModLoader install** (the route that coexists with
+MachineParty+, first person and similar mods, see "Mod loaders and the alternative MPML install" in the
+README). The recommended `.exe` route ends at step 4.
+
+**Extra prerequisite**: a Godot 4 editor executable (this project uses 4.7.2). This step uses it to run
+a script, not to open the project.
 
 ```powershell
-# 默认找 Steam 版 Godot；装在别处就用 -Godot 指过去，或设 $env:GODOT
+# Looks for the Steam build of Godot by default. If yours is elsewhere, point -Godot at it or set $env:GODOT
 powershell -ExecutionPolicy Bypass -File tools\build_mpml_mod.ps1 -Godot "D:\Godot\godot.exe"
 ```
 
-产物在 `dist\mpml\`：
+Output goes to `dist\mpml\`:
 
-| 文件 | 是什么 |
+| File | What it is |
 | --- | --- |
-| `overtime\mod.json` | 加载器读的清单（id / 版本 / 入口） |
-| `overtime\main.gd` | **适配层，本仓库里可以逐行读的那个文件**。它不 `extends` 任何原版脚本，只在加载器的 `_init()` 窗口里把覆盖包挂进 `res://` |
-| `overtime\vanilla_md5.json` | 54 个**原版**文件的 md5。挂载前逐条核对，游戏一更新就拒绝挂载 |
-| `overtime\overtime_overlay.zip` | 第 3 步编出来的 54 个 `.gdc`，打成资源包 |
-| `Machine-Party-Overtime-<版本>-MPML.zip` | 上面整个 `overtime\` 文件夹，即 Release 里那个附件 |
+| `overtime\mod.json` | The manifest the loader reads (id, version, entry point) |
+| `overtime\main.gd` | **The adapter, the file in this repository you can read line by line.** It doesn't `extends` any vanilla script. It only mounts the overlay into `res://` during the loader's `_init()` |
+| `overtime\vanilla_md5.json` | md5 of the 54 **vanilla** files. Each one is checked before mounting, so a game update makes it refuse to mount |
+| `overtime\overtime_overlay.zip` | The 54 `.gdc` files compiled in step 3, packed as a resource pack |
+| `Machine-Party-Overtime-<version>-MPML.zip` | The whole `overtime\` folder above, which is the release asset |
 
-玩家侧：先自己装 MachinePartyModLoader，再把 zip 里的 `overtime` 文件夹放进游戏的
-`mods` 目录。**我们不打包加载器本身** —— 它的仓库没有 LICENSE，未经作者许可无权再分发。
+For players: install MachinePartyModLoader yourself first, then put the `overtime` folder from the zip
+into the game's `mods` directory. **We don't bundle the loader itself.** Its repository has no LICENSE,
+so we have no right to redistribute it without the author's permission.
 
-> ⚠️ **这一步不是确定性构建，别拿哈希对。**
-> `overtime_overlay.zip` 和外层那个 zip 都会把**打包时间**写进 zip 头，
-> 所以同一份输入连打两次，两个 zip 的 SHA256 就不一样 ——
-> 实测两次构建：zip 逐字节不同，但**里面 94 个条目的内容逐条相同**。
-> 要核对就解开来比内容，或者比 `overtime_overlay.zip` 里那 54 个 `.gdc`
-> 与你第 3 步自己编出来的 `patch_gdc\` 是否一致。
-> （`.exe` 那条路同理：csc 每次编出来的二进制也带时间戳。
-> README 里那几行 SHA256 是给**校验你下载到的那一份**用的，
-> 不是"自己编一遍应该得到同一个哈希"的意思。）
+> ⚠️ **This step isn't a deterministic build, so don't compare hashes.**
+> `overtime_overlay.zip` and the outer zip both write the **packing time** into their zip headers, so
+> building the same input twice gives two zips with different SHA256s. In a test of two builds, the
+> zips differed byte for byte, but **the contents of all 94 entries were identical**. To check a build,
+> extract it and compare the contents, or compare the 54 `.gdc` files in `overtime_overlay.zip` with the
+> `patch_gdc\` you compiled yourself in step 3.
+> (The same goes for the `.exe` route, since csc also stamps a timestamp into every binary. The SHA256
+> lines in the README are for **checking the copy you downloaded**, not a promise that building it
+> yourself gives the same hash. `tools\verify_exe.ps1` can compare an exe's code and scripts while
+> ignoring those timestamps.)
 
-## 可选：本地测试台
+## Optional: local test bench
 
-想在不动自己 Steam 安装的前提下试跑，把游戏目录整个拷贝一份到 `game_test\`，
-再把原版数据包留一份副本叫 `Machine Party.pck.orig`，然后**不带** `-CompileOnly` 跑：
+To try a build without touching your Steam install, copy the whole game folder to `game_test\`, keep a
+copy of the vanilla data pack named `Machine Party.pck.orig`, then run **without** `-CompileOnly`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\build.ps1
 ```
 
-它会从 `.orig` 打出一个新 PCK 换上去。**永远从 `.orig` 打，不要在已经打过的包上叠。**
+It builds a new PCK from `.orig` and swaps it in. **Always build from `.orig`, never on top of a pack
+that's already patched.**
 
-## 常见报错
+## Common errors
 
-**`apply_patches.ps1` 说「在 src\ 里找不到」**
-游戏版本不是 v2.1.2。等 mod 出适配版本，或按 [`UPDATING.md`](UPDATING.md) 自己迁。
+**`apply_patches.ps1` says a file can't be found in src\**
+The game isn't v2.1.2. Wait for a mod release that supports it, or migrate it yourself following
+[`UPDATING.md`](UPDATING.md).
 
-**`apply_patches.ps1` 说「补丁打不上」**
-多半是 gdre 不是 v2.6.4。
+**`apply_patches.ps1` says patches failed to apply**
+Most likely gdre isn't v2.6.4.
 
-**打出来的文件每行都多一个字节 / 与作者的产物哈希对不上**
-是 git 的 `core.autocrlf` 把 LF 换成了 CRLF。`apply_patches.ps1` 已经用
-`-c core.autocrlf=false -c core.eol=lf` 强制关掉了；如果你是手动 `git apply` 的，
-记得自己带上这两个参数。
+**Every line of the output has an extra byte / hashes don't match the author's output**
+git's `core.autocrlf` turned LF into CRLF. `apply_patches.ps1` already forces it off with
+`-c core.autocrlf=false -c core.eol=lf`. If you ran `git apply` by hand, add those two options yourself.
 
-**`build.ps1` 说「patch\ 下有同名脚本」**
-gdre 的 `--output` 只认目录、不保留层级，两个不同目录下的同名 `.gd` 会互相覆盖。
-正常情况下不会遇到（现有 54 个文件基名互不冲突）；你自己加文件时才可能撞上。
+**`build.ps1` reports a base name collision in patch\**
+gdre's `--output` only takes a folder and drops the hierarchy, so two `.gd` files with the same name in
+different folders overwrite each other. You won't normally hit this (the current 54 files all have
+different base names). It can only happen if you add files yourself.
 
-**`build_mpml_mod.ps1` 说「缺少：…godot…exe」**
-找不到 Godot。用 `-Godot "<你的 godot.exe>"` 指过去，或先设 `$env:GODOT`。
+**`build_mpml_mod.ps1` says Godot is missing**
+It can't find Godot. Point `-Godot "<your godot.exe>"` at it, or set `$env:GODOT` first.
 
-**`build_installer.ps1` 说找不到 `csc.exe`**
-路径写死在脚本第 18 行。极老的系统或裁剪过的镜像可能没有 .NET Framework 4。
+**`build_installer.ps1` can't find `csc.exe`**
+The path is hard-coded near the top of the script, in `$csc`. Very old systems or stripped-down images
+may not have .NET Framework 4.

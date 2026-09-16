@@ -59,13 +59,31 @@ if (Test-Path $Out) {
     else { throw "$Out already exists. Re-run with -Force once you are sure it can be overwritten." }
 }
 New-Item -ItemType Directory -Force $Out | Out-Null
+$Out = (Resolve-Path $Out).Path
+
+# Inside a git work tree, git apply reads patch paths from the repo root and silently skips every file outside
+# the current folder, still exiting 0. The default patch\ is inside this repo, so git is kept from looking above
+# the output folder, then asked to confirm it can't see a repository.
+$oldCeiling = $env:GIT_CEILING_DIRECTORIES
+$env:GIT_CEILING_DIRECTORIES = Split-Path -Parent $Out
+Push-Location $Out
+$ErrorActionPreference = "Continue"
+git rev-parse --git-dir 2>&1 | Out-Null
+$seesRepo = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = "Stop"
+Pop-Location
+if ($seesRepo) {
+    $env:GIT_CEILING_DIRECTORIES = $oldCeiling
+    throw "git still sees a repository from $Out, so git apply would skip files. Pass an -Out folder that isn't a git repository."
+}
 
 Write-Host "Applying patches: $($list.Count)"
 
-$missing = @()
-$failed  = @()
-$ok      = 0
-$usedSrc = @{}
+$missing   = @()
+$failed    = @()
+$unchanged = @()
+$ok        = 0
+$usedSrc   = @{}
 
 foreach ($p in $list) {
     # patches\modules\multiplayer\network_manager.gd.patch
@@ -84,13 +102,20 @@ foreach ($p in $list) {
     # ⚠️ Both -c flags are required. If local git has core.autocrlf on (common with a default Windows install),
     #    apply writes every LF as CRLF, adding one byte per line. It still compiles, but the output no longer
     #    matches the author's and any byte-level check fails. The author hit this exact problem locally.
+    # Continue keeps git's error text on a failed patch from stopping the script before the report below
     Push-Location $Out
+    $ErrorActionPreference = "Continue"
     git -c core.autocrlf=false -c core.eol=lf apply --whitespace=nowarn "$($p.FullName)" 2>&1 | Out-Null
     $code = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
     Pop-Location
 
-    if ($code -ne 0) { $failed += $rel } else { $ok++ }
+    # A file that still matches its source was skipped, whatever the exit code says
+    if ($code -ne 0) { $failed += $rel }
+    elseif ((Get-FileSha256 $dest) -eq $usedSrc[$rel.Replace('\', '/')]) { $unchanged += $rel }
+    else { $ok++ }
 }
+$env:GIT_CEILING_DIRECTORIES = $oldCeiling
 
 Write-Host ""
 if ($missing.Count -gt 0) {
@@ -106,7 +131,12 @@ if ($failed.Count -gt 0) {
     Write-Host "  ① The gdre used for unpacking is not v2.6.4 (decompiled output differs, so line numbers don't match)." -ForegroundColor Yellow
     Write-Host "  ② The game is not v2.1.2." -ForegroundColor Yellow
 }
-if ($missing.Count -gt 0 -or $failed.Count -gt 0) {
+if ($unchanged.Count -gt 0) {
+    Write-Host "These patches ran but changed nothing ($($unchanged.Count)):" -ForegroundColor Red
+    foreach ($x in $unchanged) { Write-Host "    $x" -ForegroundColor Red }
+    Write-Host "→ git skipped them. This happens when git finds a repository around the output folder." -ForegroundColor Yellow
+}
+if ($missing.Count -gt 0 -or $failed.Count -gt 0 -or $unchanged.Count -gt 0) {
     throw "Not all patches applied: $ok succeeded out of $($list.Count)"
 }
 

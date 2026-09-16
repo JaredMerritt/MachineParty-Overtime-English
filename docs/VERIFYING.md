@@ -10,9 +10,9 @@ step refuses to continue if anything changed in between.
 
 | Step | Script | What it checks | What it records |
 | --- | --- | --- | --- |
-| 1. Apply patches | `tools\apply_patches.ps1` | Every patch is a plain text edit of exactly the file it's named after. No new, deleted, renamed, symlinked or binary files, no path traversal. | `patch\.overtime-stamp.json`: git commit and dirty state, hashes of every patch, every vanilla source used and every patched script |
+| 1. Apply patches | `tools\apply_patches.ps1` | Every patch is a plain text edit of exactly the file it's named after, and must actually change that file. No new, deleted, renamed, symlinked or binary files, no path traversal. | `patch\.overtime-stamp.json`: git commit and dirty state, hashes of every patch, every vanilla source used and every patched script |
 | 2. Compile scripts | `tools\build.ps1 -CompileOnly` | `gdre_tools.exe` matches `tools\pins\gdre_tools.sha256`. `patch\` and `patches\` still match the step 1 stamp. | `patch_gdc\.overtime-stamp.json`: hash of the step 1 stamp, the gdre hash, and the hash of every source and compiled `.gdc` |
-| 3. Build the exe | `tools\build_installer.ps1` | `MP8_DEV_TOOLS` is `false` in `network_manager.gd` (`-DevBuild` overrides that for local test builds only). `csc.exe` has a valid Microsoft signature. Every script and `.gdc` matches the step 2 stamp, which chains back to the step 1 stamp. After compiling, each exe is read back and must embed exactly the staged payload. | `BUILDINFO.json` (shipped inside the zip, including `dev_tools`) and `SHA256SUMS.txt` |
+| 3. Build the exe | `tools\build_installer.ps1` | `MP8_DEV_TOOLS` is `false` in `network_manager.gd` (`-DevBuild` overrides that for local test builds only). `csc.exe` has a valid Microsoft signature. Every script and `.gdc` matches the step 2 stamp, which chains back to the step 1 stamp. After compiling, each exe is read back. It must embed exactly the staged manifest and version, and that manifest must accept the shipped `overtime_scripts.dat` byte for byte. | `BUILDINFO.json` (shipped inside the zip, including `dev_tools`) and `SHA256SUMS.txt` |
 | 4. Verify | `tools\verify_exe.ps1` | Compares any exe with a `BUILDINFO.json` or with your own build | — |
 
 `BUILDINFO.json` holds:
@@ -20,7 +20,8 @@ step refuses to continue if anything changed in between.
 - **Source:** the git commit and whether uncommitted changes were present.
 - **Tools:** the compiler's version, hash and signer, and the pinned gdre hash.
 - **Input hashes:** `Installer.cs` and every patch.
-- **Payload:** the hash and `res://` path of every embedded script.
+- **Payload:** the hash of `overtime_scripts.dat` and of the embedded manifest, plus the `res://` path,
+  offset, size and hash of every script in the data file.
 - **Output hashes:** the plain and normalized hash of each exe.
 
 Before the first build you need to pin GDRE Tools once. See `tools\pins\README.md`.
@@ -41,20 +42,26 @@ Against an exe you built yourself from the same commit:
 powershell -ExecutionPolicy Bypass -File tools\verify_exe.ps1 -Exe their\overtime_launcher.exe -Reference dist\overtime-1.6\overtime_launcher.exe
 ```
 
+`overtime_scripts.dat` is read from the exe's folder. Pass `-Scripts <path>` if it's somewhere else.
+Builds up to the first 1.7-en embedded every script inside the exe and have no data file. Their
+schema 1 `BUILDINFO.json` records still verify the same way as before.
+
 | Result | Meaning | Exit code |
 | --- | --- | --- |
 | `IDENTICAL` | Byte-for-byte the same file | 0 |
-| `MATCH` | Same installer code and the same embedded game scripts. Only compile timestamps and the random module id differ | 0 |
+| `MATCH` | Same installer code and the same game scripts. Only compile timestamps and the random module id differ | 0 |
 | `PAYLOAD ONLY` | Same game scripts, but the installer program differs, for example because a different `csc.exe` version built it. **The installer code is not verified** | 2 |
-| `MISMATCH` | The embedded game scripts are different. Don't run it | 1 |
+| `MISMATCH` | The game scripts are different, in the exe's manifest or in `overtime_scripts.dat`. Don't run it | 1 |
 | `INCONSISTENT RECORD` | The file hash matches the record but its payload doesn't, so the record itself can't be trusted | 1 |
 
 ### How the exe is read without running it
 
 - **Hashes:** the file hash and the normalized hash are computed from raw bytes.
-- **Embedded scripts:** these are read by loading the exe "reflection-only" from a byte array, inside a
-  separate PowerShell process. The .NET runtime parses its metadata but can't execute any code from a
-  reflection-only assembly.
+- **Manifest:** the exe's embedded resources are read by loading it "reflection-only" from a byte array,
+  inside a separate PowerShell process. The .NET runtime parses its metadata but can't execute any code
+  from a reflection-only assembly.
+- **Scripts:** `overtime_scripts.dat` is then checked against that manifest the same way the launcher
+  checks it. Every script must sit at its listed offset with its listed SHA256, and no byte may be left over.
 
 ### The normalized hash
 
@@ -76,7 +83,8 @@ twice and the normalized hashes differ, please report it. `verify_exe.ps1` will 
 ## What this does and doesn't prove
 
 It proves:
-- The embedded game scripts in a verified exe are byte-for-byte the ones in the build record, or in your own build.
+- The game scripts a verified exe will install are byte-for-byte the ones in the build record, or in your own build.
+  The launcher refuses any `overtime_scripts.dat` that doesn't match its embedded manifest.
 - A build record can't claim inputs that its build steps didn't actually see, as long as nobody edits the stamps by hand.
 - A tampered patch, a swapped `gdre_tools.exe`, an edited intermediate file or an unsigned `csc.exe` stops the build.
 
@@ -94,7 +102,8 @@ It doesn't prove:
 ## Further steps worth considering
 
 - **Code signing.** The exe is still unsigned, so Windows SmartScreen and antivirus heuristics will
-  keep warning. Low-cost options include Azure Trusted Signing (paid monthly) and SignPath's free
+  keep warning. Moving the scripts out of the exe removed the biggest trigger, a near-random 700 KB blob
+  that made machine-learning scanners read the launcher as packed. Low-cost options include Azure Trusted Signing (paid monthly) and SignPath's free
   program for open-source projects. SignPath expects builds to run in CI, which isn't possible here,
   because the build needs the game's own files.
 - **A deterministic compiler.** Building with the Roslyn compiler from the .NET SDK and `/deterministic`
