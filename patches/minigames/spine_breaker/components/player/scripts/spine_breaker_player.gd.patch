@@ -6,23 +6,23 @@ diff --git a/minigames/spine_breaker/components/player/scripts/spine_breaker_pla
  var spine_breaker_device: SpineBreakerDevice
  
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 两台机器上场后必须记住「现在背着我的是哪一台」（2026-08-17）
++# [MP8] With two devices in play, the player must remember "which device is on my back right now" (2026-08-17)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 原版 `spine_breaker_device` 是 setup_rpc() 时写死的**那一台**（场景里的 Device）。
-+# 一台机器时它永远是对的；两台一上场，三处会错位：
-+#   ① throw_spine_breaker_rpc()：背着 2 号机的人按扔 → 扔的是 1 号机
-+#      → 自己背的甩不掉，反而把另一台遥控走了；
-+#   ② break_spine_rpc()：死亡结算调错那台的 set_spine_broken_rpc；
-+#   ③ _process 的闪烁同步：读错那台的 light_animation_player.speed_scale
-+#      → 引信节奏显示的是另一台的，玩家判断不了自己还有多久炸。
++# In vanilla, `spine_breaker_device` is hard-set to **that one device** (the Device in the scene) during setup_rpc().
++# With one device it's always correct. Once two devices are in play, three places get it wrong.
++#   ① throw_spine_breaker_rpc() — the player carrying device 2 presses throw → device 1 gets thrown
++#      → they can't shake off their own and remotely send the other one away instead.
++#   ② break_spine_rpc() — death handling calls set_spine_broken_rpc on the wrong device.
++#   ③ The blink sync in _process — reads light_animation_player.speed_scale from the wrong device
++#      → the fuse rhythm shown belongs to the other device, so the player can't tell how long until they blow up.
 +#
-+# 由机器在 attach 时通过 mp8_bind_rpc 自报家门（call_local，所以每个客户端都设得上；
-+# 光靠服务器的 attached_to 反查不行，状态机只在服务器转，客户端那份是空的）。
++# The device identifies itself via mp8_bind_rpc on attach (call_local, so it gets set on every client —
++# looking it up from the server's attached_to alone doesn't work, since the state machine only runs on the server and the client's copy is empty).
 +var mp8_current_device: SpineBreakerDevice = null
 +
-+# [MP8] 染过色的面：[[MeshInstance3D, 面号, 染之前那个面上的覆盖材质], ...]
-+# 记"之前是什么"而不是"清成 null"，见 mp8_set_visual_tint 里的理由。
++# [MP8] Tinted surfaces, as [[MeshInstance3D, surface index, override material on that surface before tinting], ...]
++# Records "what it was before" rather than "clearing to null". See mp8_set_visual_tint for the reasoning.
 +var _mp8_tinted: Array = []
 +
  var kicking: bool = false
@@ -33,45 +33,45 @@ diff --git a/minigames/spine_breaker/components/player/scripts/spine_breaker_pla
  signal emit_died(network_id)
  
 +
-+# [MP8] 把背上那台机器的视觉染成 c（Color.WHITE = 恢复原色）。
++# [MP8] Tint the device visual on the player's back to c (Color.WHITE = restore the original color).
 +#
-+# 为什么非要有这个：**你背上看到的那台不是装置本体**。装置 attach 的那一刻就
-+# `visible = false` 并被挪到地下 100 米（attach_entered_rpc），背上这个是玩家场景
-+# 自己的 `spine_breaker_visual`，是另一套网格 —— 所以给装置本体染的红色，
-+# 一被抱住就"没了"（用户 2026-08-17 实测）。这里给背上这套单独染一次。
++# Why this is needed at all — **the device you see on your back isn't the device itself**. The moment the device attaches it
++# sets `visible = false` and gets moved 100 m underground (attach_entered_rpc). The one on your back is the player scene's
++# own `spine_breaker_visual`, a separate set of meshes — so the red tint applied to the device itself
++# "disappears" as soon as it grabs someone (user tested in practice on 2026-08-17). This tints the set on the back separately.
 +#
-+# 同样走 set_surface_override_material（节点级、每个玩家各一份），
-+# 不碰材质资源本身 —— 理由见小游戏脚本里 _mp8_tint_device 那段。
-+# ⚠️⚠️ 这个函数前后错了**两版**，把教训写死在这儿：
++# It also uses set_surface_override_material (node level, one copy per player)
++# and doesn't touch the material resource itself — see the _mp8_tint_device section in the minigame script for why.
++# ⚠️⚠️ This function was wrong in **two versions** in a row, so the lessons are written down here for good.
 +#
-+#   第一版：走 `spine_breaker_visual.find_children(...)` —— 一个面都没染到。
-+#     `find_children()` **只找后代、不含自身**，而 `spine_breaker_visual` 自己就是
-+#     MeshInstance3D；且它的面 0 材质是 null，又被"必须是 StandardMaterial3D"挡掉。
++#   The first version used `spine_breaker_visual.find_children(...)` — it didn't tint a single surface.
++#     `find_children()` **only searches descendants, not the node itself**, and `spine_breaker_visual` is itself a
++#     MeshInstance3D. On top of that its surface 0 material is null, which was also filtered out by "must be StandardMaterial3D".
 +#
-+#   第二版：修好上面两条，日志如实打出 `染色 1 面` —— **画面还是没变**。
-+#     因为染对了节点、染错了对象：`spine_breaker_visual`（SpineBreakerAttached）
-+#     根本不是画面上显示的那台。玩家背上真正看得见的机器，是
-+#     `set_spinebreaker_visuals()` 用 `skeleton_attached.set_bone_pose_scale(34, ...)`
-+#     从 0 撑到 1 的那根骨头 —— 属于**另一套骨骼**
-+#     （`Visuals/main character spinebreaker attached`）的 character mesh 的**面 3**。
++#   The second version fixed both of those, and the log faithfully printed `tinted 1 surface` — **but nothing changed on screen**.
++#     It tinted the right node but the wrong object. `spine_breaker_visual` (SpineBreakerAttached)
++#     isn't the device shown on screen at all. The device actually visible on the player's back is
++#     the bone that `set_spinebreaker_visuals()` scales from 0 to 1 with `skeleton_attached.set_bone_pose_scale(34, ...)`
++#     — it belongs to **a different skeleton**
++#     (`Visuals/main character spinebreaker attached`), and is **surface 3** of its character mesh.
 +#
-+# ⭐⭐ 两次的共同教训：**"我改到了"和"玩家看到了"是两回事。**
-+#    日志说染了 1 个面是真的，只是那个面没人看。验收必须落到画面上。
++# ⭐⭐ The shared lesson from both — **"I changed it" and "the player can see it" are two different things.**
++#    The log saying it tinted 1 surface was true, it's just that nobody ever sees that surface. Verification has to happen on screen.
 +#
-+# 现在的认法（probe46 查的，不猜下标）：**按贴图名匹配**。
-+# 机器那个面和装置本体用的是同名贴图，只是各自模型目录下的一份拷贝：
-+#     装置本体   spinebreaker single2**_spinebreaker base1.png**
-+#     玩家 面3   character spinebreaker attached1**_spinebreaker base1.png**
-+#     角色皮肤   ..._main character painted6 / hands boots / eye open   ← 匹配不上
-+# 所以拿"最后一个下划线之后的部分"当钥匙，扫整个 Visuals 子树。
-+# 好处是**背着走和处决动画共用这张网格**，一条规则两处都覆盖。
++# The current approach (found with probe46, no guessing at indices) is **matching by texture name**.
++# The device surface and the device itself use a texture with the same name, each just a copy under its own model folder.
++#     Device itself    spinebreaker single2**_spinebreaker base1.png**
++#     Player surf 3    character spinebreaker attached1**_spinebreaker base1.png**
++#     Character skin   ..._main character painted6 / hands boots / eye open   ← no match
++# So the part "after the last underscore" is used as the key, scanning the whole Visuals subtree.
++# The upside is that **carrying it around and the execution animation share this mesh**, so one rule covers both.
 +#
-+# tex_key 为空 = 不做匹配（退化成"染所有带贴图的面"），只在装置那边取不到贴图时才会发生。
++# Empty tex_key = no matching (falls back to "tint every surface that has a texture"), which only happens when the texture can't be read from the device.
 +func mp8_set_visual_tint(c: Color, tex_key: String = "") -> int :
 +
-+	# 先把上一次染的还原 —— 上一台可能是红的，这一台是白的，得刷得回来。
-+	# 记的是**原来的覆盖材质**而不是一律清 null：角色定制（customization assigner）
-+	# 也可能在这些面上挂过覆盖材质，一律清掉会把玩家配色抹了。
++	# First restore whatever was tinted last time — the previous device may have been red and this one white, so it has to be able to switch back.
++	# It records **the original override material** instead of always clearing to null. Character customization (customization assigner)
++	# may also have put override materials on these surfaces, and clearing them all would wipe the player's colors.
 +	for row in _mp8_tinted:
 +		var old_mi = row[0]
 +		if is_instance_valid(old_mi):
@@ -113,7 +113,7 @@ diff --git a/minigames/spine_breaker/components/player/scripts/spine_breaker_pla
 +	return n
 +
 +
-+# [MP8] 当前背着我的那台；没绑上就退回原版那台（一台机器时两者是同一个）
++# [MP8] The device currently on my back. If none is bound, fall back to the vanilla one (with one device they're the same)
 +func _mp8_dev() -> SpineBreakerDevice :
 +
 +	if mp8_current_device != null and is_instance_valid(mp8_current_device):
@@ -153,25 +153,25 @@ diff --git a/minigames/spine_breaker/components/player/scripts/spine_breaker_pla
  	if not has_spine_breaker:
  		return
  
-+	# ═══════ [MP8] 2026-08-19 修：这道「防止对着墙扔」的检测把人和机器也当成了墙 ═══════
++	# ═══════ [MP8] 2026-08-19 fix — this "don't throw into a wall" check also treated players and devices as walls ═══════
 +	#
-+	# 用户实机报的：「有人站在面前，则无法把碎骨装置丢出」。
++	# Reported by the user from real gameplay — "If someone is standing in front of you, you can't throw the Spine Breaker device."
 +	#
-+	# 根因：`wall_raycast` 在 `_ready()` 里只 `add_exception(self)` —— **只排除了自己**。
-+	# 而活着的玩家就在碰撞层 1 上（死亡时才 `set_collision_layer_value(1, false)`，
-+	# 见本文件 break_spine 那段），碎骨装置也在层 1
-+	# （`spine_breaker_device.gd` 的 `set_collision_layer_value(1, true)`）——
-+	# 正好都是这条射线用来找墙的那一层。
-+	# 于是只要正前方站着人、或躺着一台机器，射线就报碰撞 → 这里直接 return → 扔不出去。
++	# The root cause is that `wall_raycast` only calls `add_exception(self)` in `_ready()` — **it only excludes itself**.
++	# But living players are on collision layer 1 (`set_collision_layer_value(1, false)` only runs on death,
++	# see the break_spine section in this file), and the Spine Breaker device is on layer 1 too
++	# (`set_collision_layer_value(1, true)` in `spine_breaker_device.gd`) —
++	# which is exactly the layer this ray uses to find walls.
++	# So whenever someone is standing right in front, or a device is lying there, the ray reports a hit → this returns right away → the throw never happens.
 +	#
-+	# 顺带印证了报告的细节：**尸体不挡**，因为死亡时已经被移出层 1。
++	# This also matches a detail in the report. **Corpses don't block**, because they're removed from layer 1 on death.
 +	#
-+	# 原版就有这个 bug（`src/` 里是同一行），但 4 人时场地相对空、很少正对着人站；
-+	# 8 人挤在同样大的场地里，正对着人是高频事件，所以到 8 人才显形。
++	# Vanilla has this bug too (same line in `src/`), but with 4 players the arena is fairly empty and you rarely end up facing someone.
++	# With 8 players packed into the same size arena, facing someone happens all the time, so it only shows up at 8 players.
 +	#
-+	# 改成看**撞到的是什么**：只有真墙才拦，人和机器一律放行。
-+	# ⚠️ RayCast3D 只报最近的那一个碰撞体，所以「人背后紧贴着墙」时这里会放行。
-+	#    这是有意的取舍 —— 宁可偶尔扔到墙上，也不要出现「扔不出去」这种完全卡死的手感。
++	# Now it checks **what it hit**. Only real walls block, and players and devices are always let through.
++	# ⚠️ RayCast3D only reports the nearest collider, so when "someone is standing right up against a wall" this lets the throw through.
++	#    This is a deliberate trade-off — better to occasionally throw into a wall than to get a completely stuck "can't throw" feel.
  	if wall_raycast.is_colliding():
 -		return
 +		var wall_hit = wall_raycast.get_collider()
@@ -216,8 +216,8 @@ diff --git a/minigames/spine_breaker/components/player/scripts/spine_breaker_pla
  	spine_breaker_visual.visible = _has_spine_breaker
  	has_spine_breaker = _has_spine_breaker
  
-+	# [MP8] 机器离身（被扔走 / 复位）就把绑定解掉，免得下一次按扔还去遥控上一台；
-+	# 背上那套视觉的染色也一并还原，否则下次被**白色那台**抱住还是红的
++	# [MP8] When the device leaves the body (thrown away / reset), clear the binding so the next throw press doesn't remote-control the previous device.
++	# Also restore the tint on the back visual, otherwise getting grabbed by **the white device** next time would still look red
 +	if not _has_spine_breaker:
 +		mp8_current_device = null
 +		mp8_set_visual_tint(Color.WHITE)
@@ -252,28 +252,28 @@ diff --git a/minigames/spine_breaker/components/player/scripts/spine_breaker_pla
  
  	await get_tree().create_timer(0.5, false).timeout
  
-+	# [MP8] ⚠️⚠️ **必须在 spine_broken.emit() 之前取这台机器**，取晚了拿到的一定是错的那台。
++	# [MP8] ⚠️⚠️ **Grab this device before spine_broken.emit()**. Grab it too late and it is guaranteed to be the wrong one.
 +	#
-+	# emit 会**同步**走进 break_spine_state._on_spine_broken()，那里发的
-+	# set_spine_breaker_rpc(false) 是 call_local 的 —— 当场就把 mp8_current_device 清成 null。
-+	# 于是 emit 之后再问"谁背着我"，_mp8_dev() 只能退回原版写死的 spine_breaker_device，
-+	# 也就是**永远是 1 号机**。
++	# emit **synchronously** runs into break_spine_state._on_spine_broken(), and the
++	# set_spine_breaker_rpc(false) sent there is call_local — it clears mp8_current_device to null on the spot.
++	# So if we ask "who's on my back" after emit, _mp8_dev() can only fall back to vanilla's hard-set spine_breaker_device,
++	# which is **always device 1**.
 +	#
-+	# 后果正是用户 2026-08-17 实测看到的那一幕：**2 号机杀的人，把 1 号机也拽到这具尸体上**
-+	# —— set_spine_broken_rpc 干的事是「global_position = 传进去的坐标 + 重新打开碰撞层」，
-+	# 于是两台机器叠在同一个点，被物理挤开，一台飞出去。
-+	# 用户的判断（"下来的位置是被杀伤的人的实体坐标"）就是这条：传的正是尸体的 global_position。
++	# The consequence is exactly what the user saw in testing on 2026-08-17 — **someone killed by device 2 drags device 1 onto the corpse too**
++	# — what set_spine_broken_rpc does is "global_position = the passed-in position + re-enable the collision layer",
++	# so the two devices overlap at the same point, physics pushes them apart, and one goes flying.
++	# The user's read ("where it comes down is the killed person's body position") is exactly this. What gets passed in is the corpse's global_position.
 +	#
-+	# ⭐ 判据：**拿"当前绑定"去做事之前，先查这中间有没有谁把绑定清掉了。**
-+	# 上一轮修的是"写死第一台"这个表面，但取值时机在清空**之后** —— 等于没修，
-+	# 而且因为写法看着是对的（`_mp8_dev()` 就在那儿），复查时极容易被跳过去。
++	# ⭐ Rule — **before acting on "the current binding", first check whether anything in between has cleared it.**
++	# The previous round fixed the surface problem of "hard-setting the first device", but the value was still read **after** it was cleared — as good as not fixed,
++	# and because the code looks right (`_mp8_dev()` is right there), it's very easy to skip past during review.
 +	var dev: SpineBreakerDevice = _mp8_dev()
 +
-+	# 绊线：任何一台机器 attach 时都会 mp8_bind_rpc 自报家门（含 1 号机），
-+	# 所以死的时候没绑定 = 绑定链断了，退回来的那台**很可能不是杀我的那台** ——
-+	# 这条一旦打出来，上面那个"两台叠一起"的老毛病就会原样复现。
++	# Tripwire. Every device calls mp8_bind_rpc to identify itself on attach (device 1 included),
++	# so no binding at death = the binding chain broke, and the device we fall back to **is quite likely not the one that killed me** —
++	# if this ever prints, the old "two devices stacked together" problem above will come right back.
 +	if multiplayer.is_server() and mp8_current_device == null:
-+		print("[MP8] 碎骨者：⚠️ %s 死了却没有绑定机器 —— 退回 setup 时那台，复位可能挪错机器" % String(name))
++		print("[MP8] Spine Breaker: ⚠️ %s died but has no bound device — falling back to the one from setup, the reset may move the wrong device" % String(name))
 +
  	spine_broken.emit()
  
@@ -284,14 +284,14 @@ diff --git a/minigames/spine_breaker/components/player/scripts/spine_breaker_pla
  		emit_died.emit(player_presence.network_id)
 -		spine_breaker_device.set_spine_broken_rpc.rpc(global_position)
 +
-+		# [MP8] 退休那台**不复位**：set_spine_broken_rpc 会把它重新显形、重开碰撞、
-+		# 挪到尸体坐标 —— 那正好把"钉在他身上不下来"整个撤销掉。
-+		# （_on_spine_broken 已经为退休那台跳过了全套复位，这里是同一件事的另一条入口，
-+		#  漏掉这条的话退休机器会当场从尸体里冒出来变绿灯。）
++		# [MP8] The retired device **doesn't reset**. set_spine_broken_rpc would make it visible again, re-enable collisions,
++		# and move it to the corpse position — which would completely undo "pinned to him and won't come off".
++		# (_on_spine_broken already skips the full reset for the retired device. This is another entry point for the same thing,
++		#  and without it the retired device would pop out of the corpse on the spot with a green light.)
 +		if dev != null and not dev.mp8_retired:
 +			dev.set_spine_broken_rpc.rpc(global_position)
 +		elif dev != null:
-+			print("[MP8] 碎骨者：%d 号机已退休，跳过尸体复位" % dev.mp8_index)
++			print("[MP8] Spine Breaker: device %d is retired, skipping the corpse reset" % dev.mp8_index)
  
  @rpc("any_peer", "call_local", "reliable")
  func throw_spine_breaker_rpc():
@@ -303,16 +303,16 @@ diff --git a/minigames/spine_breaker/components/player/scripts/spine_breaker_pla
 -			throw_position.global_position, 
 -			- visuals.global_basis.z, 
 -			throw_strength, 
-+		# [MP8] 2026-08-25：只认**真的骑在我身上**的那台，认不出来就**什么都不扔**。
++		# [MP8] 2026-08-25 — only accept the device **actually riding on me**, and if none can be found, **throw nothing**.
 +		var dev: SpineBreakerDevice = _mp8_dev_to_throw()
 +
 +		if dev == null:
-+			print("[MP8] 碎骨者：%s 按扔，但背上确实没有机器 —— 不扔" % String(name))
++			print("[MP8] Spine Breaker: %s pressed throw, but there really is no device on their back — not throwing" % String(name))
 +			return
 +
-+		print("[MP8] 碎骨者：%s 按扔 → %d 号机%s" % [
++		print("[MP8] Spine Breaker: %s pressed throw → device %d%s" % [
 +			String(name), dev.mp8_index,
-+			("" if dev == mp8_current_device else "（⚠️ 绑定链断过，靠 attached_to 找回）")
++			("" if dev == mp8_current_device else " (⚠️ binding chain was broken, recovered via attached_to)")
 +		])
 +		dev.try_throw_rpc.rpc(
 +			throw_position.global_position,
@@ -322,37 +322,37 @@ diff --git a/minigames/spine_breaker/components/player/scripts/spine_breaker_pla
  		)
  
 +
-+# [MP8] ═══ 按扔时该扔哪一台（2026-08-25 用户实机报的 bug）═══
++# [MP8] ═══ Which device to throw when throw is pressed (bug reported by the user from real gameplay on 2026-08-25) ═══
 +#
-+# **原来这里走 `_mp8_dev()`**，它在 `mp8_current_device` 为空时**回退到 setup 时那台** ——
-+# 而那台很可能正骑在**别人**背上、或者已经在空中飞。
++# **This used to go through `_mp8_dev()`**, which **falls back to the device from setup** when `mp8_current_device` is empty —
++# and that device may well be riding on **someone else's** back, or already flying through the air.
 +#
-+# 房主 8-24 那局的实测（`godot.log`，6 人）：全局按扔 **159** 次，其中 **61 次**打在
-+# 没绑定的装置上；deamn 一个人按扔 76 次、空扔 58 次（**76%**），
-+# 伴随 **51 次 `Device: Transition From Thrown to Thrown`** 自转移 ——
-+# 那就是在反复重扔一台**已经在飞**的机器。
++# Measured in the host's 8-24 match (`godot.log`, 6 players). Throw was pressed **159** times across the match, and **61** of those landed on
++# an unbound device. deamn alone pressed throw 76 times, 58 of them empty throws (**76%**),
++# along with **51 `Device: Transition From Thrown to Thrown`** self-transitions —
++# which means a device that was **already in flight** kept getting thrown again.
 +#
-+# ### 为什么会出现「按得下去但服务器这边没绑定」
++# ### Why "the press goes through but the server has no binding" happens
 +#
-+# `has_spine_breaker`（**客机**的按扔门，`update_throwing()` 第一句）与
-+# `mp8_current_device`（**服务器**记的绑定）是**两份分开的状态**，
-+# 由两条**不同的 RPC** 维护：`set_spine_breaker_rpc()` 与 `mp8_bind_rpc()`。
-+# 两者之间只要错开一拍（或者 bind 被后粘的那台覆盖），
-+# 客机就按得下去、而服务器这边是空的。
++# `has_spine_breaker` (the **client's** throw gate, the first line of `update_throwing()`) and
++# `mp8_current_device` (the binding the **server** records) are **two separate pieces of state**,
++# maintained by two **different RPCs**, `set_spine_breaker_rpc()` and `mp8_bind_rpc()`.
++# If the two get out of step by even one beat (or the bind is overwritten by a device that stuck later),
++# the client can press throw while the server side is empty.
 +#
-+# ### 修法：问装置本人，别猜
++# ### The fix — ask the device itself, don't guess
 +#
-+# `attached_to` 是 `attached_state` 在**服务器**上写的权威事实（骑在谁身上）。
-+#   1. 先信 `mp8_current_device`，但**必须** `attached_to == self` 才算数；
-+#   2. 对不上就扫一遍场上的机器，找 `attached_to == self` 的那台；
-+#   3. 都找不到 = 背上真的没有东西 → **不扔**。
++# `attached_to` is the authoritative fact (who it's riding on) written by `attached_state` on the **server**.
++#   1. Trust `mp8_current_device` first, but it **only** counts if `attached_to == self`.
++#   2. If that doesn't match, scan the devices on the field for the one with `attached_to == self`.
++#   3. If neither finds one = there's truly nothing on the back → **don't throw**.
 +#
-+# 顺带把那 51 次自转移也解决了：已经在飞的机器 `attached_to` 是 null，扫不到，自然不会被重扔。
++# This also fixes those 51 self-transitions. A device already in flight has `attached_to` as null, so the scan won't find it and it naturally won't be re-thrown.
 +#
-+# ⚠️ **只能在服务器调**：客机上 `attached_to` 恒为 null
-+#    （装置状态机只在服务器转，见 `spine_breaker_device.gd` 里那段注释）。
-+# ⚠️ `_mp8_dev()` 的回退**保留不动** —— 死亡复位那条路（`break_spine`）还在用它，
-+#    那里回退到 setup 那台是"宁可挪错也别不挪"，与这里的取舍相反。
++# ⚠️ **Only call this on the server**. On clients `attached_to` is always null
++#    (the device state machine only runs on the server, see that comment in `spine_breaker_device.gd`).
++# ⚠️ The fallback in `_mp8_dev()` **is left untouched** — the death reset path (`break_spine`) still uses it,
++#    and there falling back to the setup device means "better to move the wrong one than not move one at all", the opposite trade-off from here.
 +func _mp8_dev_to_throw() -> SpineBreakerDevice :
 +
 +	if mp8_current_device != null and is_instance_valid(mp8_current_device) \

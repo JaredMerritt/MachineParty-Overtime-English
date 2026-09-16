@@ -6,9 +6,9 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/components/player/scripts/chi
  func look_at_rpc(target: ChiselGauntletPlayer.LookAtTarget):
  	if !alive: return
 +
-+	# [MP8] 看巨幕时把相机摆到正对某块屏幕的方位，看完回自己座位（详见文件末尾那一节）。
-+	# 45° 座位的人原本正对的是两块屏之间的**柱子**，两边各半块斜屏，图案根本读不清。
-+	# 原版四个座位算出来的偏移恒为 0 → 这一段对 ≤4 人局是彻底的空操作。
++	# [MP8] When looking at the jumbotron, swing the camera to a bearing facing one screen head-on, then return to your own seat afterwards (details in the section at the end of the file).
++	# Players in 45° seats would otherwise face the **pillar** between two screens, with half a skewed screen on each side, and can't read the pattern at all.
++	# The offset computed for the four vanilla seats is always 0 → this block is a complete no-op for matches with ≤4 players.
 +	match target:
 +		ChiselGauntletPlayer.LookAtTarget.Jumbotron:
 +			_mp8_aim_view(_mp8_view_offset_deg, 1.5)
@@ -35,8 +35,8 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/components/player/scripts/chi
  	global_position = _position
  	global_rotation_degrees = _rotation
  
-+	# [MP8] 座位 = 一个 yaw（本小游戏所有人共用同一个出生点，只靠 yaw 分方位）。
-+	# 记下来给看巨幕时的相机摆位用。
++	# [MP8] Seat = one yaw (everyone in this minigame shares the same spawn point and is told apart only by yaw).
++	# Stored for positioning the camera when looking at the jumbotron.
 +	_mp8_set_seat_yaw(_rotation.y)
 +
  @rpc("any_peer", "call_local", "reliable")
@@ -48,42 +48,42 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/components/player/scripts/chi
  			ach_active = false
 +
 +
-+# [MP8] ============ 45° 座位看巨幕时的相机摆位 ============
++# [MP8] ============ Camera positioning for 45° seats when looking at the jumbotron ============
 +#
-+# 问题（实拍 notes\shots\chisel8_a_memorize_P4.png）：
-+#   巨幕是个四面盒子，四块屏各正对一个原版座位（bravo 0° / alpha 90° /
-+#   charlie 270° / delta 180°），**四个角上是柱子**。
-+#   新增的 45° 座位正对的就是那根柱子 —— 左右各看到半块严重斜视的屏，
-+#   方块被压成菱形。记忆阶段读不清图案 = 直接吃亏，这是功能问题不是难看。
++# The problem (real screenshot notes\shots\chisel8_a_memorize_P4.png)
++#   The jumbotron is a four-sided box, and each of the four screens faces one vanilla seat (bravo 0° / alpha 90° /
++#   charlie 270° / delta 180°), with **pillars on the four corners**.
++#   The new 45° seats face right at one of those pillars — seeing half of a badly skewed screen on each side,
++#   with the squares squashed into diamonds. Not being able to read the pattern in the memorize phase = a direct disadvantage, so this is a functional issue, not a cosmetic one.
 +#
-+# 为什么只能挪相机、不能挪人：
-+#   玩家根节点在场地中心，人是被 ./Visuals 的 (0,-0.037,-8) 偏移推到半径 8 的圆周上的，
-+#   **改 yaw 就是换座位**。真把人转过去就会和原版座位那个人重叠。
-+#   所以身体留在自己座位，只把相机绕场地中心转过去。
++# Why only the camera can move, not the player.
++#   The player root node is at the venue center, and the player is pushed out onto a radius 8 circle by the ./Visuals offset (0,-0.037,-8),
++#   so **changing yaw means changing seats**. Actually rotating the player would overlap them with whoever is in the vanilla seat.
++#   So the body stays in its own seat and only the camera is rotated around the venue center.
 +#
-+# 挂在哪一层（这一步是关键，挂错了完全不生效）：
-+#   相机层级是  .  →  Node3D  →  CameraParent  →  CameraSubParent  →  Camera
-+#   而 `anim_camera` 这个 AnimationPlayer 的 root 就是 **CameraParent**，
-+#   它的轨道每帧写 `.:position` 和 `.:rotation`（rotation.y 恒定 3.14159）。
-+#   → **写 CameraParent 会被动画逐帧盖掉**（逆向行进改 IK 目标白改就是这个坑，T19 弯路 2）。
-+#   `CameraSubParent` 也不行：它和 CameraParent 同原点，转它只改朝向不改位置，
-+#   屏幕只是被摆到画面中央，仍然是斜着看的梯形，不是"正对"。
-+#   → 唯一正确的插入点是 **CameraParent 的父节点 `Node3D`**：动画不碰它，
-+#     而且它在玩家根节点底下，左乘一个 Y 旋转就是绕**场地中心**转，
-+#     相机整个荡到另一个方位去，正对上一块屏。
++# Which level to hook into (this step is key, hooking the wrong level has no effect at all).
++#   The camera hierarchy is  .  →  Node3D  →  CameraParent  →  CameraSubParent  →  Camera
++#   and the root of the `anim_camera` AnimationPlayer is **CameraParent**,
++#   whose tracks write `.:position` and `.:rotation` every frame (rotation.y is constant at 3.14159).
++#   → **writing CameraParent gets overwritten by the animation every frame** (the same pitfall that made the Escalator Pit IK target change useless, T19 detour 2).
++#   `CameraSubParent` doesn't work either. It shares an origin with CameraParent, so rotating it changes only the facing, not the position,
++#   and the screen just gets moved to the middle of the frame, still a skewed trapezoid rather than "head-on".
++#   → the only correct insertion point is **CameraParent's parent `Node3D`**. The animation doesn't touch it,
++#     and since it's under the player root node, left-multiplying a Y rotation rotates around the **venue center**,
++#     swinging the whole camera over to another bearing where it faces a screen head-on.
 +#
-+# 偏移怎么算（自己从 yaw 推，不写死表）：
++# How the offset is computed (derived from yaw, no hardcoded table).
 +#   offset = -(yaw mod 90)
-+#   原版四个 yaw（0/180/90/-90）对 90 取模都是 0 → **偏移恒为 0，≤4 人逐帧与原版一致**；
-+#   四个新座位（45/225/135/-45）取模都是 45 → 一律 -45°，
-+#   各自落到一块**不同**的屏幕正前方（225→180, 45→0, 315→270, 135→90），
-+#   四块屏正好一块一个，不打架。
++#   The four vanilla yaws (0/180/90/-90) are all 0 mod 90 → **the offset is always 0, so ≤4 players match vanilla frame for frame**.
++#   The four new seats (45/225/135/-45) are all 45 mod 90 → all get -45°,
++#   each landing directly in front of a **different** screen (225→180, 45→0, 315→270, 135→90),
++#   exactly one per screen across all four, with no conflicts.
 +
-+## 本座位的 yaw（teleport_rpc 给的）
++## This seat's yaw (given by teleport_rpc)
 +var _mp8_seat_yaw: float = 0.0
-+## 看巨幕时相机要绕场地中心转多少度（原版座位恒为 0）
++## How many degrees the camera rotates around the venue center when looking at the jumbotron (always 0 for vanilla seats)
 +var _mp8_view_offset_deg: float = 0.0
-+## 相机吊臂（CameraParent 的父节点）的原始局部变换，只取一次
++## Original local transform of the camera rig (CameraParent's parent), captured only once
 +var _mp8_rig_rest: Transform3D = Transform3D.IDENTITY
 +var _mp8_rig_rest_taken: bool = false
 +var _mp8_view_tween: Tween
@@ -99,18 +99,18 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/components/player/scripts/chi
 +
 +	_mp8_seat_yaw = yaw_deg
 +
-+	# 相对最近一个"原版方位"（90° 的整数倍）差多少，就往回转多少
++	# Rotate back by however far it is from the nearest "vanilla bearing" (a multiple of 90°)
 +	var within: float = fposmod(yaw_deg, 90.0)
 +	_mp8_view_offset_deg = - within
 +
 +	if not is_zero_approx(_mp8_view_offset_deg):
-+		print("[MP8] 凿刻考验：本机玩家在 %.0f° 座位（非原版方位），看巨幕时相机转 %+.0f°" % [
++		print("[MP8] Chisel Gauntlet: local player is in the %.0f° seat (not a vanilla bearing), camera rotates %+.0f° when looking at the jumbotron" % [
 +			fposmod(yaw_deg, 360.0), _mp8_view_offset_deg
 +		])
 +
 +
-+# 把相机吊臂绕**场地中心**转到 target_deg。左乘旋转 = 绕父节点（玩家根）原点转，
-+# 而玩家根就在场地中心，所以不用知道任何绝对坐标（坑第 8 条）。
++# Rotates the camera rig around the **venue center** to target_deg. Left-multiplying a rotation = rotating around the parent's (player root) origin,
++# and the player root sits at the venue center, so no absolute coordinates are needed (pitfall #8).
 +func _mp8_apply_view_angle(deg: float) -> void :
 +
 +	var rig: Node3D = _mp8_camera_rig()
@@ -123,33 +123,33 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/components/player/scripts/chi
 +	rig.transform = Transform3D(Basis(Vector3.UP, deg_to_rad(deg)), Vector3.ZERO) * _mp8_rig_rest
 +
 +
-+# 转过去。duration > 0 就补间，跟原版那段 1.5 秒的转头动画同步，看起来是一个动作。
++# Turn to it. If duration > 0 it tweens, in sync with vanilla's 1.5-second head-turn animation, so it looks like a single motion.
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 记忆阶段藏掉别的玩家（用户 2026-08-18 真人局反馈）
++# [MP8] Hide other players during the memorize phase (user feedback from a real-player match on 2026-08-18)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# **症状**：看巨幕的记忆阶段，视野里是别人的后脑勺。
++# **Symptom** - during the memorize phase at the jumbotron, the view was filled with the back of someone else's head.
 +#
-+# **根因是上面那套相机摆位的副作用**：巨幕是四面盒子、四块屏各正对一个原版座位，
-+# 四个角是柱子。新增的 45° 座位正对柱子，所以我们把相机**绕场地中心转 -45°**
-+# 去正对一块屏（45→0 / 225→180 / 315→270 / 135→90）。
-+# 转过去之后，相机落点正好是**那块屏对应的原版座位**附近 ——
-+# 而那个座位上真的坐着人。于是"看屏"就是"看他后脑勺"。
++# **The root cause is a side effect of the camera positioning above**. The jumbotron is a four-sided box with each of the four screens facing a vanilla seat,
++# and pillars on the four corners. The new 45° seats face a pillar, so we **rotate the camera -45° around the venue center**
++# to face a screen head-on (45→0 / 225→180 / 315→270 / 135→90).
++# After rotating, the camera ends up right near **the vanilla seat that screen belongs to** —
++# and someone is actually sitting in that seat. So "looking at the screen" means "looking at the back of their head".
 +#
-+# **为什么不改成挪相机躲开**：躲到哪儿都还是斜视那块屏（那正是当初要转过去的原因），
-+# 而且四块屏各自有主，横向躲一点就会开始蹭到隔壁那块。几何上没有既正对又不挡的位置。
++# **Why not move the camera out of the way instead** - wherever it dodges to, it's back to viewing that screen at an angle (the very reason for rotating in the first place),
++# and each of the four screens has its own seat, so dodging sideways even a little starts encroaching on the neighboring one. Geometrically there's no spot that is both head-on and unobstructed.
 +#
-+# **所以直接不画人**：记忆阶段本来就只需要读屏上的图案，别人长什么样毫无信息量。
-+# 藏的是**本机**这一份场景树里其他玩家的第三人称视觉 —— 纯客户端行为，不发 RPC，
-+# 不影响任何判定，别人那边看自己照常。
++# **So the players simply aren't drawn**. The memorize phase only needs the pattern on the screen, and what other players look like carries no information.
++# What gets hidden is other players' third-person visuals in **this machine's** own scene tree — purely client-side, no RPC is sent,
++# it affects no game logic, and what others see on their own machines is unchanged.
 +#
-+# ⚠️ **不碰 setup_local_visuals 那套可见性层**：那套按 `10 + index*2` 分层，
-+# 8 个座位会顶到第 26 层，而 Godot 的 VisualInstance3D 只有 20 层；
-+# 它还写死了 `for i in 4`。那是另一笔账（本 mod 从没动过它，与原版逐字节一致），
-+# 在这里绕开它、直接开关节点的 visible，不去趟那摊浑水。
++# ⚠️ **Don't touch setup_local_visuals's visibility layers**. It assigns layers by `10 + index*2`,
++# so 8 seats would reach layer 26, while Godot's VisualInstance3D only has 20 layers.
++# It also hardcodes `for i in 4`. That's a separate issue (this mod has never touched it, it's byte for byte identical to vanilla),
++# so here we go around it and toggle the nodes' visible directly, rather than wading into that mess.
 +#
-+# ⚠️ 只记录**自己藏过的**，恢复时也只恢复这些：中途被淘汰的人视觉本来就是关的，
-+# 无差别 `visible = true` 会把他们凭空复活回画面里。
++# ⚠️ Only record **what we hid ourselves**, and only restore those. Players eliminated mid-match already have their visuals off,
++# and a blanket `visible = true` would bring them back onto the screen out of nowhere.
 +var _mp8_hidden_others: Array[Node3D] = []
 +
 +
@@ -159,16 +159,16 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/components/player/scripts/chi
 +	return GameManager.local_game or (multiplayer.get_unique_id() == player_presence.network_id)
 +
 +
-+# [MP8] 场上其他玩家实例 —— **不能走 `game_instance.players`**。
++# [MP8] The other player instances in the venue — **must not go through `game_instance.players`**.
 +#
-+# 🩸 2026-08-19 用户 6 人真人局报的：房主视角里人藏掉了，客机视角里照样看得见后脑勺。
-+# 根因：`players` 字典是在 `spawn_players()` 里填的，而 `spawn_players()` 只在
-+# `initialize()` 里调、`initialize()` **只在服务器上跑**（chisel_gauntlet.gd 的
-+# `_ready()` 注释里写死了这一条）。所以客户端那份 `players` **恒为空字典** ——
-+# 循环一次都不进，一个人都藏不掉，而且不报错。
++# 🩸 Reported by the user in a 6-player real match on 2026-08-19 - players were hidden in the host's view, but clients could still see the backs of heads.
++# Root cause - the `players` dictionary is filled in `spawn_players()`, and `spawn_players()` is only
++# called from `initialize()`, and `initialize()` **only runs on the server** (the comment in chisel_gauntlet.gd's
++# `_ready()` states this explicitly). So the client's copy of `players` **is always an empty dictionary** —
++# the loop never runs even once, nobody gets hidden, and no error is reported.
 +#
-+# 玩家实例在**每台机器**上都是 `PlayerSpawnNode` 的子节点（服务器 add_child，
-+# 各端由复制器同步过来），所以直接扫自己的兄弟节点，主客机一视同仁。
++# Player instances are children of `PlayerSpawnNode` on **every machine** (the server calls add_child,
++# and each peer receives them via the replicator), so we just scan our own sibling nodes, which works the same on host and clients.
 +func _mp8_others() -> Array :
 +
 +	var parent: Node = get_parent()
@@ -184,7 +184,7 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/components/player/scripts/chi
 +
 +func _mp8_hide_others(hide_them: bool) -> void :
 +
-+	# 只有"我自己这台机器上的我"才需要管镜头里有什么
++	# Only "me on my own machine" needs to care about what's in the camera view
 +	if not _mp8_is_local_view():
 +		return
 +
@@ -196,19 +196,19 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/components/player/scripts/chi
 +		return
 +
 +	if not _mp8_hidden_others.is_empty():
-+		return  # 已经藏着了，别重复记账
++		return  # Already hidden, don't record them twice
 +
 +	for other in _mp8_others():
 +		if not is_instance_valid(other):
 +			continue
 +		var v: Node3D = other.visuals_third_person
 +		if v == null or not v.visible:
-+			continue          # 已经不可见（淘汰/掉线）→ 不归我管，也不该由我恢复
++			continue          # Already invisible (eliminated/disconnected) → not ours to manage, and not ours to restore
 +		v.visible = false
 +		_mp8_hidden_others.append(v)
 +
 +	if not _mp8_hidden_others.is_empty():
-+		print("[MP8] 凿刻考验：记忆阶段藏掉 %d 个其他玩家的视觉（本机）" % _mp8_hidden_others.size())
++		print("[MP8] Chisel Gauntlet: hid the visuals of %d other players for the memorize phase (local)" % _mp8_hidden_others.size())
 +
 +
 +func _mp8_aim_view(target_deg: float, duration: float) -> void :
@@ -223,7 +223,7 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/components/player/scripts/chi
 +	if _mp8_view_tween != null and _mp8_view_tween.is_valid():
 +		_mp8_view_tween.kill()
 +
-+	# 原版座位偏移恒为 0：这里 from/to 都是 0，补间也是原地不动，行为与原版一致
++	# Vanilla seat offset is always 0. Here from/to are both 0, so the tween doesn't move anything and behavior matches vanilla
 +	var from: float = rad_to_deg((_mp8_rig_rest.affine_inverse() * rig.transform).basis.get_euler().y)
 +	if is_zero_approx(target_deg) and is_zero_approx(from):
 +		return

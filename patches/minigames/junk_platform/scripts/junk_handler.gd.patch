@@ -6,34 +6,34 @@ diff --git a/minigames/junk_platform/scripts/junk_handler.gd b/minigames/junk_pl
  @export var platform_radius: float = 6.0
  
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 2026-08-19：停在平台上不动的残骸要主动回收，否则整局再也不掉石头
++# [MP8] 2026-08-19 — debris resting motionless on the platform must be actively recycled, or no more rocks fall for the rest of the match
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 原版的回收链路**只有一条**：残骸掉出平台 → 撞进 `junk_catcher` 这个 Area3D
-+# → `_on_catcher_body_entered()` → `reset_rpc()` + 塞回 `caught_junk` 池。
-+# 平台**没有**回收，压缩机也没有（两边都不碰 reset_rpc / caught_junk）。
++# Vanilla has **only one** recycle path. Debris falls off the platform → hits the `junk_catcher` Area3D
++# → `_on_catcher_body_entered()` → `reset_rpc()` + goes back into the `caught_junk` pool.
++# The platform does **not** recycle, and neither does the compactor (neither one touches reset_rpc / caught_junk).
 +#
-+# 于是停在平台上、再也不掉下去的那些残骸**永久退出流通**：
-+#   `_on_timer_timeout()` 取实例的顺序是「先掏 caught_junk，池空了才新建，
-+#    而新建又卡着 counter < max_junk」——
-+#   `counter` 只增不减，一旦 40 个全在平台上躺着，
-+#   `junk_instance` 每个 tick 都是 null，**一块石头都不再掉**，这一局就废了。
++# So debris that comes to rest on the platform and never falls off is **permanently out of circulation**.
++#   `_on_timer_timeout()` picks instances in this order, "drain caught_junk first, only create new ones once the pool is empty,
++#    and creating new ones is capped by counter < max_junk" —
++#   `counter` only ever goes up. Once all 40 are lying on the platform,
++#   `junk_instance` is null on every tick, **not a single rock falls again**, and the match is ruined.
 +#
-+# ⚠️ 8 人局比原版严重得多：掉落点是**每人一个**（`add_spawn_point` 每个玩家一次），
-+# 一个 tick 就投 8 块，而间隔还从 3.0 秒一路压到 1.0 秒 ——
-+# 40 块的池子十几秒就见底。原版 4 人是这个速度的一半，且平台更空、更容易掉下去。
++# ⚠️ 8-player matches are far worse than vanilla. There is **one drop point per player** (`add_spawn_point` runs once per player),
++# so a single tick drops 8 pieces, and the interval is also squeezed from 3.0 s all the way down to 1.0 s —
++# a 40-piece pool runs dry in a dozen or so seconds. Vanilla 4-player runs at half this rate, and its platform is emptier so debris falls off more easily.
 +#
-+# 修法：服务器每物理帧给每块**在场且没人拿着**的残骸记「静止了多久」，
-+# 超过 mp8_stuck_recycle_time 就走和回收区**完全同一条路**（reset_rpc + 进池），
-+# 下一个 tick 它就会被重新投放。池子恢复流通，counter 不用动。
++# The fix is that the server tracks "how long it has been still" every physics frame for each piece that is **in play and not held by anyone**.
++# Past mp8_stuck_recycle_time it takes **exactly the same path** as the catcher area (reset_rpc + into the pool),
++# and it gets dropped again on the next tick. The pool circulates again and counter is left alone.
 +#
-+# [MP8] 2026-08-24 用户定：60 → 30 秒。
-+# 机制后果：平台上静止残骸的周转快一倍 —— 池子回流更快（后半局更不容易变稀），
-+# 平台上的堆积也清得更勤。代价是玩家搁在地上不动的残骸 30 秒就会被收走
-+#（举在手里的不算，下面 held_by 那条排除仍然生效）。
++# [MP8] 2026-08-24 the user decided 60 → 30 seconds.
++# Mechanical consequence — still debris on the platform turns over twice as fast. The pool refills faster (less likely to thin out late in the match),
++# and pile-ups on the platform are cleared more often. The cost is that debris a player leaves sitting on the ground is taken after 30 seconds
++# (debris held in hand doesn't count, the held_by exclusion below still applies).
 +@export var mp8_stuck_recycle_time: float = 30.0
-+# 判「没动」的速度阈值（米/秒）。静止刚体会被 Godot 挂起，速度就是 0；
-+# 给一点余量是为了容忍物理抖动。慢慢滚动的（速度高于此值）不算卡住，计时归零。
++# Speed threshold (m/s) for "not moving". Godot puts resting rigid bodies to sleep, so their speed is 0.
++# A little headroom tolerates physics jitter. Anything rolling slowly (faster than this) isn't stuck and its timer resets to zero.
 +@export var mp8_stuck_speed_threshold: float = 0.15
 +
  @export_category("Nodes")
@@ -43,10 +43,10 @@ diff --git a/minigames/junk_platform/scripts/junk_handler.gd b/minigames/junk_pl
  var caught_junk: Array[JunkCubeRigidbody]
  var elapsed: float = 0.0
  
-+# [MP8] 每块残骸「已经静止了多少秒」，键与 junk_instances 同一套下标。
-+# 只有服务器读写（回收判定整个都在服务器侧，客户端拿到的是广播下来的变换）。
++# [MP8] How many seconds each piece of debris "has been still", keyed by the same indices as junk_instances.
++# Only the server reads or writes this (recycle decisions happen entirely server-side, clients get the broadcast transforms).
 +var mp8_idle_time: Dictionary[int, float] = {}
-+# 本局主动回收了几块，只为日志
++# How many pieces were actively recycled this match, for logging only
 +var mp8_stuck_recycled: int = 0
 +
  func _ready() -> void :
@@ -56,9 +56,9 @@ diff --git a/minigames/junk_platform/scripts/junk_handler.gd b/minigames/junk_pl
  	if active:
  		elapsed += _delta
  
-+	# [MP8] 2026-08-19：先做卡死回收，再拍变换快照 ——
-+	# 顺序有意如此：这一帧被回收掉的残骸 reset_rpc 之后 active 就是 false，
-+	# 下面那个快照循环正好会把它跳过，不会再把 UP*999 那个位置广播出去。
++	# [MP8] 2026-08-19 — recycle stuck debris first, then take the transform snapshot —
++	# the order is intentional. Debris recycled this frame has active set to false by reset_rpc,
++	# so the snapshot loop below skips it and never broadcasts that UP*999 position.
 +	_mp8_recycle_stuck_junk(_delta)
 +
  	var data: Dictionary[int, Transform3D]
@@ -68,24 +68,24 @@ diff --git a/minigames/junk_platform/scripts/junk_handler.gd b/minigames/junk_pl
  
  	updata_junk_positions_rpc.rpc(data)
  
-+# [MP8] 2026-08-25：暂停落石必须是**处理器自己的状态**，不能只靠「把计时器停掉」。
++# [MP8] 2026-08-25 — pausing rock drops must be **the handler's own state**, it can't rely only on "stopping the timer".
 +#
-+# 老写法只在 junk_platform._mp8_apply_junk_speed() 里 `timer.stop()`，
-+# 而下面 set_active(true) 是**无条件** `timer.start()` —— 新一轮一开始
-+# （或处理器被重新激活），暂停就被悄悄撤销了，而 HUD 还显示着「暂停落石」。
-+# 这就是「暂停保证全局生效」缺的那一块：状态得留在被控对象身上。
++# The old code only did `timer.stop()` in junk_platform._mp8_apply_junk_speed(),
++# but set_active(true) below does an **unconditional** `timer.start()` — as soon as a new round starts
++# (or the handler is reactivated), the pause is silently undone while the HUD still shows "drops paused".
++# That was the missing piece of "the pause is guaranteed to apply everywhere". The state has to live on the object being controlled.
 +var mp8_paused: bool = false
 +
 +
  func set_active(_active: bool):
  	active = _active
 +
-+	# [MP8] 开打/停打都把静止计时清干净，免得跨阶段累加（见 _mp8_recycle_stuck_junk）
++	# [MP8] Clear the idle timers both when play starts and when it stops, so they don't carry over between phases (see _mp8_recycle_stuck_junk)
 +	mp8_idle_time.clear()
  	if active:
 +		mp8_stuck_recycled = 0
 +
-+	# [MP8] 暂停期间**不许**在这里把计时器重新点着（见 mp8_paused 上面那段）。
++	# [MP8] While paused, this **must not** restart the timer (see the block above mp8_paused).
 +	if active and not mp8_paused:
  		timer.start(spawn_interval)
  
@@ -95,9 +95,9 @@ diff --git a/minigames/junk_platform/scripts/junk_handler.gd b/minigames/junk_pl
  
  func _on_timer_timeout():
 +
-+	# [MP8] 兜底：正常情况下暂停时计时器是停的、根本不会走到这儿；
-+	# 但只要有任何一条路把它重新点着（历史上就是 set_active 干的），这里也不放行。
-+	# 注意**直接 return、不重排计时器** —— 重排等于自己把暂停解除了。
++	# [MP8] Safety net. Normally the timer is stopped while paused and we never get here.
++	# But if any path restarts it (historically that was set_active), this still won't let it through.
++	# Note it **returns directly and does not reschedule the timer** — rescheduling would lift the pause on its own.
 +	if mp8_paused:
 +		return
 +
@@ -110,14 +110,14 @@ diff --git a/minigames/junk_platform/scripts/junk_handler.gd b/minigames/junk_pl
  		caught_junk.append(body)
 +
 +
-+# ═══════ [MP8] 2026-08-19：卡在平台上不动的残骸，超时主动回收 ═══════
++# ═══════ [MP8] 2026-08-19 — actively recycle debris stuck motionless on the platform after a timeout ═══════
 +#
-+# 只在服务器跑（调用点 `_physics_process` 开头就 `is_server()` 早退了）。
-+# 理由与整条链路见文件顶部 mp8_stuck_recycle_time 的大段注释。
++# Server only (the call site at the top of `_physics_process` already returns early via `is_server()`).
++# For the reasoning and the full chain, see the long comment on mp8_stuck_recycle_time at the top of the file.
 +func _mp8_recycle_stuck_junk(delta: float) -> void :
 +
-+	# 不在游玩中就不计时：回合间/结算时残骸静止是正常的，
-+	# 不清零的话下一轮一开局就会有一批被误判成"卡了一分钟"。
++	# Don't count time when not in play. Debris sitting still between rounds or during results is normal,
++	# and without clearing, a batch would be misjudged as "stuck for a minute" right at the start of the next round.
 +	if not active:
 +		mp8_idle_time.clear()
 +		return
@@ -130,19 +130,19 @@ diff --git a/minigames/junk_platform/scripts/junk_handler.gd b/minigames/junk_pl
 +			mp8_idle_time.erase(k)
 +			continue
 +
-+		# 已经在池子里（或还没投放）—— reset_rpc 会把 active 置 false。
-+		# 这一条同时也让"刚被回收区收走的"自动跳过，不会被重复塞进池子。
++		# Already in the pool (or not dropped yet) — reset_rpc sets active to false.
++		# This check also automatically skips pieces "just taken by the catcher area", so they never get pushed into the pool twice.
 +		if not junk.active:
 +			mp8_idle_time[k] = 0.0
 +			continue
 +
-+		# 被玩家举在手上不算卡住：那是有人在用它（举着时 freeze=true、速度恒为 0，
-+		# 不排除的话举一分钟就会在手里凭空消失）。
++		# Being held by a player doesn't count as stuck, someone is using it (while held, freeze=true and speed is always 0,
++		# so without this exclusion it would vanish from their hands after being held for a minute).
 +		if junk.held_by:
 +			mp8_idle_time[k] = 0.0
 +			continue
 +
-+		# 还在动（掉落中 / 被扔出去 / 慢慢滚）—— 计时归零。
++		# Still moving (falling / thrown / rolling slowly) — reset the timer to zero.
 +		if junk.linear_velocity.length() > mp8_stuck_speed_threshold:
 +			mp8_idle_time[k] = 0.0
 +			continue
@@ -153,11 +153,11 @@ diff --git a/minigames/junk_platform/scripts/junk_handler.gd b/minigames/junk_pl
 +			mp8_idle_time[k] = idle
 +			continue
 +
-+		# 超时：走**和回收区完全同一条路**，下一个 tick 就会被重新投放。
++		# Timed out. Take **exactly the same path as the catcher area**, and it gets dropped again on the next tick.
 +		mp8_idle_time[k] = 0.0
 +		junk.reset_rpc.rpc()
 +		caught_junk.append(junk)
 +
 +		mp8_stuck_recycled += 1
-+		print("[MP8] 残骸平台：#%d 静止超过 %.0f 秒，主动回收（本局第 %d 块，池中 %d）" % [
++		print("[MP8] Junk Platform: #%d still for over %.0f s, actively recycled (piece %d this match, %d in pool)" % [
 +			k, mp8_stuck_recycle_time, mp8_stuck_recycled, caught_junk.size()])

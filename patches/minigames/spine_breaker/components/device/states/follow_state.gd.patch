@@ -6,19 +6,19 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
  var elapsed: float = 0.0
  
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 卡住 → 侧向绕行（2026-08-17，用户实测"被抱住的人可以卡另一个机体的位置"）
++# [MP8] Stuck → sidestep around (2026-08-17, user tested in practice "a grabbed player can block another device in place")
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# **为什么两台机器才会出这个问题**：一个人背上 A 之后 `has_spine_breaker = true`，
-+# B 的 `_mp8_can_take()` 就把他否掉了 —— B **既抓不了他、又推不开他**，
-+# 于是他可以拿身体把 B 顶在原地。原版只有一台，撞上就是被抓，卡不成僵局。
++# **Why this only happens with two devices** — once a player has A on their back, `has_spine_breaker = true`,
++# and B's `_mp8_can_take()` rules them out — B **can neither grab them nor push them away**,
++# so they can use their body to pin B in place. Vanilla only has one device, so bumping into it means getting grabbed and there's no deadlock.
 +#
-+# **为什么不能靠"重新寻路"**：NavigationAgent3D 走的是导航网格，
-+# 网格里根本没有玩家和另一台机器这些动态刚体 —— 重算多少次都是同一条路，
-+# 撞的还是同一个人。所以真正管用的是**贴着障碍侧移一段**，绕过去再接回原路。
-+const MP8_STUCK_RATIO: float = 0.35   # 实际位移 < 意图位移的这个比例 = 正被挡着
-+const MP8_STUCK_SECS: float = 0.5     # 连续挡这么久才判定卡住（避免蹭一下就绕）
-+const MP8_DODGE_SECS: float = 0.8     # 一次绕行走多久
++# **Why "re-pathing" can't fix it** — NavigationAgent3D follows the navigation mesh,
++# and the mesh doesn't contain dynamic bodies like players or the other device at all — however many times it recalculates it gets the same path
++# and hits the same person. What actually works is **sidestepping along the obstacle for a bit**, getting around it and then rejoining the original path.
++const MP8_STUCK_RATIO: float = 0.35   # Actual movement < this fraction of intended movement = being blocked
++const MP8_STUCK_SECS: float = 0.5     # Must be blocked this long in a row to count as stuck (so a brief bump doesn't trigger a detour)
++const MP8_DODGE_SECS: float = 0.8     # How long one detour lasts
 +
 +var _mp8_stuck: float = 0.0
 +var _mp8_dodge_left: float = 0.0
@@ -26,31 +26,31 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
 +var _mp8_dodge_count: int = 0
 +
 +# ═════════════════════════════════════════════════════════════════════════
-+# [MP8] 🩸 死锁目标：盯上一个**永远扑不上的人**（2026-08-24 用户实机报的）
++# [MP8] 🩸 Deadlocked target — locked onto **someone it can never latch onto** (reported by the user from real gameplay on 2026-08-24)
 +# ═════════════════════════════════════════════════════════════════════════
 +#
-+# **用户原话**：「假如一个人身上有一个装置了，其他人往他附近扔装置，
-+#   第二个装置虽然无法上身，但是会一直追着他，不会改变目标」
++# **The user's exact words** — "If one person already has a device on them and someone else throws a device near them,
++#   the second device can't get on them, but it keeps chasing them forever and never changes target"
 +#
-+# **这是 T37 修双挂时我们自己引进来的。** `thrown_state` 里粘不上时的兜底是
-+# `transition_to("Follow", {target: body})`，旧注释写着「他背上的机器迟早会被
-+# 扔掉或杀完复位」—— **那句是错的**，因为下面这条链根本没有出口：
++# **We introduced this ourselves when T37 fixed double attaching.** The fallback in `thrown_state` when it can't stick is
++# `transition_to("Follow", {target: body})`, and the old comment said "the device on his back will sooner or later
++# be thrown off or reset after its kill" — **that was wrong**, because the chain below has no way out at all.
 +#
-+#   1. `update_proximity_check()` 里 `_mp8_can_take(target)` 恒为 false
-+#      （`has_spine_breaker`），于是这个人被 `continue` 掉 —— 既扑不上也选不中；
-+#   2. 换目标那句是 `if closest != target: if closest_distance < target_distance:`，
-+#      而 `target_distance` **恒为 INF、从头到尾没人给它赋值**（原版就这样，我们没动）
-+#      —— 所以只有「附近还有另一个可扑的人」时才换得掉。旁边没人 = 不换；
-+#   3. `request_new_target` **只从 BreakSpine 之后的 Idle 发出**，
-+#      而进 BreakSpine 的前提是先扑上 —— 扑不上就永远发不出。
++#   1. In `update_proximity_check()`, `_mp8_can_take(target)` is always false
++#      (`has_spine_breaker`), so this person gets skipped by `continue` — it can neither latch onto nor select them.
++#   2. The target switch is `if closest != target: if closest_distance < target_distance:`,
++#      and `target_distance` **is always INF and nothing ever assigns it** (vanilla is like this, we didn't touch it)
++#      — so it only switches when "there's another person nearby it can latch onto". Nobody nearby = no switch.
++#   3. `request_new_target` **is only sent from Idle after BreakSpine**,
++#      and getting into BreakSpine requires latching on first — if it can't latch on it can never send it.
 +#
-+# 结论：一旦盯上背着机器的人且附近没别人，这台机器就**永久绕着他转**。
++# Conclusion — once it locks onto someone carrying a device with nobody else nearby, this device **circles them forever**.
 +#
-+# 修法：发现当前目标已经不可扑，就主动跟宿主要一个新目标
-+# （走的就是杀完人之后那条现成的重派路径）。
-+# 用**冷却**而不是一次性开关 —— `_mp8_pick_prey()` 有「候选全被筛掉」的
-+# 合法返回 null，那时得过一会儿再问一次，否则又卡死。
-+const MP8_DEADEND_RETRY: float = 4.0   # 比最长的 MP8_DEVICE_WAIT（3 秒）长，不跟重派打架
++# The fix is, when the current target turns out to be impossible to latch onto, to proactively ask the host for a new target
++# (using the existing reassignment path that runs after a kill).
++# It uses a **cooldown** rather than a one-shot flag — `_mp8_pick_prey()` can legitimately return null when "every candidate
++# was filtered out", and then it has to ask again a bit later, otherwise it hangs again.
++const MP8_DEADEND_RETRY: float = 4.0   # Longer than the longest MP8_DEVICE_WAIT (3 sec) so it doesn't fight the reassignment
 +var _mp8_deadend_cd: float = 0.0
 +
  func init() -> void :
@@ -60,7 +60,7 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
  	state_time = 0.0
  	elapsed = 0.0
  
-+	# [MP8] 绕行状态按"每次追击"清零 —— 不清的话上一段追击攒下的绕行会带进新目标
++	# [MP8] Reset the detour state "per chase" — otherwise detour state built up in the previous chase carries over to the new target
 +	_mp8_stuck = 0.0
 +	_mp8_dodge_left = 0.0
 +	_mp8_dodge_count = 0
@@ -73,10 +73,10 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
  
  func update_physics(_delta: float) -> void :
  
-+	# [MP8] 放在**最开头**而不是 `update_proximity_check()` 之后：
-+	# 那句会在撞上人时 `transition_to("Attached")`，而转完之后本帧剩下的代码
-+	# 还会继续跑完 —— 那时 `target.has_spine_breaker` 已经被置为 true，
-+	# 放后面会让**刚扑上去的机器当场误报死锁**。
++	# [MP8] This goes at the **very start** and not after `update_proximity_check()`.
++	# That call does `transition_to("Attached")` when it touches someone, and after the transition the rest of this frame's code
++	# still runs to the end — by then `target.has_spine_breaker` has already been set to true,
++	# so putting it after would make **a device that just latched on falsely report a deadlock on the spot**.
 +	_mp8_check_dead_end(_delta)
 +
  	var increase_ratio = elapsed / owner.speed_increase_duration
@@ -89,7 +89,7 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
 -	owner.velocity = current_agent_position.direction_to(next_path_position) * (owner.speed + elapsed_speed)
 +	var dir: Vector3 = current_agent_position.direction_to(next_path_position)
 +
-+	# [MP8] 绕行期间把方向换成侧移方向（掺了原方向，所以是"斜着蹭过去"不是原地打转）
++	# [MP8] During a detour swap the direction for the sidestep direction (it's mixed with the original direction, so it "slides past at an angle" instead of spinning in place)
 +	if _mp8_dodge_left > 0.0:
 +		_mp8_dodge_left -= _delta
 +		dir = _mp8_dodge_dir
@@ -104,11 +104,11 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
  	update_proximity_check()
  
 +
-+# [MP8] 这一帧想走多远 vs 实际走了多远，差太多就是被挡着了。
-+# 用位移比而不是"速度是否为零"：move_and_slide 撞墙时速度还在，只是走不动。
++# [MP8] How far it wanted to move this frame vs how far it actually moved. If the gap is too big, it's being blocked.
++# Uses the movement ratio instead of "is velocity zero", because when move_and_slide hits a wall the velocity is still there, it just can't move.
 +func _mp8_check_stuck(_delta: float, before: Vector3, dir: Vector3) -> void :
 +
-+	if _mp8_dodge_left > 0.0:      # 正在绕行，先让它走完
++	if _mp8_dodge_left > 0.0:      # Detour in progress, let it finish first
 +		return
 +
 +	var want: float = Vector2(owner.velocity.x, owner.velocity.z).length() * _delta
@@ -129,21 +129,21 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
 +	_mp8_dodge_left = MP8_DODGE_SECS
 +	_mp8_dodge_count += 1
 +
-+	# 每次追击只报第一次，够看出"这台在绕路"又不刷屏
++	# Only report the first one per chase. That's enough to see "this device is detouring" without spamming the log
 +	if _mp8_dodge_count == 1 and multiplayer.is_server():
-+		print("[MP8] 碎骨者：%d 号机被挡住了，改走侧向绕行（目标 %s）" % [
++		print("[MP8] Spine Breaker: device %d is blocked, switching to a sideways detour (target %s)" % [
 +			owner.mp8_index, (String(target.name) if target != null else "?")
 +		])
 +
 +
-+# 挑绕行方向：拿挡路那面的法线求切向，两个切向里选**不往回走**的那个。
-+# 取不到法线（比如卡在两个体中间）就退回"当前朝向的垂线"。
++# Pick the detour direction. Take the tangents of the blocking surface's normal and pick the one of the two that **doesn't head backwards**.
++# If there's no normal (for example wedged between two bodies), fall back to "perpendicular to the current heading".
 +func _mp8_pick_dodge(dir: Vector3) -> Vector3 :
 +
 +	var n: Vector3 = Vector3.ZERO
 +	for i in owner.get_slide_collision_count():
 +		var cn: Vector3 = owner.get_slide_collision(i).get_normal()
-+		if absf(cn.y) < 0.7:        # 忽略地面，只要竖直面
++		if absf(cn.y) < 0.7:        # Ignore the floor, only vertical surfaces
 +			n = cn
 +			break
 +
@@ -153,23 +153,23 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
 +		return dir
 +	side = side.normalized()
 +
-+	if side.dot(dir) < 0.0:         # 选和原方向同侧的那条切向
++	if side.dot(dir) < 0.0:         # Pick the tangent on the same side as the original direction
 +		side = - side
 +
-+	# 掺一点原方向：绕行时仍然朝目标偏，绕过去就自然接回原路
++	# Mix in a little of the original direction. It still leans toward the target while detouring, so once past it naturally rejoins the original path
 +	return (side * 0.8 + dir * 0.4).normalized()
 +
 +
-+# [MP8] 这个人能不能被我扑上去？
++# [MP8] Can I latch onto this person?
 +#
-+# 原版**没有任何判断**：距离 <1.45 就 Attached，body_entered 也是无条件。
-+# 一台机器的时候无所谓，两台就会出事 ——
-+#   * 两台可以同时扑同一个人：两条 10 秒引信并行跑，第一条烧完人就死了，
-+#     第二台还 attached 在尸体上，之后它的 activation_timer 到点会对着死人再来一次 BreakSpine；
-+#   * 已经死的人 collision layer 被关了（break_spine_rpc 里 set_collision_layer_value(1,false)），
-+#     照理进不了 Area3D，但 players_in_proximity 是自己维护的数组，
-+#     退出信号漏一次就会残留一个死人引用。
-+# 所以这里逐条挡掉。
++# Vanilla has **no checks at all**. Distance <1.45 means Attached, and body_entered is unconditional too.
++# With one device that's fine, but with two things go wrong —
++#   * Two devices can latch onto the same person at once. Two 10-second fuses run in parallel, the person dies when the first burns out,
++#     the second device is still attached to the corpse, and when its activation_timer runs out it does BreakSpine on the dead person again.
++#   * A dead person's collision layer is turned off (set_collision_layer_value(1,false) in break_spine_rpc),
++#     so in theory they can't enter the Area3D, but players_in_proximity is an array we maintain ourselves,
++#     and missing a single exit signal leaves a dead person's reference behind.
++# So each case is blocked here one by one.
 +func _mp8_can_take(p) -> bool :
 +
 +	if p == null or not is_instance_valid(p):
@@ -183,15 +183,15 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
 +	return true
 +
 +
-+# 能不能把他**设成我的目标**（比 _mp8_can_take 多一条：别抢另一台已经盯上的人）。
++# Can I **make them my target** (one more rule than _mp8_can_take — don't steal someone another device is already locked onto).
 +#
-+# 为什么要分成两条判据：`choose_new_target` 分配目标时已经避开了另一台，
-+# 但机器在跑过去的路上，下面 update_proximity_check() 会把 target 改成
-+# "附近最近的那个" —— 那段原版逻辑完全不看另一台在追谁，于是两台又汇到同一个人身上
-+# （用户实测："仇恨同时锁到一个人身上"）。
++# Why split this into two rules? `choose_new_target` already avoids the other device when assigning targets,
++# but while the device is on its way, update_proximity_check() below switches target to
++# "the closest one nearby" — that vanilla logic ignores who the other device is chasing, so both devices converge on the same person again
++# (user tested in practice, "the aggro locks onto one person at the same time").
 +#
-+# ⚠️ 但**接触判定（distance < 1.45）不受这条约束**：都撞上了还不粘，
-+#    玩家只会觉得机器坏了。抢不抢是"选目标"的事，粘不粘是"撞上了"的事。
++# ⚠️ But **the contact check (distance < 1.45) is not bound by this rule**. If it's already touching and still won't stick,
++#    players will just think the device is broken. Stealing or not is a "choosing a target" matter, sticking or not is a "made contact" matter.
 +func _mp8_can_target(p) -> bool :
 +
 +	var gi = owner.game_instance
@@ -220,18 +220,18 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
 -					"target": p
 -				})
 -				return
-+		# [MP8] 接触判定提到前面来，**不受"别抢别人的目标"约束**（见 _mp8_can_target 的注释）。
-+		# ⚠️ 挪出 `if distance < closest_distance` 之后与原版逐例等价，不是行为改动：
-+		#    原来它嵌在里面，但 closest_distance 只减不增 —— 能挡住某个 <1.45 的人的
-+		#    前提是更早有个比他还近的，而那个人自己就 <1.45，早就 return 掉了。
-+		#    所以"第一个进 1.45 的人触发"这条在两种写法下都成立。
++		# [MP8] The contact check is moved up front and is **not bound by "don't steal someone else's target"** (see the comment on _mp8_can_target).
++		# ⚠️ Moving it out of `if distance < closest_distance` is equivalent to vanilla case by case, not a behavior change.
++		#    It used to be nested inside, but closest_distance only ever goes down — the only way someone <1.45 could be excluded
++		#    is if someone even closer came earlier, and that person would be <1.45 themselves and would already have returned.
++		#    So "the first person to come within 1.45 triggers it" holds either way it's written.
 +		if distance < 1.45:
 +			state_machine.transition_to(&"Attached", {
 +				"target": p
 +			})
 +			return
 +
-+		if not _mp8_can_target(p):      # [MP8] 换目标才看归属
++		if not _mp8_can_target(p):      # [MP8] Ownership only matters when switching targets
 +			continue
 +
 +		if distance < closest_distance:
@@ -242,13 +242,13 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
  		if closest_distance < target_distance:
  			set_target(closest, false)
  
-+# [MP8] 见文件头 MP8_DEADEND_RETRY 上那段：目标已经不可扑就跟宿主要新的。
++# [MP8] See the block above MP8_DEADEND_RETRY at the top of the file. If the target can't be latched onto anymore, ask the host for a new one.
 +#
-+# ⚙ 判据用 `_mp8_can_take` 而不是只看 `has_spine_breaker`：死人、失效引用
-+#    同样是「永远扑不上」，一并覆盖（比如另一台先把他杀了，这台还在追尸体）。
-+# ⚙ 只在服务器发：`request_new_target` 的接线在 `spine_breaker.gd` 里就包在
-+#    `if multiplayer.is_server():` 内，客机发出去没人听。
-+# ⚙ `not active` 时直接返回：本帧已经转出 Follow 了，不该再插一手。
++# ⚙ The check uses `_mp8_can_take` instead of only `has_spine_breaker`. Dead players and stale references
++#    are also "never latchable", so they're covered too (for example another device killed him first and this one is still chasing the corpse).
++# ⚙ Only sent on the server. The `request_new_target` wiring in `spine_breaker.gd` is already wrapped in
++#    `if multiplayer.is_server():`, so if a client sends it nobody is listening.
++# ⚙ Return right away when `not active`. This frame has already transitioned out of Follow, so it shouldn't step in.
 +func _mp8_check_dead_end(_delta: float) -> void :
 +
 +	if not active:
@@ -269,14 +269,14 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
 +		return
 +
 +	var who: String = "?"
-+	var why: String = "引用已失效"
++	var why: String = "reference no longer valid"
 +	if is_instance_valid(target):
 +		who = String(target.name)
 +		if target.has_spine_breaker:
-+			why = "已经背着机器"
++			why = "already carrying a device"
 +		elif not target.active:
-+			why = "已死"
-+	print("[MP8] 碎骨者：%d 号机盯着 %s 但永远扑不上（%s）—— 要新目标" % [
++			why = "dead"
++	print("[MP8] Spine Breaker: device %d is locked onto %s but can never latch on (%s) — requesting a new target" % [
 +		owner.mp8_index, who, why
 +	])
 +	owner.request_new_target.emit()
@@ -289,7 +289,7 @@ diff --git a/minigames/spine_breaker/components/device/states/follow_state.gd b/
  	if body is not SpineBreakerPlayer:
  		return
  
-+	if not _mp8_can_take(body):        # [MP8] 别扑已经背着机器的人 / 死人
++	if not _mp8_can_take(body):        # [MP8] Don't latch onto someone already carrying a device / a dead person
 +		return
 +
  	state_machine.transition_to(&"Attached", {

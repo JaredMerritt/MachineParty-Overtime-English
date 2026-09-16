@@ -5,9 +5,9 @@ diff --git a/minigames/smoke_break/states/round_play_state.gd b/minigames/smoke_
  
  	while countdown_timer >= 0:
  
-+		# [MP8] 手调座位时把倒计时冻住 —— 不然摆到一半这一轮就结束、人被枪毙了。
-+		# 用 `owner.get()` 取标志位：属性不存在时返回 null，不会报错，
-+		# 所以不开手调模式时这个 while 一次都不进，与原版逐值一致。
++		# [MP8] Freeze the countdown while seats are being hand-tuned — otherwise the round ends halfway through placement and players get shot.
++		# The flag is read with `owner.get()`, which returns null instead of erroring when the property doesn't exist,
++		# so without tuning mode this while never runs even once, identical to vanilla value for value.
 +		while owner.get("mp8_edit_paused") == true:
 +			await get_tree().create_timer(0.25).timeout
 +
@@ -19,15 +19,15 @@ diff --git a/minigames/smoke_break/states/round_play_state.gd b/minigames/smoke_
  func tick_rpc(time):
  	timer_updated.emit(time)
 +
-+	# ═══════ [MP8] 2026-08-19 修：内层音效只由服务器发起 ═══════
++	# ═══════ [MP8] 2026-08-19 fix — the inner sound effect is only triggered by the server ═══════
 +	#
-+	# `tick_rpc` 本身是 `call_local` 广播 —— 8 个端**都会**执行到这里。
-+	# 旧版没有这道 guard，于是 8 个端各自 `play_omni_rpc.rpc()` 广播一遍，
-+	# 每个端最终收到 8 份。而 `play_omni_rpc` 是从 32 路池里取空闲槽的，
-+	# **8 份 = 8 个声部同时响**（不是重启同一个播放器），约 +18 dB，
-+	# 还带 RTT 拖尾拍成连击。倒计时 31 个 tick，整段都是这样。
++	# `tick_rpc` itself is a `call_local` broadcast — all 8 peers **do** run this code.
++	# The old version had no guard here, so each of the 8 peers broadcast `play_omni_rpc.rpc()` once,
++	# and every peer ended up receiving 8 copies. `play_omni_rpc` takes a free slot from a 32-voice pool,
++	# so **8 copies = 8 voices sounding at once** (not restarting the same player), about +18 dB,
++	# plus RTT lag smearing them into rapid-fire repeats. The countdown has 31 ticks, and the whole thing was like that.
 +	#
-+	# 加上 guard 之后：只有服务器发一次广播 → 每个端恰好播 1 次。
++	# With the guard added, only the server broadcasts once → each peer plays it exactly once.
 +	if not multiplayer.is_server():
 +		return
 +

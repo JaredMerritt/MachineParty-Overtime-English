@@ -5,13 +5,13 @@ diff --git a/minigames/smoke_break/components/player/scripts/smoke_break_player.
  var player_presence: PlayerPresence
  
  var active_player_seat_index = 0
-+# [MP8] 座位 4~7 的死亡动画名（由小游戏按最近邻算好发下来）。
-+# 空串 = 原版四个座位之一，走 anim_handler 里那条 match。
++# [MP8] Death animation name for seats 4~7 (worked out by the minigame from the nearest neighbour and sent down).
++# Empty string = one of the four vanilla seats, which goes through the match in anim_handler.
 +var mp8_death_anim: String = ""
  
  var camera_offset_parent: Node3D
  var default_camera_position: Vector3
-@@ -305,13 +308,19 @@ func set_player_presence_rpc(network_id: int):
+@@ -305,13 +308,20 @@ func set_player_presence_rpc(network_id: int):
  		handle_input = true
  
  @rpc("any_peer", "call_local", "reliable")
@@ -23,11 +23,12 @@ diff --git a/minigames/smoke_break/components/player/scripts/smoke_break_player.
  
  	active_player_seat_index = _seat_index
  
-+	# [MP8] 新增座位（4~7）的死亡动画名。anim_handler 里那个 match 只写了 0~3，
-+	# 新座位会落进缝里 → `anim_player.play("")`。这里把小游戏算好的名字带过来兜底。
-+	# **第 4 个参数带默认值**（照猎鸭 setup_rpc 那次的做法），≤4 人时传空串，
-+	# 走原版那条 match，逐值一致。
-+	mp8_death_anim = _mp8_death_anim
++	# [MP8] Death animation name for the added seats (4~7). The match in anim_handler only covers 0~3,
++	# so new seats fall through the gap → `anim_player.play("")`. This carries over the name the minigame computed as a fallback.
++	# **The 4th argument has a default value** (same approach as Duck Hunt's setup_rpc). With ≤4 players an empty string is passed,
++	# which goes through the vanilla match, identical value for value.
++	# setup_rpc is any_peer in vanilla, so the animation name this mod added is only taken from the host.
++	mp8_death_anim = _mp8_death_anim if NetworkManager.mp8_sender_is_host(multiplayer) else ""
 +
  
  

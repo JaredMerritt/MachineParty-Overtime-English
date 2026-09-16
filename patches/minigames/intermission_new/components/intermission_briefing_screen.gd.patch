@@ -5,29 +5,29 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
  
  	Globals.locale_changed.connect(debug_update)
  
-+	# [MP8] 自动准备独立成 mp8ready 开关，不再绑死在 mp8fast 上——
-+	# 排查时需要"不快进但仍然自动准备"的组合。
-+	var _mp8_args := Array(OS.get_cmdline_args())
-+	# mp8hold：只关掉自动准备，保留 mp8fast 的过场快进——
-+	# 让赛前说明屏一直停着，好截图看排版。
++	# [MP8] Auto-ready is now its own mp8ready switch instead of being tied to mp8fast —
++	# debugging needs the "no fast-forward but still auto-ready" combination.
++	var _mp8_args := NetworkManager.mp8_args()
++	# mp8hold turns off only auto-ready and keeps mp8fast's cutscene fast-forward —
++	# so the pre-match briefing screen stays up for screenshots of the layout.
 +	_mp8_auto_ready_armed = (
 +		(_mp8_args.has("mp8fast") or _mp8_args.has("mp8ready"))
 +		and not _mp8_args.has("mp8hold")
 +	)
-+	# mp8noscore：排查开关，跳过记分板扩位（用来隔离"卡在 SessionIntro"是不是它造成的）
++	# mp8noscore is a debugging switch that skips the scoreboard slot expansion (to isolate whether it causes "stuck in SessionIntro")
 +	if not _mp8_args.has("mp8noscore"):
 +		_mp8_extend_score_slots()
 +	else:
-+		print("[MP8] mp8noscore：跳过结算记分板扩位")
++		print("[MP8] mp8noscore: skipping results scoreboard slot expansion")
 +
 +
-+# [MP8] 结算记分板只摆了 4 个玩家条（user_container_array 是 @export 数组，
-+# 场景里填了 4 项；rank_y_positions 也是写死的 4 个 y 坐标），
-+# 8 人下后 4 个人根本不显示分数。
++# [MP8] The results scoreboard only has 4 player rows (user_container_array is an @export array
++# with 4 items filled in the scene, and rank_y_positions is also 4 hard-coded y coordinates),
++# so with 8 players the last 4 never get their scores shown.
 +#
-+# 做法沿用大厅排布那条血泪教训：**复制现成的条目，让原有代码去摆位置，不自己算坐标。**
-+# reset_briefing_rpc() 本来就会按 rank_y_positions[i] 给每条设 y，
-+# 所以这里只要把条目补到 8 个、把 y 坐标表按原间距续到 8 个即可，排序/填数据的代码一行不用动。
++# The approach follows the hard-learned lesson from the lobby layout - **duplicate existing entries and let the existing code position them, don't compute coordinates ourselves.**
++# reset_briefing_rpc() already sets each row's y from rank_y_positions[i],
++# so here we only pad the entries to 8 and extend the y coordinate table to 8 at the original spacing. Not a single line of the sorting/data-filling code needs to change.
 +func _mp8_extend_score_slots() -> void :
 +
 +	var target: int = NetworkManager.MAX_PLAYERS
@@ -50,23 +50,23 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +		parent.add_child(dup)
 +		user_container_array.append(dup)
 +
-+	# ---- 排版：8 条必须缩小才塞得下 ----------------------------------------
-+	# 面板几何（probe13/15 从原装 PCK 量出来的确定值，单位是"面板单位"，
-+	# 整块 UI 被父节点 scale 4 倍后画进 1920×1080 的 SubViewport）：
++	# ---- Layout - 8 rows only fit if shrunk ----------------------------------------
++	# Panel geometry (exact values measured from the stock PCK by probe13/15, in "panel units",
++	# the whole UI is scaled 4x by its parent and then drawn into a 1920×1080 SubViewport).
 +	#
-+	#   玩家条起点 y = 69.25（user data container parent 的位置）
-+	#   行间距       = 19        文字高 = 字号 221 × 0.06703 ≈ 14.8
-+	#   准备按钮     y = 149.5   （local_ready_button 在 147.6）
-+	#   进度条框     y = 227.5
++	#   player rows start  y = 69.25 (position of user data container parent)
++	#   row spacing          = 19        text height = font size 221 × 0.06703 ≈ 14.8
++	#   ready button       y = 149.5   (local_ready_button is at 147.6)
++	#   progress bar frame y = 227.5
 +	#
-+	# 于是可用高度只有 149.5 - 67.5 ≈ 79.5，而 8 条按原间距要 7×19+14.8 = 148，
-+	# **原尺寸怎么排都塞不下**（哪怕把准备按钮压到进度条上也差 10 个单位）。
-+	# 所以必须整条缩小：缩放 s、间距 19×s，占用 147.8×s ≤ 79.5 → s ≤ 0.538。
-+	# 取 s = 0.5 / 间距 9.5：8 条占 73.9，完全落在原本 4 条的地盘里，
-+	# **准备按钮、进度条、分页线一个都不用动**（改别的元素才是风险）。
++	# So the usable height is only 149.5 - 67.5 ≈ 79.5, while 8 rows at the original spacing need 7×19+14.8 = 148,
++	# so **at the original size they can't fit however they're arranged** (even pushing the ready button onto the progress bar leaves them 10 units short).
++	# So whole rows must shrink. With scale s and spacing 19×s they take 147.8×s ≤ 79.5 → s ≤ 0.538.
++	# Using s = 0.5 / spacing 9.5, 8 rows take 73.9, entirely within the space the original 4 rows used,
++	# and **none of the ready button, progress bar or page divider has to move** (changing other elements is where the risk is).
 +	var s: float = MP8_ROW_SCALE
 +	var step: float = MP8_ROW_STEP
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var t: String = String(a)
 +		if t.begins_with("mp8row="):
 +			var parts: PackedStringArray = t.substr(7).split(",")
@@ -83,26 +83,26 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +	for uc in user_container_array:
 +		uc.scale = Vector2(s, s)
 +
-+	# 邀请按钮：先补到 8 套并把每条玩家条接到自己那一套，再按行距摆位。
-+	# 顺序不能反 —— 摆位要对全部 8 套生效。
++	# Invite buttons - first pad to 8 sets and hook each player row to its own set, then position them by row spacing.
++	# The order can't be reversed — positioning has to apply to all 8 sets.
 +	_mp8_extend_invite_buttons(target)
 +	_mp8_align_invite_buttons(s, step)
 +
-+	# ⚠️ 这一屏还有另外两个**按玩家下标索引**的定长数组，必须一起补到 8。
-+	# 只补 user_container_array 会直接导致原生崩溃（0xc0000005）：
-+	#   sort_user_containers_by_score():  score_container_nodes[i] = ...   ← 越界【写】
-+	#   show_score_nodes() / update_players():  speakers_show_player_card[i].play()  ← 越界【读】
-+	# 发行版模板不带边界检查，越界写就是访问违例。
-+	# （2026-08-14 实测：只补一个数组时 duck_hunt / dvd_roomba 必崩，
-+	#   disco_dodge 侥幸不崩只是执行顺序的运气，并不安全。）
++	# ⚠️ This screen has two more fixed-length arrays **indexed by player index**, and they must be padded to 8 as well.
++	# Padding only user_container_array leads straight to a native crash (0xc0000005) at these points.
++	#   sort_user_containers_by_score():  score_container_nodes[i] = ...   ← out-of-bounds **write**
++	#   show_score_nodes() / update_players():  speakers_show_player_card[i].play()  ← out-of-bounds **read**
++	# Release templates have no bounds checking, so an out-of-bounds write is an access violation.
++	# (Tested 2026-08-14 - with only one array padded, duck_hunt / dvd_roomba always crash,
++	#   and disco_dodge not crashing is just luck of execution order, it is not safe.)
 +	while score_container_nodes.size() < target:
 +		score_container_nodes.append(user_container_array[score_container_nodes.size()])
 +
-+	# 音源只需要"数组够长、索引不越界"，**不要往场景树里塞新节点**。
-+	# 试过用 duplicate() 建 4 个新 AudioStreamPlayer，结果整个流程卡在 SessionIntro
-+	# 推进不下去（2026-08-14 实测，mp8noscore 关掉本函数即恢复正常）。
-+	# 这里改成循环复用已有音源：第 5~8 张卡的音效会重触发前 4 个音源，
-+	# 顶多是听感上少一层叠音，功能与稳定性都没有代价。
++	# The audio sources only need "the array long enough that indexes stay in bounds", so **don't add new nodes to the scene tree**.
++	# We tried creating 4 new AudioStreamPlayers with duplicate(), and the whole flow got stuck in SessionIntro
++	# and couldn't move on (tested 2026-08-14, turning this function off with mp8noscore brought it back to normal).
++	# So this now reuses the existing audio sources in a cycle. The sounds for cards 5~8 retrigger the first 4 sources,
++	# which at most loses one layer of overlapping sound, with no cost to function or stability.
 +	var spk_n: int = speakers_show_player_card.size()
 +	if spk_n > 0:
 +		while speakers_show_player_card.size() < target:
@@ -110,26 +110,26 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +				speakers_show_player_card[speakers_show_player_card.size() % spk_n]
 +			)
 +
-+	print("[MP8] 结算记分板：玩家条 %d->%d, score_container %d, 音源 %d, 缩放 %.2f, 间距 %.2f, y表 %s" % [
++	print("[MP8] Results scoreboard: player rows %d->%d, score_container %d, audio sources %d, scale %.2f, spacing %.2f, y table %s" % [
 +		n, user_container_array.size(), score_container_nodes.size(),
 +		speakers_show_player_card.size(), s, step, str(rank_y_positions)
 +	])
 +
 +
-+# [MP8] 玩家条排版参数。命令行 mp8row=<缩放>,<间距> 可临时覆盖，方便对着画面调。
++# [MP8] Player row layout parameters. Command-line mp8row=<scale>,<spacing> can override them temporarily, handy for tuning against the screen.
 +const MP8_ROW_SCALE: float = 0.5
 +const MP8_ROW_STEP: float = 9.5
 +
 +
-+# [MP8] 自截图：命令行传 mp8shot，赛前说明屏摆好后把画面存成 PNG。
++# [MP8] Self-screenshot. Pass mp8shot on the command line, and once the pre-match briefing screen is laid out the frame gets saved as PNG.
 +#
-+# 为什么不用外部截屏：赛前说明屏是画进 1920×1080 的 SubViewport
-+# 再贴到 3D 显示器网格上的，外面截到的是带透视和反光的"照片"，量不准排版；
-+# 直接抓 SubViewport 拿到的是原始 UI，一个像素不差。
-+# 存两张：ui = 那块屏本身，win = 整个游戏窗口（看它在场景里的实际观感）。
++# Why not use an external screenshot? The briefing screen is drawn into a 1920×1080 SubViewport
++# and then put onto a 3D monitor mesh, so an external capture is a "photo" with perspective and reflections that can't measure layout accurately.
++# Grabbing the SubViewport directly gives the raw UI, accurate to the pixel.
++# Two images are saved. ui = the screen itself, win = the whole game window (to see how it actually looks in the scene).
 +func _mp8_shot() -> void :
 +
-+	if not Array(OS.get_cmdline_args()).has("mp8shot"):
++	if not NetworkManager.mp8_args().has("mp8shot"):
 +		return
 +
 +	await get_tree().create_timer(1.0, false).timeout
@@ -139,7 +139,7 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +
 +	var tag: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 0
 +
-+	# 往上找承载这一屏的 SubViewport
++	# Walk up to find the SubViewport hosting this screen
 +	var vp: Viewport = null
 +	var node: Node = user_data_container_parent
 +	while node != null:
@@ -157,34 +157,34 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +	if win_img != null:
 +		win_img.save_png("user://mp8_shot_win_%d.png" % tag)
 +
-+	print("[MP8] mp8shot：已存 user://mp8_shot_{ui,win}_%d.png" % tag)
++	print("[MP8] mp8shot: saved user://mp8_shot_{ui,win}_%d.png" % tag)
 +
 +
-+# [MP8] 邀请按钮：空位上的"点邀请好友"区域。原版 4 套，和玩家条一一对应。
++# [MP8] Invite buttons, the "click to invite friends" area on empty slots. Vanilla has 4 sets, one per player row.
 +#
-+# ⚠️ 这里有个坑：这两个数组**不在同一个坐标系**（probe69 量的实况）。
-+#   invite_buttons_visuals   = SubViewport 内的 InviteButton0..3
-+#                              （面板坐标，父节点 InviteButtonParent 在 y=69.25，
-+#                                按钮 offset_top = 3.5 / 22.25 / 41.0 / 59.75，步长 18.75）
-+#   invite_buttons_interacts = 屏幕覆盖层的 InviteOverlayButton0..3
-+#                              （屏幕坐标，offset_top = 124 / 172 / 210 / 248，
-+#                                注意**步长不均匀**：48 / 38 / 38，是人手摆的）
-+# 真正能点的是后者，前者只是 ButtonClass 的 custom_ui_target（悬停时改透明度）。
++# ⚠️ There's a pitfall here. These two arrays are **not in the same coordinate system** (as measured live by probe69).
++#   invite_buttons_visuals   = InviteButton0..3 inside the SubViewport
++#                              (panel coordinates, parent node InviteButtonParent is at y=69.25,
++#                                button offset_top = 3.5 / 22.25 / 41.0 / 59.75, step 18.75)
++#   invite_buttons_interacts = InviteOverlayButton0..3 in the screen overlay
++#                              (screen coordinates, offset_top = 124 / 172 / 210 / 248,
++#                                note the **uneven steps** of 48 / 38 / 38, placed by hand)
++# The clickable ones are the latter. The former are only ButtonClass's custom_ui_target (opacity changes on hover).
 +#
-+# 🩸 旧版本这里错了两处，是用户 2026-08-18 报的"错位、只有三个"的成因：
-+#   ① 映射系数取 (act[1]-act[0])/(vis[1]-vis[0]) = 48/18.75 = 2.56 ——
-+#      正好取到那个**异常的第一段**（真实三段是 48/38/38）。
-+#      改成对全部原始点做最小二乘拟合，斜率约 2.19。
-+#   ② 只有 4 套，而 MP8 有 8 条玩家条 —— 见 _mp8_extend_invite_buttons。
-+# （点击区跟着缩放那一条旧版本本来就是对的，保留。）
++# 🩸 The old version got two things wrong here, which caused the "misaligned, only three of them" issue the user reported on 2026-08-18.
++#   ① The mapping factor was taken as (act[1]-act[0])/(vis[1]-vis[0]) = 48/18.75 = 2.56 —
++#      which happens to land on that **anomalous first gap** (the real three gaps are 48/38/38).
++#      It now does a least-squares fit over all the original points instead, slope about 2.19.
++#   ② There were only 4 sets, while MP8 has 8 player rows — see _mp8_extend_invite_buttons.
++# (The old version already had the click areas scaling correctly, so that part is kept.)
 +var _mp8_inv_fit_ok: bool = false
-+var _mp8_inv_k: float = 0.0        # 面板 y → 屏幕 y 的斜率
-+var _mp8_inv_b: float = 0.0        # 截距
++var _mp8_inv_k: float = 0.0        # Slope from panel y → screen y
++var _mp8_inv_b: float = 0.0        # Intercept
 +var _mp8_inv_act_scale: Vector2 = Vector2.ONE
 +
 +
-+# 拿原始的 4 对 (面板 y, 屏幕 y) 做最小二乘，得到两套坐标系之间的映射。
-+# 用全部点而不是头两个：原版第一段间距是异常值，只看它会把后面几个越推越偏。
++# Least squares over the original 4 (panel y, screen y) pairs gives the mapping between the two coordinate systems.
++# All points are used instead of the first two. Vanilla's first gap is an outlier, and using only it pushes the later ones further and further off.
 +func _mp8_fit_invite_mapping() -> void :
 +
 +	var vis: Array[Button] = invite_buttons_visuals
@@ -223,37 +223,37 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +	_mp8_inv_act_scale = act[0].scale if is_instance_valid(act[0]) else Vector2.ONE
 +	_mp8_inv_fit_ok = true
 +
-+	print("[MP8] 邀请按钮映射：屏幕y = %.4f × 面板y + %.2f（%d 个原始点拟合）" % [
++	print("[MP8] Invite button mapping: screen y = %.4f × panel y + %.2f (fit from %d original points)" % [
 +		_mp8_inv_k, _mp8_inv_b, xs.size()])
 +
 +
-+# [MP8] 把邀请按钮从 4 套补到 8 套，并把每条玩家条接到**自己**那一套。
++# [MP8] Pad the invite buttons from 4 sets to 8, and hook each player row up to **its own** set.
 +#
-+# 🩸 不补的后果就是用户看到的现象。玩家条是用 duplicate() 复制出来的，
-+#    而 duplicate() **不重映射 @export 引用**（坑第 14 条）：
-+#    4~7 号条的 invite_visual_button / invite_interact_button 全都指着 0 号条那一套。
-+#    于是 2 人局（0/1 号是玩家，2~7 号是空位）时：
-+#      2 号 → InviteButton2 亮，3 号 → InviteButton3 亮，
-+#      4/5/6/7 号 → 全都去点亮 InviteButton0
-+#    → **屏幕上只有 3 个邀请按钮**，其中一个还压在 0 号玩家那一行上（"错位"）。
++# 🩸 Not padding them causes exactly what the user saw. The player rows are copies made with duplicate(),
++#    and duplicate() **does not remap @export references** (pitfall #14).
++#    So invite_visual_button / invite_interact_button on rows 4~7 all point at row 0's set.
++#    So in a 2-player match (0/1 are players, 2~7 are empty slots)
++#      row 2 → InviteButton2 lights up, row 3 → InviteButton3 lights up,
++#      rows 4/5/6/7 → all light up InviteButton0
++#    → **only 3 invite buttons on screen**, and one of them sits on top of player 0's row (the "misalignment").
 +#
-+# 复制时要重接的引用（都是 duplicate() 不会帮你改的）：
-+#   · 覆盖层按钮的 ButtonClass.custom_ui_target → 必须指向**新的**视觉按钮，
-+#     否则悬停新按钮时闪的是 0 号那个；
-+#   · 玩家条的两个 @export → 指向新的一套；
-+#   · pressed 信号 → setup_invite_buttons() 已经跑过了（_ready 里在扩位之前），
-+#     运行时连的 lambda 不会被 duplicate 带走，必须自己连。
-+# ButtonClass 里的 speaker_press / speaker_hover 是**相对路径**，
-+# 副本挂在同一个父节点下、深度一致，所以那两条不用动。
++# References that need rewiring when copying (duplicate() fixes none of them for you)
++#   · the overlay button's ButtonClass.custom_ui_target → must point at the **new** visual button,
++#     otherwise hovering the new button flashes button 0.
++#   · the player row's two @exports → point at the new set.
++#   · the pressed signal → setup_invite_buttons() has already run (in _ready, before the slot expansion),
++#     and lambdas connected at runtime aren't carried over by duplicate, so we have to connect them ourselves.
++# speaker_press / speaker_hover in ButtonClass are **relative paths**,
++# and the copies sit under the same parent at the same depth, so those two can stay as they are.
 +func _mp8_extend_invite_buttons(target: int) -> void :
 +
 +	var vis: Array[Button] = invite_buttons_visuals
 +	var act: Array[Button] = invite_buttons_interacts
 +	if vis.size() == 0 or not is_instance_valid(vis[0]):
-+		print("[MP8] 邀请按钮：场景里一个都没有，跳过")
++		print("[MP8] Invite buttons: none in the scene at all, skipping")
 +		return
 +
-+	# ⚠️ 映射必须在**动任何东西之前**拟合：下面摆位会把原始几何覆盖掉。
++	# ⚠️ The mapping must be fitted **before anything is touched**. The positioning below overwrites the original geometry.
 +	_mp8_fit_invite_mapping()
 +
 +	var n0: int = vis.size()
@@ -264,14 +264,14 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +	var act_parent: Node = act[0].get_parent() if (act.size() > 0 and is_instance_valid(act[0])) else null
 +
 +	for i in range(n0, target):
-+		# ---- 视觉件 ----------------------------------------------------
++		# ---- Visual part ----------------------------------------------------
 +		var v: Button = vis[0].duplicate()
 +		v.name = "MP8InviteButton%d" % i
 +		v.visible = false
 +		vis_parent.add_child(v)
 +		vis.append(v)
 +
-+		# ---- 点击区 ----------------------------------------------------
++		# ---- Click area ----------------------------------------------------
 +		if act_parent != null:
 +			var a: Button = act[0].duplicate()
 +			a.name = "MP8InviteOverlayButton%d" % i
@@ -279,12 +279,12 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +			act_parent.add_child(a)
 +			act.append(a)
 +
-+			# 悬停高亮的目标必须换成新的视觉件，否则闪的是 0 号
++			# The hover highlight target must switch to the new visual part, otherwise button 0 flashes
 +			var bc: Node = a.get_node_or_null("ButtonClass")
 +			if bc != null:
 +				bc.set("custom_ui_target", v)
 +
-+			# _ready 里的 setup_invite_buttons() 早就跑完了，新按钮得自己接
++			# setup_invite_buttons() in _ready finished long ago, so the new buttons have to be wired up here
 +			if not GameManager.local_game:
 +				a.pressed.connect(func():
 +					Steam.activateGameOverlayInviteDialog(
@@ -292,7 +292,7 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +					)
 +				)
 +
-+	# ---- 把每条玩家条接到自己那一套（0~3 号本来就是对的，4~7 号在此纠正）----
++	# ---- Hook each player row to its own set (0~3 were already right, 4~7 get corrected here) ----
 +	var fixed: int = 0
 +	for i in user_container_array.size():
 +		var uc = user_container_array[i]
@@ -305,7 +305,7 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +		if i < act.size() and is_instance_valid(act[i]):
 +			uc.set("invite_interact_button", act[i])
 +
-+	# 本地单机局整屏不给邀请（_ready 里已经把原版那 4 个关掉了，新增的补上）
++	# Local offline matches get no invites on this screen at all (_ready already turned off the vanilla 4, this covers the new ones)
 +	if GameManager.local_game:
 +		for b in vis:
 +			if is_instance_valid(b):
@@ -314,17 +314,17 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +			if is_instance_valid(b):
 +				b.visible = false
 +
-+	print("[MP8] 邀请按钮：%d -> %d 套（视觉 %d / 点击区 %d），重接了 %d 条玩家条的悬空引用" % [
++	print("[MP8] Invite buttons: %d -> %d sets (visual %d / click area %d), rewired dangling references on %d player rows" % [
 +		n0, target, vis.size(), act.size(), fixed])
 +
 +
-+# [MP8] 邀请按钮的盒子高度占行距的比例。
++# [MP8] Invite button box height as a fraction of row spacing.
 +#
-+# 为什么要单独收这一下（2026-08-18 看实机截图定的）：按钮高度是 anchor 驱动的
-+# （anchor_bottom - anchor_top = 0.4 × 父高），运行时算出来**约等于一整行的行距**。
-+# 4 行时行距 19，看着还行；压到 8 行、行距 9.5 之后，相邻两个盒子的边框直接贴死，
-+# 六个空位连成一张表格，不像六个按钮。收到 0.78 就能露出缝。
-+# ⚠️ 只收盒子高度，**不动字号**（字号在 theme_override 里，本来就只有 12×0.5，再小就糊了）。
++# Why this gets its own shrink (decided 2026-08-18 from in-game screenshots). Button height is anchor-driven
++# (anchor_bottom - anchor_top = 0.4 × parent height), which at runtime works out to **roughly one full row spacing**.
++# With 4 rows the spacing is 19 and it looks fine. Squeezed to 8 rows at spacing 9.5, neighboring box borders touch outright,
++# and six empty slots merge into one table instead of looking like six buttons. Shrinking to 0.78 leaves a visible gap.
++# ⚠️ Only the box height shrinks, **the font size is untouched** (it lives in theme_override and is already only 12×0.5, any smaller and it blurs).
 +const MP8_INVITE_H_RATIO: float = 0.78
 +
 +var _mp8_invite_h_done: bool = false
@@ -338,22 +338,22 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +	var act: Array[Button] = invite_buttons_interacts
 +
 +	for i in vis.size():
-+		# 原版 y = 3.5 + i×18.75，即"比玩家条低 3.5"，等比缩放后保持这层关系
++		# Vanilla y = 3.5 + i×18.75, i.e. "3.5 below the player row", and uniform scaling keeps that relationship
 +		var new_y: float = float(i) * step + 3.5 * s
 +
 +		if is_instance_valid(vis[i]):
-+			# 先收高度再摆位：anchor 一改会重新算 rect，顺序反了位置会被冲掉。
-+			# 加 _mp8_invite_h_done 是防重入 —— 这个函数万一被调两次，
-+			# 比例会连乘两遍，盒子越缩越扁。
++			# Shrink the height first, then position. Changing an anchor recalculates the rect, so doing it the other way round wipes out the position.
++			# _mp8_invite_h_done guards against re-entry — if this function ever gets called twice,
++			# the ratio would be multiplied in twice and the boxes would keep getting flatter.
 +			if not _mp8_invite_h_done:
 +				var span: float = vis[i].anchor_bottom - vis[i].anchor_top
 +				vis[i].anchor_bottom = vis[i].anchor_top + span * MP8_INVITE_H_RATIO
 +			vis[i].scale = Vector2(s, s)
 +			vis[i].position.y = new_y
 +
-+		# 点击区：走拟合出来的映射，并且**跟着一起缩小**——
-+		# 不缩的话 8 行时相邻点击区会互相压住（原版点击区高约 36 屏幕像素，
-+		# 而 8 行的行距映射过去只有约 21）。
++		# Click areas use the fitted mapping and **shrink along with the rest** —
++		# without shrinking, neighboring click areas overlap each other with 8 rows (vanilla click areas are about 36 screen pixels tall,
++		# while the 8-row spacing maps to only about 21).
 +		if _mp8_inv_fit_ok and i < act.size() and is_instance_valid(act[i]):
 +			act[i].position.y = _mp8_inv_k * new_y + _mp8_inv_b
 +			act[i].scale = _mp8_inv_act_scale * s
@@ -367,14 +367,14 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
  
  func _physics_process(_delta: float) -> void :
  
-+	# [MP8] ⚠️ 自动准备必须放在 game_focused 判断**前面**。
-+	# 8 开的时候只有一个窗口有焦点，剩下 7 个的 _physics_process 会在下面那行直接 return，
-+	# 于是只有被点中的那个窗口会自动准备，全员准备永远凑不齐，局就开不起来。
-+	# 这是测试台专用路径（只有 mp8fast / mp8ready 才会武装），不影响真实对局。
++	# [MP8] ⚠️ Auto-ready must come **before** the game_focused check.
++	# With 8 instances open only one window has focus, and _physics_process in the other 7 returns straight away at the line below,
++	# so only the clicked window would auto-ready, everyone being ready never happens, and the match can't start.
++	# This is a test-bench-only path (only armed by mp8fast / mp8ready) and doesn't affect real matches.
 +	_mp8_tick_auto_ready()
 +
-+	# [MP8] 🩸 冷却也必须在门前面清 —— 上面挪了自动准备却漏了这一半，
-+	# 于是客机从**第二局的幕间**起再也准备不了。完整机制见 _mp8_tick_cooldown_offscreen()。
++	# [MP8] 🩸 The cooldown also has to be cleared before the gate — auto-ready was moved above it but this half was missed,
++	# so from **the second match's intermission** onward clients could never ready up again. See _mp8_tick_cooldown_offscreen() for the full mechanism.
 +	_mp8_tick_cooldown_offscreen()
 +
  	if not GameManager.game_focused:
@@ -384,7 +384,7 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
  	show_score_nodes()
  	set_briefing_screen_button_disabled(false)
  
-+	_mp8_shot()  # [MP8] mp8shot：把这一屏自己存成 PNG（不需要任何屏幕录制权限）
++	_mp8_shot()  # [MP8] mp8shot - the game saves this screen as PNG itself (no screen recording permission needed)
 +
  	update_progess_elements()
  
@@ -393,13 +393,13 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
  	ready_button_parent.modulate.a = 1
  	is_ready = false
  
-+	_mp8_auto_ready_done = false  # [MP8] 新一次显示，重新武装自动准备
++	_mp8_auto_ready_done = false  # [MP8] New showing, so re-arm auto-ready
 +
-+	# [MP8] 顺带把准备按钮的冷却清干净。原版从不在这里重置它 ——
-+	# 真实对局无所谓（自己那台机器上窗口一直有焦点，冷却每帧都在走），
-+	# 但测试台上没焦点的 7 个窗口永远走不到 check_ready_button_cooldown()，
-+	# 冷却会一直卡在 true。上面那条 _mp8_tick_cooldown_offscreen() 已经能救，
-+	# 这里再清一次是让**每一屏都从干净状态开始**，不依赖上一屏计时器走到哪儿。
++	# [MP8] Also clear the ready button cooldown while we're here. Vanilla never resets it here —
++	# that doesn't matter in real matches (the window on your own machine always has focus, so the cooldown ticks every frame),
++	# but on the test bench the 7 unfocused windows never reach check_ready_button_cooldown(),
++	# so the cooldown stays stuck at true. The _mp8_tick_cooldown_offscreen() call above already rescues that,
++	# and clearing it again here makes **every screen start from a clean state**, regardless of where the previous screen's timer got to.
 +	if _mp8_auto_ready_armed:
 +		ready_button_on_cooldown = false
 +		ready_button_cooldown_counting = false
@@ -412,68 +412,68 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
  		CursorManager.set_mouse_mode(Input.MouseMode.MOUSE_MODE_VISIBLE)
  		CursorManager.set_cursor(true, true)
  
-+# [MP8] 自动化测试：赛前说明界面出现后倒数 3 秒，自动按一次"准备"。
++# [MP8] Automated testing - once the pre-match briefing screen appears, count down 3 seconds and press "Ready" once automatically.
 +#
-+# 为什么是"自动按按钮"而不是 Globals.debug_skip_brief：
-+# skip_brief 会把赛前说明和倒计时整段砍掉，压缩局内时序，进而踩出原版
-+# disco_dodge 里"显示符号"和 symbol_index 脱钩的隐患（该塌的不塌、不该塌的塌，
-+# 详见 HANDOFF 第六节第 10 条）。本函数走的是和真人完全一样的准备流程，
-+# 只是把"手点"换成"到点自动点"，时序不变，不会制造假 bug。
-+# 倒计时秒数在"准备"按钮文字后面以括号显示，例如「准备 (3)」→「准备 (2)」→「准备 (1)」。
-+# label_ready_button 的文字来自场景（本地化串），脚本里没有别处会写它，
-+# 所以这里改完再还原是安全的。
++# Why "auto-press the button" instead of Globals.debug_skip_brief?
++# skip_brief cuts out the whole briefing and countdown, compressing in-match timing, which then trips vanilla's
++# latent issue in disco_dodge where the "displayed symbol" drifts out of step with symbol_index (what should collapse doesn't, and what shouldn't does,
++# see HANDOFF section 6, item 10). This function goes through exactly the same ready flow as a real person,
++# only swapping "clicking by hand" for "clicking automatically on time", so timing is unchanged and no fake bugs get created.
++# The countdown seconds are shown in brackets after the "Ready" button text, e.g. "Ready (3)" → "Ready (2)" → "Ready (1)".
++# label_ready_button's text comes from the scene (a localized string) and nothing else in the script writes it,
++# so changing it here and restoring it afterward is safe.
 +const MP8_AUTO_READY_SECONDS: int = 3
 +
-+var _mp8_auto_ready_armed: bool = false     # 命令行开关，_ready() 里缓存一次
-+var _mp8_auto_ready_running: bool = false   # 本次显示的倒计时正在跑
-+var _mp8_auto_ready_done: bool = false      # 本次显示已经自动按过了
++var _mp8_auto_ready_armed: bool = false     # Command-line switch, cached once in _ready()
++var _mp8_auto_ready_running: bool = false   # The countdown for this showing is running
++var _mp8_auto_ready_done: bool = false      # Already auto-pressed for this showing
 +
-+# 每帧轮询而不是在 show_briefing_screen() 里挂一发。
-+# 原因：show_briefing_screen() 有两条几乎重复的调用路径（intermission_game_picker.gd
-+# 的 405 与 435 行），各自带 `if not is_inside_tree(): return` 提前返回，
-+# 到底哪条在第几局跑不好判断——实测就是第一局有倒计时、后面几局没有。
-+# 轮询"按钮可按了且还没准备"这个状态本身，跟走哪条路径无关，稳。
++# Poll every frame instead of firing once from show_briefing_screen().
++# The reason is that show_briefing_screen() has two near-duplicate call paths (lines 405 and 435 of
++# intermission_game_picker.gd), each with an early `if not is_inside_tree(): return`,
++# and it's hard to tell which one runs in which match — in practice the first match had the countdown and later ones didn't.
++# Polling the "button is pressable and not ready yet" state itself doesn't depend on which path ran, so it's reliable.
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 🩸 没焦点的窗口也要走准备按钮的冷却 —— 否则客机从第二局起再也准备不了
++# [MP8] 🩸 Unfocused windows must also tick the ready button cooldown — otherwise clients can never ready up again from the second match on
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# **症状**（2026-08-18，用户要录像做宣传片时报的）：
-+# 用 `-Room`（自己开局、每轮幕间自动准备）跑 8 开，第一局正常，
-+# **第二局的幕间起客机全都不再自动准备**，局卡在赛前说明屏开不下去。
++# **Symptom** (2026-08-18, reported by the user while recording footage for a promo video).
++# Running 8 instances with `-Room` (hosts its own match, auto-ready at every intermission), the first match was fine,
++# but **from the second match's intermission onward none of the clients auto-readied any more**, and the match was stuck on the pre-match briefing screen.
 +#
-+# ### 三件事叠起来才出事，缺一条都不犯
++# ### It takes all three of these stacked together to break, remove any one and it doesn't happen
 +#
-+# 1. `check_ready_button_cooldown()` 是**唯一**清 `ready_button_on_cooldown` 的地方，
-+#    而它在 `_physics_process` 里位于 `game_focused` 门**之后** ——
-+#    8 开时只有 1 个窗口有焦点，另外 7 个永远跑不到它；
-+# 2. `_on_ready_button_pressed()` 第一句就是 `if ready_button_on_cooldown: return`；
-+# 3. `show_briefing_screen()` 从不重置 `ready_button_on_cooldown`。
++# 1. `check_ready_button_cooldown()` is the **only** place that clears `ready_button_on_cooldown`,
++#    and in `_physics_process` it sits **after** the `game_focused` gate —
++#    with 8 instances only 1 window has focus, so the other 7 never reach it.
++# 2. The very first line of `_on_ready_button_pressed()` is `if ready_button_on_cooldown: return`.
++# 3. `show_briefing_screen()` never resets `ready_button_on_cooldown`.
 +#
-+# 于是客机第一次自动按下之后，冷却**永远卡在 true**，此后每一屏的自动准备
-+# 都在第 2 条那里被挡掉 —— 而且**一条日志都不会打**，看起来像"自动准备没触发"。
++# So after a client's first auto-press, the cooldown is **stuck at true forever**, and every later screen's auto-ready
++# gets blocked at item 2 — and **not a single log line is printed**, so it looks like "auto-ready never triggered".
 +#
-+# ### ⚠️ 这是原版结构，不是我们引入的；**真实对局没有这个 bug**
++# ### ⚠️ This is vanilla's structure, not something we introduced. **Real matches don't have this bug**
 +#
-+# 原版 `_physics_process` 就是「先 `game_focused` 门、再 `check_ready_button_cooldown()`」，
-+# 原版 `show_briefing_screen()` 也从不重置冷却。
-+# 真实对局里每个人在自己那台机器上窗口都是有焦点的，冷却每帧都在走，永远不会卡。
-+# **只有我们的 8 开测试台会犯**（7 个窗口没焦点）。
-+# 所以这个修复**整个锁在 `_mp8_auto_ready_armed` 里**（只有 mp8fast / mp8ready 武装），
-+# 真实对局逐帧与原版一致 —— 符合"原版那份一个字节都不许动"。
++# Vanilla `_physics_process` is already "the `game_focused` gate first, then `check_ready_button_cooldown()`",
++# and vanilla `show_briefing_screen()` never resets the cooldown either.
++# In a real match everyone's window on their own machine has focus, so the cooldown ticks every frame and never gets stuck.
++# **Only our 8-instance test bench hits it** (7 windows without focus).
++# So this fix is **entirely gated behind `_mp8_auto_ready_armed`** (armed only by mp8fast / mp8ready),
++# and real matches behave frame for frame like vanilla — in line with "not a single byte of the vanilla code may change".
 +#
-+# ### 🩸 为什么拖到现在才暴露
++# ### 🩸 Why it only surfaced now
 +#
-+# 默认测试模式带 `mp8fast`，它会设 `debug_instant_start`，
-+# **那条路径直接跳掉赛前说明屏** —— 客机的自动准备从来没被真正跑完过。
-+# 换成 `mp8ready`（走完整时序）之后才露出来。
++# The default test mode includes `mp8fast`, which sets `debug_instant_start`,
++# and **that path skips the pre-match briefing screen entirely** — client auto-ready had never actually run all the way through.
++# It only showed up after switching to `mp8ready` (which runs the full timing).
 +#
-+# **判据：一个"为了跑得快"的开关，可能同时跳过了你想验的那段逻辑。**
-+# 这跟坑第 10、20 条同源 —— `-Clean` 那一节讲的就是这件事。
++# **Rule of thumb - a switch meant "to run faster" may also skip the very logic you want to verify.**
++# This has the same root as pitfalls #10 and #20 — the `-Clean` section covers exactly this.
 +func _mp8_tick_cooldown_offscreen() -> void :
 +
 +	if not _mp8_auto_ready_armed:
 +		return
-+	# 有焦点的窗口下面那条原版路径会走，别重复计时
++	# A focused window goes through the vanilla path below, so don't tick the timer twice
 +	if GameManager.game_focused:
 +		return
 +
@@ -508,7 +508,7 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +		if not is_inside_tree():
 +			_mp8_auto_ready_running = false
 +			return
-+		# 人先手动按了就让人说了算，别再自动按一次把它按回未准备
++		# If a person pressed it manually first, they get the final say. Don't auto-press again and toggle it back to not ready
 +		if is_ready:
 +			break
 +
@@ -530,7 +530,7 @@ diff --git a/minigames/intermission_new/components/intermission_briefing_screen.
 +		return
 +
 +	_mp8_auto_ready_done = true
-+	print("[MP8] 赛前说明：倒计时到，自动准备")
++	print("[MP8] Pre-match briefing: countdown finished, auto-readying")
 +	_on_ready_button_pressed()
 +
 +

@@ -6,54 +6,54 @@ diff --git a/minigames/spine_breaker/components/device/spine_breaker_device.gd b
  var attached: bool = false
  
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 多装置支持（2026-08-17）
++# [MP8] Multi-device support (2026-08-17)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# **退休**：用户定的规则 —— 第 4 个被机器弄死的人，机器杀完**不从他身上下来**，
-+# 就此退出流通（画面上留着一具背着机器的尸体）。之后场上只剩一台机器，
-+# 保证最后两人是"一台机器传来传去"的决战，不会两人各背一台同归于尽。
-+# 具体不复位的动作在 break_spine_state.gd 里，这里只存标志。
++# **Retirement** is a rule the user set — for the 4th person killed by a device, the device **doesn't come off them** after the kill
++# and leaves rotation for good (a corpse carrying a device stays on screen). After that only one device is left on the field,
++# which guarantees the last two players get a "one device passed back and forth" showdown instead of each carrying one and both dying together.
++# The actual skipped-reset behavior lives in break_spine_state.gd. This only stores the flag.
 +var mp8_retired: bool = false
 +
-+# 序号，只为日志读得懂（1 = 场景里原装那台，2 = 本 mod 加的第二台）
++# Index, only so the logs are readable (1 = the original device in the scene, 2 = the second one this mod adds)
 +var mp8_index: int = 1
 +
-+# [MP8] 速度基准 [default_speed, new_target_speed, speed_increase_over_time]，
-+# 由小游戏在第一次缩放时记一次。之后一律"基准 × 系数"——
-+# 装置是跨轮复用的，而设速度那段每轮都跑，拿当前值连乘两轮 1.2 就成了 1.44。
++# [MP8] Speed baseline [default_speed, new_target_speed, speed_increase_over_time],
++# recorded once by the minigame on the first scaling. After that it's always "baseline × factor" —
++# devices are reused across rounds while the speed-setting code runs every round, so multiplying the current value by 1.2 two rounds in a row gives 1.44.
 +var mp8_speed_base: Array = []
 +
-+# [MP8] 本台的机体颜色，由小游戏在 mp8_ensure_devices_rpc 里设（每个端各设一次）。
-+# attach 时要把它转贴到被抱住那人背上的视觉去，所以装置自己得记着。
-+# [MP8] 退休那台的**灯色**（用户 2026-08-30 要求：退休的机器亮绿灯）。
++# [MP8] This device's body color, set by the minigame in mp8_ensure_devices_rpc (set once on each peer).
++# On attach it has to be carried over to the visual on the grabbed player's back, so the device needs to remember it.
++# [MP8] The retired device's **light color** (requested by the user on 2026-08-30 — a retired device shows a green light).
 +#
-+# ⚠️ 上一版做错过一次：去刷**机体贴图**（albedo）了。用户当场指出要的是
-+#    「闪的那盏灯」变绿，不是把机器刷成绿色 —— 记在这里免得再改回去。
++# ⚠️ A previous version got this wrong once by repainting the **body texture** (albedo). The user pointed out right away that they wanted
++#    "the blinking light" to turn green, not the device painted green — noted here so nobody changes it back.
 +#
-+# 玩家背上那盏灯是 `spine_breaker_player.spine_breaker_light`（OmniLight3D），
-+# 扑上来时被设成 `Color.RED`（见玩家脚本 spine_breaker_attached_rpc）。
-+# **装置本体自己的 `status_light` 看不见** —— 一 attach 就隐形并被挪到地下 100 米。
++# The light on the player's back is `spine_breaker_player.spine_breaker_light` (OmniLight3D),
++# which is set to `Color.RED` when the device latches on (see spine_breaker_attached_rpc in the player script).
++# **The device's own `status_light` can't be seen** — as soon as it attaches it goes invisible and is moved 100 m underground.
 +#
-+# 为什么是绿：本局里绿一直是「这台不构成威胁」的意思
-+#（`spine_broken_exited_rpc` 复位后就是绿灯），退休 = 永久退出流通，语义一致。
-+# 在此之前退休是**熄灯**，尸体背上黑漆漆一坨，玩家分不出那台还会不会再动 ——
-+# 而这恰恰是最该知道的：场上还剩几台在猎人，直接决定要不要继续跑。
++# Why green? In this minigame green has always meant "this device isn't a threat"
++# (`spine_broken_exited_rpc` shows a green light after a reset), and retired = permanently out of rotation, so the meaning matches.
++# Before this, retiring **turned the light off**, leaving a pitch-black lump on the corpse's back, and players couldn't tell whether that device would move again —
++# which is exactly what they most need to know. How many devices are still hunting on the field directly decides whether to keep running.
 +const MP8_RETIRE_LIGHT: Color = Color(0.2, 1.0, 0.3)
 +
-+# [MP8] 退休那台的闪烁速度（用户 2026-08-30 要求：退休了也要闪）。
++# [MP8] The retired device's blink speed (requested by the user on 2026-08-30 — keep blinking even after retiring).
 +#
-+# 用**固定慢速**而不是沿用引信那个速度：正常闪烁的快慢 = 引信剩多少
-+#（`_process` 里 `1.0 + (1 - 剩余比例) * 3.0`，越接近处决闪得越急）。
-+# 退休那一刻引信刚好烧完，速度正卡在最快档 —— 直接留着会变成
-+# 「一台报废的机器在尸体上疯狂急闪」，读起来像随时要动手，正好反了。
-+# 0.6 比基础速度还慢，是「待机脉冲」的节奏，配上绿色才说得通：**它还亮着，但不急了**。
++# It uses a **fixed slow speed** rather than keeping the fuse speed. Normal blink speed = how much fuse is left
++# (`1.0 + (1 - remaining_ratio) * 3.0` in `_process`, blinking faster the closer it gets to the execution).
++# At the moment of retirement the fuse has just burned out, so the speed is stuck at its fastest — leaving it as is would give
++# "a dead device blinking frantically on a corpse", which reads like it's about to strike at any moment, the exact opposite.
++# 0.6 is even slower than the base speed, an "idle pulse" rhythm, and only makes sense paired with green. **It's still lit, but in no hurry.**
 +const MP8_RETIRE_BLINK: float = 0.6
 +
 +var mp8_tint: Color = Color.WHITE
 +
-+# [MP8] 机体贴图名"最后一个下划线之后"的部分（实测 = "spinebreaker base1.png"）。
-+# 用来在玩家背上那堆网格里认出"哪个面是机器" —— 两边是同一张贴图的不同拷贝。
-+# 从装置自己的材质现取，不写死字符串。
++# [MP8] The part of the body texture name "after the last underscore" (measured in practice = "spinebreaker base1.png").
++# Used to recognize "which surface is the device" among the meshes on the player's back — both sides are different copies of the same texture.
++# Read live from the device's own material instead of hard-coding the string.
 +var mp8_tex_key: String = ""
 +
 +
@@ -73,12 +73,12 @@ diff --git a/minigames/spine_breaker/components/device/spine_breaker_device.gd b
  			_delta * rotation_speed
  		)
  
-+# [MP8] 诊断：机器飞到天上去了 —— 抓现行。
-+# 只报一次，报的时候把**当时的状态和速度**一起打出来，
-+# 因为"飞"这件事在哪个状态发生，决定了根因在哪段代码：
-+#   Follow  → 导航目标点在上层 navmesh（这张网格是多层的，y 到 6.5）
-+#   Thrown  → 扔的初速带了向上分量
-+#   Idle    → 那不可能，Idle 每帧强制 y=0
++# [MP8] Diagnostic for a device flying up into the sky — catch it in the act.
++# Only reports once, and when it does it prints **the state and velocity at that moment** too,
++# because the state the "flying" happens in tells us which code holds the root cause.
++#   Follow  → the navigation target point is on an upper navmesh level (this mesh has multiple levels, y up to 6.5)
++#   Thrown  → the throw's initial velocity had an upward component
++#   Idle    → impossible, Idle forces y=0 every frame
 +var _mp8_y_warned: bool = false
 +
 +func _mp8_check_altitude() -> void :
@@ -92,7 +92,7 @@ diff --git a/minigames/spine_breaker/components/device/spine_breaker_device.gd b
 +	var sname := "?"
 +	if state_machine != null and state_machine.current_state != null:
 +		sname = String(state_machine.current_state.name)
-+	print("[MP8] 碎骨者：⚠️ %d 号机飞到 y=%.2f —— 状态 %s，位置 (%.2f, %.2f)，速度 %s" % [
++	print("[MP8] Spine Breaker: ⚠️ device %d flew up to y=%.2f — state %s, position (%.2f, %.2f), velocity %s" % [
 +		mp8_index, global_position.y, sname,
 +		global_position.x, global_position.z, str(velocity)
 +	])
@@ -123,8 +123,8 @@ diff --git a/minigames/spine_breaker/components/device/spine_breaker_device.gd b
  	if not multiplayer.is_server():
  		return
  
-+	# [MP8] 退休的那台钉死在尸体上，扔不动也踢不动。
-+	# 人已经死了本来就不会按扔，这里挡的是**踢**：别人路过踹一脚会把它踹起来跑。
++	# [MP8] The retired device is pinned to the corpse and can't be thrown or kicked.
++	# A dead person won't press throw anyway, so this blocks **kicks** — someone walking past and kicking it would send it running again.
 +	if mp8_retired:
 +		return
 +
@@ -144,58 +144,61 @@ diff --git a/minigames/spine_breaker/components/device/spine_breaker_device.gd b
  		"strength": _strength
  	})
  
-@@ -265,6 +348,77 @@ func attach_entered_rpc():
+@@ -265,6 +348,80 @@ func attach_entered_rpc():
  	set_collision_layer_value(1, false)
  	set_collision_mask_value(1, false)
  
-+# [MP8] 退休那台熄灯（2026-08-17，用户实测"停机那个还在闪灯"）。
++# [MP8] Turn off the retired device's light (2026-08-17, user tested in practice "the stopped one is still blinking").
 +#
-+# 为什么不能直接复用 spine_broken_exited_rpc：它顺带 `visible = true`，
-+# 会把本该留在地下 100 米的退休机器拽回画面里 —— 退休的整个画面效果就是
-+# 「机器留在尸体背上」，机器本体必须继续隐形。所以另开一条只灭灯的。
++# Why not just reuse spine_broken_exited_rpc? It also sets `visible = true`,
++# which would drag the retired device (meant to stay 100 m underground) back into view — the whole visual point of retiring is
++# "the device stays on the corpse's back", so the device itself has to stay invisible. Hence a separate RPC that only turns off the light.
 +#
-+# ⚠️ 真正在闪的是**尸体背上那个机器视觉**，不是这台本体（本体是隐形的）：
-+# 玩家 _process 每帧都在做 `blink_animation_player.speed_scale =
-+# 本台.light_animation_player.speed_scale`，而退休那台没人去停它的灯。
-+# 所以这里 `speed_scale = 0` 是**载重的那一行** —— 它顺着既有的同步链
-+# 自动传到每个客户端的尸体上。直接 stop() 尸体那份是双保险：
-+# `break_spine_state.enter()` 里的 `target.blink_animation_player.stop()`
-+# 只在状态机跑的那一端（服务器）执行过，客户端那份从来没被停过。
++# ⚠️ What's actually blinking is **the device visual on the corpse's back**, not this device itself (which is invisible).
++# The player's _process does `blink_animation_player.speed_scale =
++# this_device.light_animation_player.speed_scale` every frame, and nobody stops the retired device's light.
++# So `speed_scale = 0` here is **the load-bearing line** — it follows the existing sync chain
++# to the corpse on every client automatically. Calling stop() directly on the corpse's copy is a double safety net,
++# since `target.blink_animation_player.stop()` in `break_spine_state.enter()`
++# only ran on the side running the state machine (the server), and the clients' copies were never stopped.
 +@rpc("any_peer", "call_local", "reliable")
 +func mp8_retire_quiet_rpc(victim_path: NodePath) -> void :
 +
++	if not NetworkManager.mp8_sender_is_host(multiplayer):
++		return
++
 +	activation_timer.stop()
 +	light_animation_player.stop()
-+	# [MP8] ⚠️ 这个 speed_scale **不是**给自己用的，是给玩家用的：
-+	# 玩家的 `_process` 每帧都把自己的 `blink_animation_player.speed_scale`
-+	# 同步成**设备这个值**。所以想让尸体背上那盏灯继续闪，唯一的旋钮就是这一行 ——
-+	# 置 0 就是「不闪」，这也是上一版灯不闪的原因。
-+	# 而设备的 `_process` 只在 `activation_timer` 没停时才覆写它，退休已经把表停了，
-+	# 所以这里设的值不会被冲掉。
++	# [MP8] ⚠️ This speed_scale is **not** for the device itself, it's for the player.
++	# Every frame the player's `_process` syncs its own `blink_animation_player.speed_scale`
++	# to **this device value**. So to keep the light on the corpse's back blinking, this line is the only knob —
++	# setting it to 0 means "no blinking", which is also why the light didn't blink in the previous version.
++	# And the device's `_process` only overwrites it while `activation_timer` isn't stopped. Retiring already stopped the timer,
++	# so the value set here won't get overwritten.
 +	light_animation_player.speed_scale = MP8_RETIRE_BLINK
-+	# [MP8] 原来是 Color.BLACK（熄灯）。装置本体这时已经隐形并被挪到地下 100 米，
-+	# 所以这一行基本看不见 —— 真正让玩家看到绿的是下面那句给背上视觉的染色。
-+	# 这里一并改成绿只为语义一致（万一哪天本体又现形，不该是黑的）。
++	# [MP8] This used to be Color.BLACK (light off). By now the device itself is invisible and has been moved 100 m underground,
++	# so this line is basically never seen — what actually makes players see green is the tint on the back visual below.
++	# It's changed to green here too just for consistency (if the device itself ever becomes visible again, it shouldn't be black).
 +	status_light.light_color = Color.GREEN
 +
 +	var v = get_node_or_null(victim_path)
 +	if v is SpineBreakerPlayer and v.blink_animation_player != null:
 +
 +		# ═══════════════════════════════════════════════════════════════════
-+		# [MP8] 🩸 必须**显式重播**，光是「不 stop」不够（用户 2026-08-30 实测：灯压根没亮）
++		# [MP8] 🩸 It has to be **explicitly replayed**, just "not calling stop" isn't enough (user tested on 2026-08-30 and the light never came on at all)
 +		# ═══════════════════════════════════════════════════════════════════
 +		#
-+		# 上一版这里是 `stop()`，结果玩家报「灯亮都没亮」。两个原因叠在一起：
++		# The previous version used `stop()` here, and players reported "the light never even turned on". Two causes stacked together.
 +		#
-+		#   ① `AnimationPlayer.stop()` 会把被动画的属性**留在当时那一帧**。
-+		#      闪烁动画有"灭"的相位，停在灭相上 → 灯的亮度就是 0，
-+		#      **这时候再怎么改 `light_color` 都看不见**（黑乘任何颜色还是黑）。
-+		#   ② 服务器和客机本来就不一致：`break_spine_state.enter()` 里那句
-+		#      `target.blink_animation_player.stop()` **只在状态机跑的那一端（服务器）执行过**，
-+		#      客机那份从来没被停过。所以只是"这里不再 stop"的话，
-+		#      房主看到的是黑灯、客机看到的是还在闪 —— 更糟。
++		#   ① `AnimationPlayer.stop()` leaves the animated properties **at whatever frame they were on**.
++		#      The blink animation has an "off" phase, and stopping on it → the light's brightness is 0,
++		#      **so no change to `light_color` will be visible** (black times any color is still black).
++		#   ② The server and clients were already inconsistent. In `break_spine_state.enter()`, the line
++		#      `target.blink_animation_player.stop()` **only ran on the side running the state machine (the server)**,
++		#      and the clients' copy was never stopped. So if we merely "stop calling stop here",
++		#      the host sees a dark light while clients still see it blinking — even worse.
 +		#
-+		# 所以这里**主动把它播起来**，让两端都从同一个状态开始。
++		# So here we **actively start playing it**, so both sides start from the same state.
 +		var ap: AnimationPlayer = v.blink_animation_player
 +		var anim: String = ap.current_animation
 +		if anim == "" and ap.get_animation_list().size() > 0:
@@ -204,62 +207,65 @@ diff --git a/minigames/spine_breaker/components/device/spine_breaker_device.gd b
 +			ap.play(anim)
 +		ap.speed_scale = MP8_RETIRE_BLINK
 +
-+	# [MP8] 尸体背上那盏灯改成绿色（用户 2026-08-30 要求）。
++	# [MP8] Turn the light on the corpse's back green (requested by the user on 2026-08-30).
 +	#
-+	# 配合上面两处，效果是**慢速闪烁的绿灯**（用户 2026-08-30 定：退休了也要闪）。
-+	# 红=引信在烧、快闪=快到点了；绿+慢闪=还亮着但已经报废，两套语义分得开。
++	# Together with the two spots above, the result is **a slowly blinking green light** (the user decided on 2026-08-30 that it keeps blinking after retiring).
++	# Red = fuse burning, fast blink = almost time. Green + slow blink = still lit but out of commission, so the two meanings stay distinct.
 +	#
-+	# ⚠️ 这个绿是**故意留着不还原**的：退休那台的整套复位本来就全被跳过
-+	#（不 spine_broken_exited_rpc、不 set_spine_breaker_rpc(false)），
-+	# 所以它会一直绿到本局结束 —— 这正是想要的效果：
-+	# 一眼看出「那具尸体上那台已经报废，场上还在猎人的只剩另一台」。
++	# ⚠️ This green is **intentionally never reverted**. The retired device's entire reset is skipped anyway
++	# (no spine_broken_exited_rpc, no set_spine_breaker_rpc(false)),
++	# so it stays green until this match ends — which is exactly the intended effect,
++	# making it obvious at a glance that "the device on that corpse is out of commission and only the other one is still hunting".
 +	if v is SpineBreakerPlayer and v.spine_breaker_light != null:
 +		v.spine_breaker_light.light_color = MP8_RETIRE_LIGHT
 +		if multiplayer.is_server():
-+			print("[MP8] 碎骨者：%d 号机退休，%s 背上那盏灯转绿" % [mp8_index, String(v.name)])
++			print("[MP8] Spine Breaker: device %d retired, the light on %s's back turns green" % [mp8_index, String(v.name)])
 +
 +
  @rpc("any_peer", "call_local", "reliable")
  func spine_broken_exited_rpc():
  
-@@ -274,6 +428,43 @@ func spine_broken_exited_rpc():
+@@ -274,6 +431,46 @@ func spine_broken_exited_rpc():
  	visible = true
  
  
-+# [MP8] 告诉玩家"现在背着你的是我这台"。
++# [MP8] Tell the player "the device on your back right now is me".
 +#
-+# 为什么非要有这条：玩家脚本里的 `spine_breaker_device` 是 setup_rpc() 时写死的**第一台**。
-+# 两台机器一上场，背着第二台的人按扔，扔出去的会是第一台 —— 自己背的甩不掉、
-+# 反而把另一台遥控走了。所以 attach 的时候由机器自报家门，玩家记住当前这台。
++# Why this is needed at all — `spine_breaker_device` in the player script is hard-set to the **first device** during setup_rpc().
++# Once two devices are in play, whoever carries the second one presses throw and the first one gets thrown — they can't shake off their own
++# and remotely send the other one away instead. So on attach the device identifies itself and the player remembers the current one.
 +#
-+# ⚠️ 必须是 call_local 的 RPC，不能只在服务器上设：
-+# 玩家的 _process 里拿这台的 light_animation_player.speed_scale 做闪烁同步，
-+# 那段在**每个客户端**都跑；客户端上 attached_to 是空的（状态机只在服务器转），
-+# 光靠服务器的数据反查不出来，背第二台的人会看到第一台的引信节奏。
++# ⚠️ This has to be a call_local RPC, not just set on the server.
++# The player's _process uses this device's light_animation_player.speed_scale to sync the blinking,
++# and that runs on **every client**. On clients attached_to is empty (the state machine only transitions on the server),
++# so it can't be worked out from server data alone, and whoever carries the second device would see the first device's fuse rhythm.
 +@rpc("any_peer", "call_local", "reliable")
 +func mp8_bind_rpc(player_path: NodePath) -> void :
 +
++	if not NetworkManager.mp8_sender_is_host(multiplayer):
++		return
++
 +	var p = get_node_or_null(player_path)
 +	if p == null:
-+		# 绑不上就是"背着 2 号机的人按扔却扔飞了 1 号机"的根因，必须看得见
-+		push_warning("[MP8] 碎骨者：%d 号机绑不上玩家 —— 找不到节点 %s" % [
++		# Failing to bind is the root cause of "the player carrying device 2 presses throw and sends device 1 flying", so it has to be visible
++		push_warning("[MP8] Spine Breaker: device %d can't bind to a player — node %s not found" % [
 +			mp8_index, str(player_path)
 +		])
 +		if multiplayer.is_server():
-+			print("[MP8] 碎骨者：⚠️ %d 号机绑定失败，路径 %s" % [mp8_index, str(player_path)])
++			print("[MP8] Spine Breaker: ⚠️ device %d failed to bind, path %s" % [mp8_index, str(player_path)])
 +		return
 +
 +	p.mp8_current_device = self
 +
-+	# [MP8] 把本台的颜色贴到他背上那套视觉上 —— 装置本体这时候已经隐形了，
-+	# 玩家看到的红不红全看这一行（见 spine_breaker_player.mp8_set_visual_tint）。
-+	# 每次 attach 都重设一遍：上一台是红的、这一台是白的时，得能刷回来。
++	# [MP8] Apply this device's color to the visual on his back — the device itself is already invisible by now,
++	# so whether players see red depends entirely on this line (see spine_breaker_player.mp8_set_visual_tint).
++	# Reapply it on every attach. If the previous device was red and this one is white, it has to be able to switch back.
 +	var painted: int = p.mp8_set_visual_tint(mp8_tint, mp8_tex_key)
 +
 +	if multiplayer.is_server():
-+		# 把染了几个面一起打出来 —— 第一版就是"调用了但一个面都没染到"，
-+		# 只看"绑定成功"这条日志完全看不出问题
-+		print("[MP8] 碎骨者：%d 号机绑定到 %s（背上视觉染色 %d 面）" % [
++		# Print how many surfaces got tinted too — the first version was "called but didn't tint a single surface",
++		# and the "bind succeeded" log alone gave no sign of the problem
++		print("[MP8] Spine Breaker: device %d bound to %s (tinted %d surfaces on the back visual)" % [
 +			mp8_index, String(p.name), painted
 +		])
 +

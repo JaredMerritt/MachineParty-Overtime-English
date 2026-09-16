@@ -6,39 +6,39 @@ diff --git a/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd b
  var movement_input: Vector3
  
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] T52 卡墙自救（2026-09-02）
++# [MP8] T52 wall-stuck self-rescue (2026-09-02)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 玩家 2026-09-01 的原话：「鸭子走到石墙处，突然发现 wasd 无反应，
-+# **但是右键下蹲正常**，可以确定不是点到其他窗口，且位置刚好猎人狙击不到，导致卡关。」
++# A player's exact words on 2026-09-01 - "The duck walked up to the stone wall and suddenly WASD stopped responding,
++# **but right-click crouch still worked**, so it definitely wasn't clicking into another window, and the spot happened to be where the hunter couldn't snipe me, so the game got stuck."
 +#
-+# 🩸 「右键下蹲正常」这一句把整个输入层一次排除干净 —— 因为 `update_crouch()` 是
-+# `_process` 的**最后一行**，排在 `PauseMenu.active` / `game_focused` / `active`
-+# 三道闸和 `movement_input` 赋值**之后**。下蹲能用 ⇒ 三道闸全过、`movement_input` 有值。
-+# 问题只可能在 `move_and_slide()` 那一侧：**人被几何卡住了。**
++# 🩸 The line "right-click crouch still worked" rules out the entire input layer in one go — because `update_crouch()` is
++# the **last line** of `_process`, placed **after** the three gates `PauseMenu.active` / `game_focused` / `active`
++# and the `movement_input` assignment. Crouch works ⇒ all three gates passed and `movement_input` has a value.
++# The problem can only be on the `move_and_slide()` side. **The player is stuck in geometry.**
 +#
-+# ⚠️ 这条推翻了本 mod 1.5 里那个点名器的前提 —— 它只会打印「角色在、已激活、
-+#    窗口聚焦=true」，而那**正是这个 bug 的样子**。判据本身问错了，已一并改。
++# ⚠️ This overturns the premise of the roll-call logger in this mod's 1.5 — all it prints is "character present, activated,
++#    window focused=true", and that **is exactly what this bug looks like**. The check itself asked the wrong question and has been fixed too.
 +#
-+# 排掉的假说（别再走）：**不是下蹲穿墙**。probe81 量过，鸭子有两个身体碰撞体，
-+# `StandingCollision`（高 5.00 半径 0.70）与 `CrouchCollision`（高 3.60 **半径同样 0.70**），
-+# 下蹲只关前者。**只变矮、不变窄**，所以既穿不进墙也挤不进缝。
++# Ruled-out hypothesis (don't go down this road again) - **it is not crouching through walls**. probe81 measured it. The duck has two body colliders,
++# `StandingCollision` (height 5.00, radius 0.70) and `CrouchCollision` (height 3.60, **same radius 0.70**),
++# and crouching only disables the former. **It only gets shorter, not narrower**, so it can neither pass into a wall nor squeeze into a gap.
 +#
-+# 现在这套不去找那堵具体的墙 —— 地图上未必只有一处，而后果是**整局卡关**
-+# （玩家还说「位置刚好猎人狙击不到」，连被打死解脱都做不到）。所以做通用兜底：
++# This approach doesn't hunt for that specific wall — there may be more than one spot on the map, and the consequence is **the whole match stuck**
++# (the player also said "the spot happened to be where the hunter couldn't snipe me", so they couldn't even escape by getting shot). So we add a general safety net.
 +#
-+#   **有输入、但连续 N 秒几乎没动 → 传回 1 米前的面包屑位置。**
++#   **Input held, but barely moved for N seconds straight → teleport back to the breadcrumb position from 1 m back.**
 +#
-+# 面包屑取"离上一个面包屑超过 1 米时更新"，所以它永远在你来路上一米左右 ——
-+# 传回去 = 沿原路退一步，必定脱困，而且位移小到几乎看不出来。
++# The breadcrumb "updates once you are more than 1 m from the previous breadcrumb", so it is always about one meter back along your path —
++# teleporting there = stepping back along the way you came, which always frees you, and the move is small enough to be nearly invisible.
 +#
-+# ⚠️ 只在**自己那台**跑：鸭子的移动权威是玩家本人（`set_multiplayer_authority`），
-+#    别人那份 `_physics_process` 是关掉的，服务器上也测不到这件事。
-+# ⚠️ 顶着墙站 3 秒也会触发，代价是被推回一米 —— 几乎察觉不到，
-+#    而漏掉一次真卡死就是一整局报废。这个不对称是故意选的。
-+const MP8_STUCK_SECONDS: float = 3.0    # 判定卡住需要的持续时间
-+const MP8_STUCK_EPSILON: float = 0.05   # 一帧位移小于这个就算"没动"
-+const MP8_CRUMB_DISTANCE: float = 1.0   # 面包屑间距
++# ⚠️ Runs **only on the player's own machine**. The duck's movement authority is the player themselves (`set_multiplayer_authority`),
++#    everyone else's copy has `_physics_process` turned off, and the server can't detect this either.
++# ⚠️ Standing against a wall for 3 seconds also triggers it, at the cost of being pushed back one meter — barely noticeable,
++#    whereas missing one real stuck case ruins a whole match. This asymmetry was chosen on purpose.
++const MP8_STUCK_SECONDS: float = 3.0    # How long it must last to count as stuck
++const MP8_STUCK_EPSILON: float = 0.05   # Per-frame movement below this counts as "not moving"
++const MP8_CRUMB_DISTANCE: float = 1.0   # Breadcrumb spacing
 +
 +var _mp8_stuck_t: float = 0.0
 +var _mp8_prev_pos: Vector3 = Vector3.ZERO
@@ -57,7 +57,7 @@ diff --git a/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd b
  	update_animations(delta)
  	play_footstep_sound(delta)
  
-+# [MP8] T52：有输入却不动 → 沿来路退一米。说明见文件上方那段。
++# [MP8] T52 - input held but not moving → step back one meter along the path. See the section at the top of the file.
 +func _mp8_check_stuck(delta: float) -> void :
 +
 +	if not _mp8_crumb_set:
@@ -69,11 +69,11 @@ diff --git a/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd b
 +	var moved: float = global_position.distance_to(_mp8_prev_pos)
 +	_mp8_prev_pos = global_position
 +
-+	# 走开够远了就丢一颗新面包屑（它始终在来路上约一米处）
++	# Once you've walked far enough, drop a new breadcrumb (it is always about one meter back along your path)
 +	if global_position.distance_to(_mp8_crumb) > MP8_CRUMB_DISTANCE:
 +		_mp8_crumb = global_position
 +
-+	# 没按方向键就不算卡住 —— 站着不动是玩家自己的选择
++	# No direction key held means not stuck — standing still is the player's own choice
 +	if movement_input.length() <= Globals.Epsilon:
 +		_mp8_stuck_t = 0.0
 +		return
@@ -86,10 +86,10 @@ diff --git a/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd b
 +	if _mp8_stuck_t < MP8_STUCK_SECONDS:
 +		return
 +
-+	# 走到这儿：按着方向键、连续 MP8_STUCK_SECONDS 秒没挪动
-+	# ⚠️ 坐标照打不误 —— 这是我们唯一能拿到「那堵墙在哪」的途径，
-+	#    本机复现不出来，只能靠玩家日志。
-+	print("[MP8] 🩸 猎鸭卡住自救：%s 在 (%.1f, %.1f, %.1f) 按着方向键 %.1f 秒没动，退回 (%.1f, %.1f, %.1f)（T52）" % [
++	# Reaching here means a direction key is held and there has been no movement for MP8_STUCK_SECONDS seconds straight
++	# ⚠️ Always print the coordinates — it's our only way to find out "where that wall is".
++	#    It can't be reproduced locally, so we have to rely on player logs.
++	print("[MP8] 🩸 Duck Hunt stuck self-rescue: %s at (%.1f, %.1f, %.1f) held a direction key for %.1f s without moving, moved back to (%.1f, %.1f, %.1f) (T52)" % [
 +		player_presence.network_name if player_presence else "?",
 +		global_position.x, global_position.y, global_position.z,
 +		_mp8_stuck_t,
@@ -107,17 +107,17 @@ diff --git a/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd b
  @rpc("any_peer", "call_local", "reliable")
  func shot_rpc(_damage: int):
  
-+	# [MP8] T47 ③：防重入。**原版这里没有这道门。**
++	# [MP8] T47 ③ - re-entry guard. **Vanilla has no gate here.**
 +	#
-+	# 原版是单猎人，一个人受射击冷却限制、很难同一瞬间打中同一只鸭两次，所以露不出来。
-+	# **是 T6b（6 人以上双猎人）让它变可达的**：两个**互相独立**的玩家可以同时命中同一只，
-+	# 两条 `shot_rpc` 都会走完下面的死亡路径 —— 血、音效、动画各来两遍。
++	# Vanilla has a single hunter, who is limited by shot cooldown and can hardly hit the same duck twice in the same instant, so it never showed up.
++	# **T6b (dual hunters at 6+ players) is what makes it reachable**. Two **independent** players can hit the same duck at the same time,
++	# and both `shot_rpc` calls run the whole death path below — blood, sound and animation each play twice.
 +	#
-+	# 得分侧有兜底（`duck_hunt.gd` 那段被 `duck_players.has(id)` 挡着，第二次进不去），
-+	# 所以**分不会重复加**；这里挡的是表现层重复，以及 `health` 被继续往下减。
++	# The scoring side has a safety net (that part of `duck_hunt.gd` is guarded by `duck_players.has(id)`, so the second call can't get in),
++	# so **the score is not added twice**. What this guards against is duplicated presentation, and `health` being reduced further.
 +	#
-+	# ⚠️ 判据用 `active` 而不是 `health > 0`：`active` 在死亡时置 false（见下），
-+	#    也在回合没开始时是 false —— 两种「不该挨枪」的情况一并覆盖。
++	# ⚠️ The check uses `active` instead of `health > 0`. `active` is set to false on death (see below),
++	#    and is also false before the round has started — this covers both "shouldn't take a shot" cases at once.
 +	if not active:
 +		return
 +
@@ -128,7 +128,7 @@ diff --git a/minigames/duck_hunt/components/duck_player/scripts/duck_player.gd b
  
  	global_position = _position
  
-+	# [MP8] T52：换了地方，面包屑与卡住计时一并重置，免得把人传回上一轮的位置
++	# [MP8] T52 - moved to a new spot, so reset the breadcrumb and stuck timer together, so the player isn't teleported back to last round's position
 +	_mp8_crumb = _position
 +	_mp8_prev_pos = _position
 +	_mp8_crumb_set = true

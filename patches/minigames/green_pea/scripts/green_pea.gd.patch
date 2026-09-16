@@ -7,49 +7,49 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
  
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 8 人席位（2026-08-17）
++# [MP8] 8-player seating (2026-08-17)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# **摆法定案 B**（probe48/49 量出来的，不是拍脑袋）：**原版 4 席一个字节不动**，
-+# 每边各插 2 个新座位，z = **+0.28**（插在原版两席中间）与 **-2.15**（桌子 -z 端的空档）。
++# **Layout decision B** (measured with probe48/49, not guessed) — **the 4 vanilla seats are not changed by a single byte**,
++# and 2 new seats are inserted on each side, at z = **+0.28** (between two vanilla seats) and **-2.15** (the gap at the table's -z end).
 +#
-+# ⚠️ **"把桌子延长再加座位"这条路两个方向都堵死**（原本的方案 ①，实测否掉）：
-+#   * **+z 方向**：相机在 (0, 4.26, 4.31) **朝 -z 看**，桌面已经到 z=2.86，
-+#     离镜头只剩 1.45 米 —— 再往这边加人就糊在镜头上。
-+#     （候选 C 实测：z=2.20 那对屏幕 ±0.93 贴边、椅子还出桌面 2 厘米。）
-+#   * **-z 方向**：教练椅占 z[-4.83, -3.33]，桌面到 -2.86，中间只有 0.47 米。
++# ⚠️ **"Extend the table and add seats" is blocked in both directions** (that was the original plan ①, rejected after testing).
++#   * **+z direction** — the camera sits at (0, 4.26, 4.31) **looking toward -z**, and the tabletop already reaches z=2.86,
++#     only 1.45 m from the lens — adding people on this side would smear them right across the camera.
++#     (Candidate C in testing — the pair at z=2.20 lands at ±0.93 on screen, hugging the edge, and the chairs also stick 2 cm past the tabletop.)
++#   * **-z direction** — the coach's chair occupies z[-4.83, -3.33] and the tabletop reaches -2.86, leaving only 0.47 m in between.
 +#
-+# ⚠️ **为什么不用"每边 4 席均分"**（候选 A，间距 1.43 刚好塞得下 4 张椅子）：
-+#   那样**原版席位会被挪走**，而教练的开枪动画是**逐座位手做的**
-+#   （`coach_shoot_position_0..3`，全表只有这 4 个）—— 席位一挪，
-+#   原本瞄得准的那 4 个也跟着全歪。保原版 = 8 席里有 4 席瞄准完美。
++# ⚠️ **Why not "4 seats evenly spaced per side"** (candidate A, where 1.43 spacing just fits 4 chairs)?
++#   Doing that **moves the vanilla seats**, and the coach's shooting animations are **hand-made per seat**
++#   (`coach_shoot_position_0..3`, only these 4 exist in the whole table) — once the seats move,
++#   the 4 that used to aim correctly all go off as well. Keeping vanilla = 4 of the 8 seats with perfect aim.
 +#
-+# 屏幕投影验算（坑第 25 条，全部在框内，最远 ±0.70，和原版最远那一席一样）：
++# Screen projection check (pitfall #25, all inside the frame, farthest ±0.70, the same as the farthest vanilla seat)
 +#     z=-2.15 → ±0.36    z=-0.73 → ±0.45    z=+0.28 → ±0.54    z=+1.29 → ±0.70
 +#
-+# 代价：z=+0.28 那把椅子和左右邻座各**重叠 0.34 米**
-+# （用户 2026-08-17 明确授权"必要时候允许重叠"）。
++# The cost is that the chair at z=+0.28 **overlaps each neighbor on the left and right by 0.34 m**
++# (on 2026-08-17 the user explicitly allowed "overlap when necessary").
 +const MP8_NEW_SEAT_Z: Array[float] = [0.28, -2.15]
 +
-+# network_manager 用 Object.get() 读这个标志，读到 true 就不碰我们的出生点容器。
-+# ⚠️ **必须有**：本容器名 `PlayerSpawnPositions` 正在通用补位的白名单里，
-+#    而通用算法取的是"相邻两点连线的中点"—— 会把新座位塞到**桌子正中间**去。
++# network_manager reads this flag via Object.get(), and when it reads true it leaves our spawn point container alone.
++# ⚠️ **This is required**. This container's name `PlayerSpawnPositions` is on the whitelist for generic slot filling,
++#    and the generic algorithm takes "the midpoint of the line between adjacent points" — which would put the new seats **right in the middle of the table**.
 +var mp8_owns_spawns: bool = true
 +
-+var _mp8_seat_z: Array[float] = []      # 下标 = 座位号，值 = 该席位的世界 z
++var _mp8_seat_z: Array[float] = []      # index = seat number, value = that seat's world z
 +
-+# [MP8] 被教练打死的先后。原版只把人从 active_players 里抹掉、不记顺序，
-+# 而名次制需要给没吃完的人排个先后 —— 死得晚的比死得早的强（躲得久）。
-+# 这是本次唯一新增的顺序数组；完成顺序用原版就有的 finished_players，
-+# 到没到一半用原版就有的 halfway_done_players（用户定的规矩 2：用已有的顺序数组）。
++# [MP8] The order in which players were shot by the coach. Vanilla only erases them from active_players and doesn't record the order,
++# but placement scoring needs to rank the people who didn't finish eating — dying later beats dying earlier (they dodged longer).
++# This is the only new order array added here. Finish order uses vanilla's existing finished_players,
++# and reaching halfway uses vanilla's existing halfway_done_players (per user rule 2, use the existing order arrays).
 +var _mp8_dead_order: Array[int] = []
 +
 +
  func _ready() -> void :
  	super._ready()
  
-+	# [MP8] 必须在任何人读出生点之前建好；而且**每个端都要跑**——
-+	# 椅子和血迹是各机本地的视觉件，不走网络同步。
++	# [MP8] This must be built before anyone reads the spawn points, and it **has to run on every peer** —
++	# chairs and blood decals are local visuals on each machine and aren't synced over the network.
 +	_mp8_setup_seats()
 +
  	camera.current = true
@@ -60,26 +60,26 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
  
  
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 以下全是新增
++# [MP8] Everything below is new
 +# ═══════════════════════════════════════════════════════════════════════════
 +
 +func _mp8_setup_seats() -> void :
 +
 +	if player_spawn_positions == null:
-+		push_warning("[MP8] 吃豆子：没有出生点容器，8 席不做")
++		push_warning("[MP8] Green Pea: no spawn point container, skipping 8 seats")
 +		return
 +
 +	var base: int = player_spawn_positions.get_child_count()
 +	if base != 4:
-+		print("[MP8] 吃豆子：出生点有 %d 个（预期 4），版本可能变了，8 席不做" % base)
++		print("[MP8] Green Pea: found %d spawn points (expected 4), the version may have changed, skipping 8 seats" % base)
 +		return
 +
-+	# 原版 4 席的 z **现读**，不抄坐标（抄坐标是这个项目翻过车的事）
++	# Read the 4 vanilla seats' z **live** instead of copying coordinates (copying coordinates is something this project has been burned by before)
 +	_mp8_seat_z.clear()
 +	for i in base:
 +		_mp8_seat_z.append(player_spawn_positions.get_child(i).position.z)
 +
-+	# 左右各取一个原版 Marker 当模板：x / y / 朝向全部沿用它的，只改 z
++	# Take one vanilla Marker on each side as a template. x / y / facing all come from it, only z changes
 +	var left_src: Node3D = null
 +	var right_src: Node3D = null
 +	for i in base:
@@ -91,10 +91,10 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +			right_src = m
 +
 +	if left_src == null or right_src == null:
-+		print("[MP8] 吃豆子：认不出左右两侧的出生点，8 席不做")
++		print("[MP8] Green Pea: can't identify the left and right spawn points, skipping 8 seats")
 +		return
 +
-+	# ① 出生点：每个新 z 各加左右两个，顺序 = 左、右（和原版的左右交替一致）
++	# ① Spawn points. Add a left and a right one for each new z, in the order left, right (matching vanilla's left/right alternation)
 +	for z in MP8_NEW_SEAT_Z:
 +		for src in [left_src, right_src]:
 +			var dup: Node3D = src.duplicate()
@@ -109,26 +109,26 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +	_mp8_map_animations(base)
 +	_mp8_clear_table_cans()
 +
-+	print("[MP8] 吃豆子：席位 %d → %d，z = %s" % [base, _mp8_seat_z.size(), str(_mp8_seat_z)])
++	print("[MP8] Green Pea: seats %d → %d, z = %s" % [base, _mp8_seat_z.size(), str(_mp8_seat_z)])
 +
 +
-+# 椅子实体：左右各拿一张原版椅子复制。
-+# ⚠️ 父节点 `walls` 的 basis 实测是**单位阵**（probe48 逐级验过），所以可以直接改 position；
-+#    换了版本万一不是单位阵，得按坑第 27 条用 basis.inverse() 换算，别直接平移。
++# Chair objects. Duplicate one vanilla chair for each side.
++# ⚠️ The parent node `walls` has an **identity** basis in practice (probe48 checked every level), so position can be edited directly.
++#    If a different version ever isn't identity, convert with basis.inverse() per pitfall #27 instead of translating directly.
 +func _mp8_add_chairs(left_src: Node3D, right_src: Node3D) -> void :
 +
 +	var walls := get_node_or_null("pea dinner scene4/walls")
 +	if walls == null:
-+		print("[MP8] 吃豆子：找不到 walls，新座位没有椅子")
++		print("[MP8] Green Pea: walls not found, new seats have no chairs")
 +		return
 +
-+	var chair_l := walls.get_node_or_null("chair player0")   # 左，z≈1.29
-+	var chair_r := walls.get_node_or_null("chair player3")   # 右，z≈1.29
++	var chair_l := walls.get_node_or_null("chair player0")   # left, z≈1.29
++	var chair_r := walls.get_node_or_null("chair player3")   # right, z≈1.29
 +	if chair_l == null or chair_r == null:
-+		print("[MP8] 吃豆子：找不到模板椅子，新座位没有椅子")
++		print("[MP8] Green Pea: template chairs not found, new seats have no chairs")
 +		return
 +
-+	# 椅子的 z 和出生点的 z 差一点（实测 0.07 米）——**现算这个差**，不写死
++	# The chair z differs slightly from the spawn point z (0.07 m in practice) — **compute that offset live**, don't hardcode it
 +	var off_l: float = chair_l.position.z - left_src.position.z
 +	var off_r: float = chair_r.position.z - right_src.position.z
 +
@@ -143,13 +143,13 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +			d.position = Vector3(src.position.x, src.position.y, z + float(pair[1]))
 +			n += 1
 +
-+	print("[MP8] 吃豆子：新增椅子 %d 张" % n)
++	print("[MP8] Green Pea: added %d chairs" % n)
 +
 +
-+# 血迹：`decals_by_seat_index` 是按座位下标索引的定长 4 项数组（坑第 13 条那个模式），
-+# 5~8 号会越界读。复制**同侧最近**那一组，整组沿世界 z 平移过去。
-+# ⚠️ 组自己带 yaw（seat1/seat3 是 -180°），但 position 在父空间、父节点是单位阵，
-+#    所以直接加 z 就是世界平移；组内子件跟着整组走，不用管它们的局部朝向。
++# Blood decals. `decals_by_seat_index` is a fixed 4-entry array indexed by seat (the pattern from pitfall #13),
++# so seats 5~8 would read out of bounds. Duplicate the **nearest group on the same side** and shift the whole group along world z.
++# ⚠️ Each group has its own yaw (seat1/seat3 are -180°), but position is in parent space and the parent is identity,
++#    so adding to z is a plain world translation. Children move with their group, so their local orientation doesn't matter.
 +func _mp8_extend_decals(base: int) -> void :
 +
 +	var coach = coach_handler.coach if coach_handler != null else null
@@ -158,7 +158,7 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +
 +	var arr: Array = coach.decals_by_seat_index
 +	if arr.size() != base:
-+		print("[MP8] 吃豆子：血迹数组 %d 项（预期 %d），跳过扩位" % [arr.size(), base])
++		print("[MP8] Green Pea: blood decal array has %d entries (expected %d), skipping extension" % [arr.size(), base])
 +		return
 +
 +	for i in range(base, _mp8_seat_z.size()):
@@ -177,11 +177,11 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +		d.visible = false
 +		arr.append(d)
 +
-+	print("[MP8] 吃豆子：血迹组 %d → %d" % [base, arr.size()])
++	print("[MP8] Green Pea: blood decal groups %d → %d" % [base, arr.size()])
 +
 +
-+# 教练动画就近映射：新座位借**同侧、z 最近**那个原版席位的动画。
-+# 全表只有 coach_shoot_position_0..3，加座位加不出新动画，只能借。
++# Nearest-match coach animations. New seats borrow the animation of the vanilla seat **on the same side with the closest z**.
++# The whole table only has coach_shoot_position_0..3. Adding seats can't add new animations, so borrowing is the only option.
 +func _mp8_map_animations(base: int) -> void :
 +
 +	var coach = coach_handler.coach if coach_handler != null else null
@@ -193,47 +193,47 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +
 +	for i in _mp8_seat_z.size():
 +		if i < base:
-+			table.append(i)                       # 原版席位用自己的，瞄准完美
++			table.append(i)                       # vanilla seats use their own, perfect aim
 +			continue
 +		var v: int = _mp8_nearest_vanilla(i, base)
 +		table.append(v)
-+		desc.append("席%d→动画%d(偏%.2f米)" % [i, v, absf(_mp8_seat_z[i] - _mp8_seat_z[v])])
++		desc.append("seat%d→anim%d(off %.2fm)" % [i, v, absf(_mp8_seat_z[i] - _mp8_seat_z[v])])
 +
 +	coach.mp8_anim_by_seat = table
-+	print("[MP8] 吃豆子：动画映射 %s" % " ".join(desc))
++	print("[MP8] Green Pea: animation mapping %s" % " ".join(desc))
 +
 +
-+# [MP8] 名次制算分（用户 2026-08-17 定：**名次制 + 第一个吃完额外一分**）
++# [MP8] Placement scoring (decided by the user on 2026-08-17 — **placement scoring + one extra point for finishing first**)
 +#
-+# 原版是 B 累加族，单轮上限 3 分（到一半 +1、吃完 +1、第一个吃完再 +1），
-+# **完全不随人数变**：8 人局里七个人都拿 2 分，排名根本分不开。
-+# 现在改成名次分，分差随人数放大，和名次族对齐。
++# Vanilla belongs to family B (cumulative), capped at 3 points per round (+1 at halfway, +1 for finishing, +1 more for finishing first),
++# and **it doesn't scale with player count at all**. In an 8-player match seven people all get 2 points and the ranking can't tell them apart.
++# It now uses placement points, so score gaps widen with player count, in line with the placement family.
 +#
-+# **排序（从差到好），全部用已有的顺序数组，不新造机制**：
-+#   ① 没到一半就被打死的 —— 按死亡先后（先死的最差）
-+#   ② 到了一半但没吃完就被打死的 —— 按死亡先后
-+#   ③ 吃完的 —— 按完成顺序**倒序**（最后吃完的排在这一档最前，第一个吃完的最好）
-+# 得分 = 在这个序列里的下标，**全档步长 1**；然后第一个吃完的**再 +1**。
++# **Ordering (worst to best), all using existing order arrays, no new mechanisms**
++#   ① Shot before reaching halfway — by death order (first to die is worst)
++#   ② Reached halfway but shot before finishing — by death order
++#   ③ Finished — in **reverse** finish order (the last to finish comes first in this tier, the first to finish is best)
++# Score = index in this sequence, **step of 1 across all tiers**, then whoever finished first gets **another +1**.
 +#
-+# ⚠️ 这个 +1 会在榜首造成一个 2 分的断层（其余档位都是 1）——
-+# 和碎骨者那次特意压平的断层是同一个形状，但**这里是用户明确要的**：
-+# 那边的断层是原版遗留的副作用，这里是刻意奖励"第一个清盘"。
++# ⚠️ This +1 creates a 2-point gap at the top (every other step is 1) —
++# the same shape as the gap we deliberately flattened in Spine Breaker, but **here the user explicitly asked for it**.
++# That gap was a side effect left over from vanilla, while this one deliberately rewards "clearing the plate first".
 +#
-+# ⚠️ 掉线的人（既没吃完也没被打死）不在任何顺序数组里，会保持 0 分 ——
-+# 和"第一个死的"并列。人都断线了，不值得为他单开一档。
++# ⚠️ Players who disconnected (neither finished nor shot) aren't in any order array and stay at 0 points —
++# tied with "the first to die". They've disconnected anyway, so it isn't worth a separate tier for them.
 +func _mp8_apply_rank_scores() -> void :
 +
 +	var order: Array = []
 +
-+	# ① / ② 没吃完的：先按"到没到一半"分两档，档内按死亡先后
++	# ① / ② Didn't finish. Split into two tiers by "reached halfway or not" first, then by death order within each tier
 +	for want_half in [false, true]:
 +		for nid in _mp8_dead_order:
 +			if finished_players.has(nid):
-+				continue                      # 吃完之后又被打死的，算完成
++				continue                      # shot after finishing still counts as finished
 +			if halfway_done_players.has(nid) == want_half:
 +				order.append(nid)
 +
-+	# ③ 吃完的：完成顺序倒过来，第一个吃完的排最后 = 分最高
++	# ③ Finished. Reverse the finish order so the first to finish comes last = highest score
 +	var fin: Array = finished_players.duplicate()
 +	fin.reverse()
 +	order.append_array(fin)
@@ -247,8 +247,8 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +	_mp8_log_scores(order.size())
 +
 +
-+# 结算时把名次/名字/得分打进日志（不改任何分数，纯为事后对账）。
-+# 格式与残骸平台、碎骨者一致，几个名次制小游戏对照着看方便。
++# Write placement/name/score to the log at results (doesn't change any score, purely for reconciling afterward).
++# Same format as Junk Platform and Spine Breaker, so the placement-scored minigames are easy to compare side by side.
 +func _mp8_log_scores(ranked: int) -> void :
 +
 +	if not multiplayer.is_server():
@@ -263,28 +263,28 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +		var nm: String = "id%d" % nid
 +		if PlayerManager.player_presences.has(nid):
 +			nm = String(PlayerManager.player_presences[nid].network_name)
-+		var how := "掉线?"
++		var how := "disconnected?"
 +		if finished_players.has(nid):
-+			how = "第%d个吃完" % (finished_players.find(nid) + 1)
++			how = "finished #%d" % (finished_players.find(nid) + 1)
 +		elif _mp8_dead_order.has(nid):
-+			how = ("到一半被打死" if halfway_done_players.has(nid) else "没到一半被打死")
-+		parts.append("第%d名 %s %d分(%s)" % [i + 1, nm, player_scores[nid], how])
++			how = ("shot after halfway" if halfway_done_players.has(nid) else "shot before halfway")
++		parts.append("place %d %s %dpts(%s)" % [i + 1, nm, player_scores[nid], how])
 +
-+	print("[MP8] 吃豆子结算（%d 人在场 / %d 人吃完 / %d 人被打死 / 排进名次 %d）：%s" % [
++	print("[MP8] Green Pea results (%d present / %d finished / %d shot / %d ranked): %s" % [
 +		player_scores.size(), finished_players.size(), _mp8_dead_order.size(),
 +		ranked, " / ".join(parts)
 +	])
 +
 +
-+# 清掉**桌面上**的罐头残骸（用户 2026-08-17 实测：挡住新座位的盘子）。
++# Clear the can debris **on the tabletop** (the user found in testing on 2026-08-17 that it blocks the plates at the new seats).
 +#
-+# ⚠️ **按范围判，不按名字写死**：`pea can*` 一共十几个，其中只有 4 个在桌上，
-+# 其余几个在远处高台上（y 3.5~5.4、z≈-7），那些是布景，清了反而少东西。
-+# 判据是"AABB 中心落在桌面 xz 范围内、且高于桌面"—— 桌面范围也现读，不抄坐标。
++# ⚠️ **Decide by area, don't hardcode names**. There are a dozen or so `pea can*` nodes and only 4 of them are on the table.
++# The rest sit on a distant raised ledge (y 3.5~5.4, z≈-7). Those are set dressing, and clearing them would just leave things missing.
++# The test is "AABB center falls within the tabletop's xz range and is above the tabletop" — the tabletop range is also read live, not copied.
 +#
-+# 只关 `visible` 不删节点：可逆、不动场景结构。
-+# （罐头如果另挂了碰撞体，这里不碰它 —— 玩家是坐着的，够不到桌子中央，
-+#  实测挡的是**视线**不是身体。真发现还能撞上再说。）
++# Only turns off `visible` and doesn't delete nodes. It's reversible and leaves the scene structure alone.
++# (If a can has its own collider, this doesn't touch it — players are seated and can't reach the middle of the table,
++#  and testing showed the cans block **sight lines**, not bodies. We'll deal with it if they ever turn out to be bumpable.)
 +func _mp8_clear_table_cans() -> int :
 +
 +	var scene := get_node_or_null("pea dinner scene4")
@@ -293,7 +293,7 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +
 +	var table := scene.find_child("table", true, false)
 +	if table == null or not (table is MeshInstance3D) or (table as MeshInstance3D).mesh == null:
-+		print("[MP8] 吃豆子：找不到桌面网格，罐头不清")
++		print("[MP8] Green Pea: tabletop mesh not found, cans not cleared")
 +		return 0
 +
 +	var tb: AABB = (table as MeshInstance3D).global_transform * (table as MeshInstance3D).mesh.get_aabb()
@@ -306,7 +306,7 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +
 +		var c: Vector3 = ((m as MeshInstance3D).global_transform * (m as MeshInstance3D).mesh.get_aabb()).get_center()
 +
-+		# 高于桌面才算"桌上的"（远处高台那批 y 在 3.5 以上，但 xz 也不在桌面范围内，双重排除）
++		# Only counts as "on the table" if above the tabletop (the distant ledge ones are above y 3.5, but their xz is also outside the tabletop range, so they're excluded twice over)
 +		if c.y < tb.end.y - 0.10:
 +			continue
 +		if c.x < tb.position.x - 0.30 or c.x > tb.end.x + 0.30:
@@ -317,13 +317,13 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
 +		m.visible = false
 +		n += 1
 +
-+	print("[MP8] 吃豆子：清掉桌面罐头 %d 个（桌面 x[%.2f,%.2f] z[%.2f,%.2f] 顶面 y=%.2f）" % [
++	print("[MP8] Green Pea: cleared %d tabletop cans (tabletop x[%.2f,%.2f] z[%.2f,%.2f] top y=%.2f)" % [
 +		n, tb.position.x, tb.end.x, tb.position.z, tb.end.z, tb.end.y
 +	])
 +	return n
 +
 +
-+# 同侧（x 同号）、z 最近的那个原版席位
++# The vanilla seat on the same side (same sign of x) with the closest z
 +func _mp8_nearest_vanilla(seat: int, base: int) -> int :
 +
 +	var mine: Node3D = player_spawn_positions.get_child(seat)
@@ -349,7 +349,7 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
  
  	finished = true
  
-+	_mp8_apply_rank_scores()          # [MP8] 名次制，见该函数
++	_mp8_apply_rank_scores()          # [MP8] placement scoring, see that function
  	player_scores_finalized.emit(player_scores)
  
  	await get_tree().create_timer(3.0).timeout
@@ -358,11 +358,11 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
  
  	if multiplayer.is_server():
 +
-+		# [MP8] T44 守卫：本局还没正式开始（有人卡在加载里，闸门未放行）。
-+		# 吃豆子的判据是 `if active_players.size() > 0: return` —— 开局前是 0，
-+		# 条件为假，**直接穿过去结算**。清理照做，只不做收尾。完整分析见 T44。
++		# [MP8] T44 guard. This match hasn't properly started yet (someone is stuck loading and the gate hasn't opened).
++		# Green Pea's check is `if active_players.size() > 0: return` — before the start that's 0,
++		# so the condition is false and it **falls straight through to results**. Cleanup still runs, only the wrap-up is skipped. Full analysis in T44.
 +		if not is_all_player_loaded:
-+			print("[MP8] 吃豆子：%d 掉线时本局还没开始，跳过收尾检查" % _network_id)
++			print("[MP8] Green Pea: %d disconnected before this match started, skipping the end-of-match check" % _network_id)
 +			return
 +
  		check_game_end()
@@ -372,9 +372,9 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
  		if ach_active:
  			player_characters[_network_id].trigger_achievement_rpc.rpc()
  
-+	# [MP8] 原版这里的两处 `player_scores += 1`（吃完 +1、第一个吃完再 +1）已删 ——
-+	# 改成名次制之后分数在 _mp8_apply_rank_scores() 里按顺序数组统一算，
-+	# 留着会和名次分叠加。"第一个吃完额外 +1"没丢，挪到那边了（用户 2026-08-17 要保留）。
++	# [MP8] Vanilla's two `player_scores += 1` here (+1 for finishing, +1 more for finishing first) have been removed —
++	# with placement scoring, scores are all computed from the order arrays in _mp8_apply_rank_scores(),
++	# and keeping them would stack on top of the placement points. "+1 extra for finishing first" isn't lost, it moved there (the user wanted it kept, 2026-08-17).
  	if active_players.has(_network_id):
 -
 -		player_scores[_network_id] += 1
@@ -390,7 +390,7 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
  
  	if active_players.has(_network_id):
  		active_players.erase(_network_id)
-+		# [MP8] 记死亡先后，名次制要用它给没吃完的人排序
++		# [MP8] Record death order. Placement scoring uses it to rank the players who didn't finish
 +		if not _mp8_dead_order.has(_network_id):
 +			_mp8_dead_order.append(_network_id)
  
@@ -398,8 +398,8 @@ diff --git a/minigames/green_pea/scripts/green_pea.gd b/minigames/green_pea/scri
  
  func _on_player_halfway(_network_id: int):
  
-+	# [MP8] 原版这里 +1；名次制下改成**排序里的一档**（到过一半的死者排在没到一半的前面），
-+	# 而不是单独加分 —— 单独加分会把"全档步长 1"的阶梯打乱。
++	# [MP8] Vanilla gives +1 here. Under placement scoring it becomes **a tier in the ordering** instead (dead players who reached halfway rank above those who didn't),
++	# not a separate bonus — a separate bonus would break the "step of 1 across all tiers" ladder.
  	if not halfway_done_players.has(_network_id):
  		halfway_done_players.append(_network_id)
 -		player_scores[_network_id] += 1

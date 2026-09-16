@@ -1,65 +1,70 @@
 diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/network_manager.gd
 --- a/modules/multiplayer/network_manager.gd
 +++ b/modules/multiplayer/network_manager.gd
-@@ -1,8 +1,13 @@
+@@ -1,8 +1,18 @@
  extends Node
  
 -const MAX_PLAYERS: int = 4
-+const MAX_PLAYERS: int = 8  # [MP8] 原值 4
++const MAX_PLAYERS: int = 8  # [MP8] Originally 4
  const MAX_DEBUG_PLAYERS: int = 5
  
-+# [MP8] mod 版本号。**发布新版就改这里**，它会被追加进 Globals.game_version，
-+# 直接决定"谁能跟谁联机"（见 _ready() 里那段版本握手）。
-+# 格式随意但要短：主菜单右下角显示的是 `原版号+本标签`，太长会顶出去。
-+const MP8_VERSION_TAG: String = "overtime-1.6"
++# [MP8] Mod version tag. **Change this when releasing a new version**. It gets appended to Globals.game_version,
++# which directly decides "who can play online with whom" (see the version handshake in _ready()).
++# Any format is fine but keep it short. The main menu's bottom-right corner shows `vanilla version+this tag`, and if it's too long it overflows.
++const MP8_VERSION_TAG: String = "overtime-1.7-en"
++
++# [MP8] Master switch for every developer tool in this mod. That covers mp8* launch flags, in-game layout editors,
++# debug keys, layout files, screenshots and diagnostics. With it false they're all unreachable and every switch keeps its default.
++# It must be false in anything given to players. tools\build_installer.ps1 refuses to package a build where it's true.
++const MP8_DEV_TOOLS: bool = false
 +
  enum NetworkBackendType{
  	Enet, Steam
  }
-@@ -18,7 +23,77 @@ var game_scene: PackedScene
+@@ -18,7 +28,77 @@ var game_scene: PackedScene
  
  var players: Dictionary
  var players_loaded: Array
 -var max_player_count: int = MAX_PLAYERS
-+# [MP8] 容量守卫的开关，在 _ready() 末尾置位。
++# [MP8] Switch for the capacity guard, set at the end of _ready().
 +#
-+# 防的是下面这个过程 —— 它只在**装了别的 mod** 时才可能发生，
-+# 单独跑 Overtime 时这段代码一次都不会触发：
++# It guards against the sequence below — which can only happen **when another mod is installed**,
++# and when Overtime runs on its own this code never triggers even once.
 +#
-+#   1. 开房：steam_backend.join_host() 拿 max_player_count 去 Steam.createLobby()，8 人，正常
-+#   2. 某个 mod 在运行时把 NetworkManager.max_player_count 写成 4
-+#      （已知案例：MachineParty+ 的「Make Lobby Public」，它的 MAX_PLAYERS_CAP 硬编码为 4）
-+#   3. 退房回主菜单：create_backend() 只重建 backend，**本 autoload 不重建**，那个 4 活下来了
-+#   4. 再开一局：createLobby(..., 4) —— 新房间只能进 4 个人
-+#   5. 没有任何代码把它改回来，重启游戏才好
++#   1. Host a lobby: steam_backend.join_host() passes max_player_count to Steam.createLobby(), 8 players, all normal
++#   2. Some mod writes NetworkManager.max_player_count as 4 at runtime
++#      (a known case is MachineParty+'s "Make Lobby Public", whose MAX_PLAYERS_CAP is hard-coded to 4)
++#   3. Leave the lobby for the main menu: create_backend() only rebuilds the backend, **this autoload is not rebuilt**, so that 4 survives
++#   4. Host again: createLobby(..., 4) — the new lobby only admits 4 players
++#   5. No code ever changes it back. Only restarting the game fixes it
 +#
-+# 这个 bug 的毒在于**跨房间存活、没有可见成因、且完全静默**：
-+# 污染发生在上一局、发作在下一局，房主看到的是一个完全正常的大厅，
-+# 只是第 5 个人进不来。
++# What makes this bug nasty is that it **survives across lobbies, has no visible cause, and is completely silent**.
++# The corruption happens in one match and shows up in the next. The host sees a perfectly normal lobby,
++# except the 5th player can't get in.
 +#
-+# ⚠️ 守卫本身修的是第 2 步，但真正的价值是那行 push_warning ——
-+# 玩家报「我房间只能进 4 个人」时，日志里直接点名是谁、压到了几，
-+# 而不是一场跨会话的猎巫。
++# ⚠️ The guard itself fixes step 2, but the real value is that push_warning line —
++# when a player reports "my lobby only admits 4 people", the log names exactly who did it and what it was lowered to,
++# instead of a cross-session witch hunt.
 +#
-+# 只挡「变小」，不挡「变大」：将来真有人做 12 人 mod，放行。
++# Only blocks "shrinking", not "growing". If someone really makes a 12-player mod in the future, let it through.
 +#
-+# 上锁点选在 _ready() 末尾是安全的：autoload 是逐个 add_child、逐个 _ready 的，
-+# 加载器（若有）排在本节点之前，各 mod 的初始化都跑在这一行之前；
-+# 我们自己的 -trailer 分支（把容量降到 5）也在上锁之前，不受影响。
++# Locking at the end of _ready() is safe. Autoloads are added with add_child and run _ready one at a time,
++# the loader (if any) comes before this node, and every mod's initialization runs before this line.
++# Our own -trailer branch (which lowers capacity to 5) also runs before the lock, so it's unaffected.
 +var _mp8_cap_locked: bool = false
 +
-+# 上锁后我们认定的容量。钉死在这个值 —— **大小都挡**。
++# The capacity we settle on once locked. It's pinned to this value — **both smaller and larger are blocked**.
 +#
-+# 原先只挡「变小」，有个棘轮毛病：某个 mod 写了 9 之后下限就变成 9，
-+# 之后连写回 8 都被挡；再极端点写个 100，座位数组直接被撑爆。
-+# 而「放行变大」本来是给假想中的 12 人 mod 留的口子 —— 但那种 mod
-+# 必然要整份替换 network_manager.gd（MAX_PLAYERS 是 const，到处内联），
-+# 根本不会在运行时写这个变量。口子留了没人用，只留下毛病，所以关掉。
++# Originally it only blocked "shrinking", which had a ratchet flaw. Once a mod wrote 9, the floor became 9,
++# and after that even writing 8 back was blocked. In a more extreme case, writing 100 would blow up the seat array outright.
++# And "allow growing" was originally a gap left for a hypothetical 12-player mod — but that kind of mod
++# would have to replace network_manager.gd wholesale (MAX_PLAYERS is a const, inlined everywhere),
++# and would never write this variable at runtime. The gap went unused and only left the flaw behind, so it's closed.
 +var _mp8_cap_want: int = MAX_PLAYERS
 +
-+# push_warning 的限流。某个 mod 若每帧写一次，不限流就是每帧一条日志、
-+# 几分钟能把 godot.log 撑到几百 MB。同一个值只报第一次，
-+# 之后每 5 秒最多补一条并带上被压掉的条数。
++# Rate limit for push_warning. If a mod writes this every frame, without a limit that's one log line per frame,
++# enough to bloat godot.log to hundreds of MB within a few minutes. The same value is only reported the first time,
++# then at most one more line every 5 seconds, including the number of suppressed writes.
 +var _mp8_cap_warn_at: float = -1.0
 +var _mp8_cap_warn_val: int = -0x7FFFFFFF
 +var _mp8_cap_warn_skipped: int = 0
@@ -76,16 +81,16 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +
 +	var now: float = float(Time.get_ticks_msec()) / 1000.0
 +
-+	# 同一个值、5 秒内 —— 只记数不刷屏
++	# Same value within 5 seconds — just count it, don't spam the log
 +	if v == _mp8_cap_warn_val and _mp8_cap_warn_at >= 0.0 and now - _mp8_cap_warn_at < 5.0:
 +		_mp8_cap_warn_skipped += 1
 +		return
 +
 +	var tail: String = ""
 +	if _mp8_cap_warn_skipped > 0:
-+		tail = "（前 %.0f 秒内还有 %d 次同样的写入被压掉了）" % [now - _mp8_cap_warn_at, _mp8_cap_warn_skipped]
++		tail = " (in the previous %.0f s, %d more identical writes were suppressed)" % [now - _mp8_cap_warn_at, _mp8_cap_warn_skipped]
 +
-+	push_warning("[MP8] 有外部代码想把房间容量从 %d 改成 %d，已忽略%s（见 _mp8_cap_locked）" % [
++	push_warning("[MP8] External code tried to change lobby capacity from %d to %d, ignored%s (see _mp8_cap_locked)" % [
 +		_mp8_cap_want, v, tail
 +	])
 +
@@ -95,150 +100,154 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
  
  signal backend_ready()
  signal on_server_created()
-@@ -42,14 +117,670 @@ signal player_removed_from_join_queue(network_id)
+@@ -42,14 +122,674 @@ signal player_removed_from_join_queue(network_id)
  
  func _ready() -> void :
  
-+	# [MP8] ================ 版本握手 ================
++	# [MP8] ================ Version handshake ================
 +	#
-+	# 原版两个后端**都自带**版本校验：客户端把 `Globals.game_version` 一起发过来，
-+	# 房主对不上就 `refuse_client_rpc(..., RefuseReason.VersionMismatch)`
-+	#（`enet_backend.gd:133` / `steam_backend.gd:169`）。
-+	# 给它打上 mod 后缀就白得三件事：
-+	#   ① 原版玩家进不了 mod 房、mod 玩家进不了原版房；
-+	#   ② **不同 mod 版本之间也互相拒绝**；
-+	#   ③ 用的是游戏自己的拒绝 UI，不是"能进去但 RPC 对不上、玩到一半开始鬼畜"。
-+	# 改核心脚本的 mod 最怕混装，这道闸门是原版送的。
++	# Both vanilla backends **already have** a version check. The client sends `Globals.game_version` along,
++	# and if it doesn't match, the host calls `refuse_client_rpc(..., RefuseReason.VersionMismatch)`
++	#(`enet_backend.gd:133` / `steam_backend.gd:169`).
++	# Adding a mod suffix to it gets us three things for free.
++	#   ① Vanilla players can't join mod lobbies, and mod players can't join vanilla lobbies.
++	#   ② **Different mod versions refuse each other too**.
++	#   ③ It uses the game's own refusal UI, instead of "you get in but the RPCs don't match, and things go haywire halfway through".
++	# Mixed installs are the biggest fear for a mod that changes core scripts, and vanilla hands us this gate for free.
 +	#
-+	# ⚠️ 代价（知情选择）：**装了 mod 就不能跟原版朋友一起玩**，
-+	# 要回去用安装器 `install_mp8.ps1 -Uninstall` 还原。
++	# ⚠️ The cost (an informed choice) is that **with the mod installed you can't play with friends on vanilla**,
++	# and you have to go back and restore with the installer's `install_mp8.ps1 -Uninstall`.
 +	#
-+	# ⚠️ 为什么写在这里、而不是 patch 掉 `autoloads/globals.gd`：
-+	# 那个文件 553 行、反编译来的、一次都没被重编译验证过，
-+	# 为一行字符串把它整个纳入补丁面不划算；本文件已被几十局 8 人测试验过。
-+	# **前提是 autoload 顺序**：`Globals`（project.godot 第 20 行）排在
-+	# `NetworkManager`（第 24 行）**之前**，所以这里读得到也改得动。
-+	# 版本串只在**连线握手时**才被读，改得再早都来得及。
++	# ⚠️ Why this is written here instead of patching `autoloads/globals.gd` —
++	# that file is 553 lines, decompiled, and has never once been verified by recompiling,
++	# so pulling all of it into the patch surface for one string isn't worth it. This file has been verified by dozens of 8-player test matches.
++	# **It depends on autoload order**. `Globals` (project.godot line 20) comes
++	# **before** `NetworkManager` (line 24), so it can be read and modified from here.
++	# The version string is only read **during the connection handshake**, so changing it this early is always in time.
 +	#
-+	# 发新版 mod 就改 MP8_VERSION_TAG —— 老版本的人会被干净地挡在门外。
-+	# 主菜单右下角那个版本号（`main_menu.gd:66`）也会跟着显示，
-+	# 一眼就能看出对面装没装、装的是不是同一版。
++	# When releasing a new mod version, change MP8_VERSION_TAG — people on older versions get cleanly kept out.
++	# The version number in the main menu's bottom-right corner (`main_menu.gd:66`) shows it too,
++	# so you can tell at a glance whether the other side has the mod installed and whether it's the same version.
 +	if not Globals.game_version.contains(MP8_VERSION_TAG):
 +		Globals.game_version += "+" + MP8_VERSION_TAG
-+		print("[MP8] 版本握手：game_version = %s" % Globals.game_version)
++		print("[MP8] Version handshake: game_version = %s" % Globals.game_version)
 +
  	var args = Array(OS.get_cmdline_args())
  	if args.has("-trailer"):
  		max_player_count = MAX_DEBUG_PLAYERS
  
 -	if not OS.has_feature("editor"):
-+	# [MP8] 带 -debug-tools 启动时不强制 Steam，保留默认的 Enet 后端（本机多开测试用）
-+	if not OS.has_feature("editor") and not args.has("-debug-tools"):
++	# [MP8] Mod dev switches. Always empty in release builds (see MP8_DEV_TOOLS), so vanilla behavior is kept.
++	var mp8a: Array = mp8_args()
++
++	# [MP8] Only a dev build launched with -debug-tools skips Steam and keeps the default Enet backend (for local multi-instance testing)
++	if not OS.has_feature("editor") and not mp8a.has("-debug-tools"):
  		active_backend_type = NetworkBackendType.Steam
  		create_backend()
  
-+	# [MP8] UID 解析自检：崩溃排查用。
-+	# 现象：用 preload("uid://...") 的小游戏（猎鸭、致命反弹）一加载就 0xc0000005 原生崩溃，
-+	# 用 preload("res://...") 的（立足之本）正常。怀疑重打包后 UID 注册表没了，
-+	# uid:// 解析成空，null.instantiate() 直接原生访问违例。
-+	# 本自检不开局、单实例即可跑：传 mp8uidtest。
-+	if args.has("mp8uidtest"):
++	# [MP8] UID resolution self-test, for crash debugging.
++	# The symptom was that minigames using preload("uid://...") (Duck Hunt, DVD Roomba) crashed natively with 0xc0000005 as soon as they loaded,
++	# while the one using preload("res://...") (Disco Dodge) was fine. The suspicion is that the UID registry is lost after repacking,
++	# so uid:// resolves to nothing and null.instantiate() causes a native access violation.
++	# This self-test doesn't start a match and runs with a single instance. Pass mp8uidtest.
++	if mp8a.has("mp8uidtest"):
 +		_mp8_uid_selftest()
 +
-+	# [MP8] 出生点补位钩子
-+	_mp8_no_topup = args.has("mp8notopup")
-+	# [MP8] 侦察日志 opt-in：编辑器 / -debug-tools 测试台 / 显式 mp8audit 才打。
-+	# 发布版双击启动什么都不传 → 天然安静。
-+	var _mp8_dbg: bool = OS.has_feature("editor") or args.has("-debug-tools") or args.has("mp8audit")
-+	_mp8_audit_on = _mp8_dbg and not args.has("mp8noaudit")
++	# [MP8] Spawn point top-up hook
++	_mp8_no_topup = mp8a.has("mp8notopup")
++	# [MP8] The diagnostic log is opt-in. It only prints in the editor, or in a dev build on the -debug-tools test rig or with mp8audit.
++	# A release build passes nothing → naturally quiet.
++	var _mp8_dbg: bool = OS.has_feature("editor") or mp8a.has("-debug-tools") or mp8a.has("mp8audit")
++	_mp8_audit_on = _mp8_dbg and not mp8a.has("mp8noaudit")
 +	if _mp8_no_topup or _mp8_audit_on:
-+		print("[MP8] 排查开关：notopup=%s audit=%s" % [str(_mp8_no_topup), str(_mp8_audit_on)])
++		print("[MP8] Debug switches: notopup=%s audit=%s" % [str(_mp8_no_topup), str(_mp8_audit_on)])
 +	get_tree().node_added.connect(_mp8_on_node_added)
 +
 +	_mp8_perf_start()
-+	_mp8_version_hooks()  # [MP8] T53 版本互报
-+	_mp8_lobby_guard_start()  # [MP8] Steam 房间人数上限的重新宣示
++	_mp8_version_hooks()  # [MP8] T53 mutual version reporting
++	_mp8_lobby_guard_start()  # [MP8] Re-assert the Steam lobby member limit
 +
-+	# [MP8] 容量守卫上锁 —— 必须是 _ready() 的最后一件事（理由见 _mp8_cap_locked 的注释）。
-+	# [MP8] 上锁**之前**先把容量拉回我们认定的值。
++	# [MP8] Lock the capacity guard — this must be the very last thing in _ready() (see the comment on _mp8_cap_locked for why).
++	# [MP8] **Before** locking, first pull capacity back to the value we settled on.
 +	#
-+	# 为什么必须有这一步（2026-09-03 实测出来的洞，不是推演）：
-+	# 引擎的 autoload 是两趟 —— 先全部 _init（并注册全局常量），再全部 _ready。
-+	# 加载器（MPML）排第一，它的 _ready 里同步调各 mod 的 _mod_ready；
-+	# 那一刻本节点的 _ready 还没跑、锁还没上，但全局常量 `NetworkManager`
-+	# 已经指向本对象了 —— 也就是**存在一个能绕过守卫的窗口**。
-+	# 实测：mod 在 _mod_ready 里写 4，写得进去，而且一直残留到开房，
-+	# 于是新房间只能进 4 个人，且没有任何提示。
++	# Why this step is required (a hole found by testing on 2026-09-03, not by reasoning).
++	# The engine loads autoloads in two passes — first _init on all of them (registering the global constants), then _ready on all of them.
++	# The loader (MPML) comes first, and its _ready synchronously calls each mod's _mod_ready.
++	# At that moment this node's _ready hasn't run and the lock isn't on yet, but the global constant `NetworkManager`
++	# already points at this object — in other words **there is a window where the guard can be bypassed**.
++	# In practice, a mod writing 4 in _mod_ready gets through, and the value lingers until a lobby is hosted,
++	# so the new lobby only admits 4 players, with no warning at all.
 +	#
-+	# 所以：不管那个窗口里谁写过什么，这里一律拉回来，然后才上锁。
++	# So no matter who wrote what during that window, always pull it back here, and only then lock.
 +	_mp8_cap_want = MAX_DEBUG_PLAYERS if args.has("-trailer") else MAX_PLAYERS
 +	if max_player_count != _mp8_cap_want:
-+		push_warning("[MP8] 上锁前发现容量被改成了 %d（多半是某个 mod 在 _mod_ready 里写的），拉回 %d" % [max_player_count, _mp8_cap_want])
++		push_warning("[MP8] Capacity was changed to %d before locking (most likely by a mod in _mod_ready), pulling it back to %d" % [max_player_count, _mp8_cap_want])
 +	max_player_count = _mp8_cap_want
 +	_mp8_cap_locked = true
 +
-+	# [MP8] 开机横幅 —— **无条件打印**，不受 _mp8_audit_on / -debug-tools 门控。
++	# [MP8] Boot banner — **always printed**, not gated by _mp8_audit_on / -debug-tools.
 +	#
-+	# 为什么要它：本 mod 的排查日志绝大多数是 opt-in 的（发布版天然安静，见
-+	# `_mp8_audit_on` 那段）。好处是玩家的日志不会被刷屏，代价是**玩家报 bug 时，
-+	# 日志里认不出他到底在跑什么** —— 哪个 mod 版本、走的哪条分发路线、
-+	# 还装了谁家的 mod。这三样正是分诊第一步要问的。
++	# Why it's needed. Most of this mod's debug logging is opt-in (release builds are naturally quiet, see
++	# the `_mp8_audit_on` section). The upside is players' logs don't get spammed. The downside is that **when a player reports a bug,
++	# the log doesn't show what they are actually running** — which mod version, which distribution route,
++	# and whose other mods are installed. Those three are exactly what the first triage step asks about.
 +	#
-+	# 所以这里打一次、只打一次，六行，把「他是谁」钉死在每一份日志的开头。
++	# So it's printed here once and only once, six lines, pinning "who they are" to the top of every log.
 +	_mp8_boot_banner()
 +
 +
-+# [MP8] 见 _ready() 末尾。无条件执行，每次启动只跑一次。
++# [MP8] See the end of _ready(). Runs unconditionally, once per launch.
 +func _mp8_boot_banner() -> void :
 +
 +	var loader: Node = get_tree().root.get_node_or_null("ModLoader")
 +	var mods: Array = []
-+	# 只有同时具备这两个方法才敢认定是 MPML —— 别的加载器
-+	# （比如 godot-mod-loader 系）也可能把 autoload 叫 ModLoader，
-+	# 只凭节点名就报「装了 MPML」是误报。
++	# Only treat it as MPML when both methods exist — other loaders
++	# (e.g. the godot-mod-loader family) may also name their autoload ModLoader,
++	# so reporting "MPML installed" from the node name alone would be a false positive.
 +	var is_mpml: bool = loader != null \
 +		and loader.has_method("mod_list") and loader.has_method("loader_version")
 +
 +	if is_mpml:
 +		mods = loader.call("mod_list")
 +
-+	# 分发路线：走 MPML 覆盖包，mods 列表里就有 overtime；
-+	# 有 ModLoader 但没有 overtime = 玩家打了 PCK、另外又装了加载器（两者并存）。
-+	var via: String = "PCK 重打"
++	# Distribution route. With the MPML overlay pack, overtime is in the mods list.
++	# ModLoader present but no overtime = the player patched the PCK and also installed a loader separately (both side by side).
++	var via: String = "PCK repack"
 +	if loader != null and not is_mpml:
-+		via = "PCK 重打 + 另装了某个加载器（不是 MPML）"
++		via = "PCK repack + some other loader installed (not MPML)"
 +	if is_mpml:
 +		var has_overtime: bool = false
 +		for m in mods:
 +			if str(m).begins_with("overtime"):
 +				has_overtime = true
-+		via = "MPML 覆盖包" if has_overtime else "PCK 重打 + 另装了 MPML"
++		via = "MPML overlay pack" if has_overtime else "PCK repack + MPML also installed"
 +
 +	print("[MP8] ======== Machine Party · Overtime ========")
-+	print("[MP8] mod 版本   : %s" % MP8_VERSION_TAG)
-+	print("[MP8] 握手串     : %s" % Globals.game_version)
-+	print("[MP8] 人数上限   : %d（原版 4）" % MAX_PLAYERS)
-+	print("[MP8] 装法       : %s" % via)
++	print("[MP8] mod version  : %s" % MP8_VERSION_TAG)
++	print("[MP8] handshake    : %s" % Globals.game_version)
++	print("[MP8] player cap   : %d (vanilla 4)" % MAX_PLAYERS)
++	print("[MP8] install type : %s" % via)
 +	if is_mpml:
-+		print("[MP8] 同装 mod   : %s" % (", ".join(PackedStringArray(mods)) if not mods.is_empty() else "（只有加载器）"))
-+	print("[MP8] 日志在     : %s/logs/godot.log" % OS.get_user_data_dir())
-+	print("[MP8] 报 bug 请连这段一起贴 -> https://github.com/DarkJadeStone/MachineParty-Overtime/issues")
++		print("[MP8] other mods   : %s" % (", ".join(PackedStringArray(mods)) if not mods.is_empty() else "(loader only)"))
++	# The resolved user data path contains the Windows account name, and this block gets posted publicly, so print the generic path instead
++	print("[MP8] log file     : %APPDATA%\\Godot\\app_userdata\\Machine Party\\logs\\godot.log")
++	print("[MP8] When reporting a bug, please paste this block too -> https://github.com/DarkJadeStone/MachineParty-Overtime/issues")
 +	print("[MP8] =========================================")
 +
-+# [MP8] UID 解析自检。逐个检查崩溃小游戏里用到的 uid://，看能不能查到路径、能不能真的载出来。
-+# 对照组是立足之本用的 res:// 路径（已验证该游戏能正常跑）。
++# [MP8] UID resolution self-test. Checks each uid:// used in the crashing minigames, whether it resolves to a path and whether it actually loads.
++# The control group is the res:// path used by Disco Dodge (that game is verified to run fine).
 +func _mp8_uid_selftest() -> void :
 +
 +	var cases := [
-+		["uid://cav2dhye17owt", "猎鸭-鸭子玩家"],
-+		["uid://bg7h0g6d2m2xu", "猎鸭-猎人玩家"],
-+		["uid://badl26ts540cw", "致命反弹-roomba"],
-+		["uid://w6wpt3kvl74p",  "致命反弹-玩家"],
-+		["uid://cyhptkj072mxh", "餐桌礼仪-玩家"],
-+		["uid://bwixccr50fbc2", "赛前说明-输入标签(本 mod 已改过此脚本)"],
++		["uid://cav2dhye17owt", "Duck Hunt - duck player"],
++		["uid://bg7h0g6d2m2xu", "Duck Hunt - hunter player"],
++		["uid://badl26ts540cw", "DVD Roomba - roomba"],
++		["uid://w6wpt3kvl74p",  "DVD Roomba - player"],
++		["uid://cyhptkj072mxh", "Green Pea - player"],
++		["uid://bwixccr50fbc2", "Briefing screen - input label (this mod has modified this script)"],
 +	]
 +
-+	print("[MP8-UID] ========== UID 解析自检 ==========")
++	print("[MP8-UID] ========== UID resolution self-test ==========")
 +
 +	for c in cases:
 +		var txt: String = c[0]
@@ -250,32 +259,32 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +		if known:
 +			path = ResourceUID.get_id_path(id)
 +
-+		var loaded: String = "未尝试"
++		var loaded: String = "not tried"
 +		if known:
 +			var r = ResourceLoader.load(path)
-+			loaded = "OK" if r != null else "载入返回 null"
++			loaded = "OK" if r != null else "load returned null"
 +		else:
 +			var r2 = ResourceLoader.load(txt)
-+			loaded = "OK(直接用uid)" if r2 != null else "失败"
++			loaded = "OK(direct uid)" if r2 != null else "failed"
 +
-+		print("[MP8-UID] %-14s 注册=%s 路径=%s 载入=%s  <- %s" % [
++		print("[MP8-UID] %-14s registered=%s path=%s loaded=%s  <- %s" % [
 +			txt, str(known), path, loaded, who
 +		])
 +
-+	# 对照：立足之本用的是 res:// 直路径，该游戏已验证能跑
++	# Control check. Disco Dodge uses a direct res:// path, and that game is verified to run
 +	var ref := "res://minigames/disco_dodge/components/player/disco_dodge_player.tscn"
-+	print("[MP8-UID] 对照 res:// 存在=%s 载入=%s" % [
++	print("[MP8-UID] control res:// exists=%s loaded=%s" % [
 +		str(ResourceLoader.exists(ref)), str(ResourceLoader.load(ref) != null)
 +	])
-+	print("[MP8-UID] ========== 自检结束 ==========")
++	print("[MP8-UID] ========== Self-test done ==========")
 +
 +
-+# [MP8] ================ 出生点运行时补位 ================
-+# 各小游戏场景里的出生点容器只摆了 4 个 Marker（duck_hunt 只有 3 个鸭子位）。
-+# spawn_players() 用 positions[counter] 取值，既没取模也没有边界检查，超出的
-+# 玩家会拿到 null，teleport_rpc 收到 Nil 被中止，人就留在默认位置。
-+# 这里在容器进树时把它补足到 MAX_PLAYERS 个，新点位取相邻两个原始点的中点，
-+# 保证落在有效场地内。不改任何 .tscn，17 个小游戏共用。
++# [MP8] ================ Runtime spawn point top-up ================
++# The spawn point containers in each minigame scene only hold 4 Markers (duck_hunt only has 3 duck spots).
++# spawn_players() reads positions[counter] with no modulo and no bounds check, so any extra
++# players get null, teleport_rpc aborts when it receives Nil, and those players stay at the default position.
++# Here, when a container enters the tree, it's topped up to MAX_PLAYERS, with each new spot at the midpoint of two adjacent original spots,
++# which keeps it inside the valid play area. No .tscn is changed, and all 17 minigames share this.
 +
 +const MP8_SPAWN_CONTAINERS: Array[String] = [
 +	"playerspawnpositions",
@@ -284,60 +293,60 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	"playerpositions",
 +	"playerspawn",
 +	"playerspawnparent",
-+	# [MP8] "duckplayerspawnpositions" 已从这里**移除**（2026-08-15，T6b）：
-+	# 通用算法取相邻两点的中点，对猎鸭那 3 个点会算出**重合**的出生点——
-+	# j=1 时 (-5,+5) 的中点 = 0，与原版 Marker3D 完全重合，实测两对鸭子叠在一起。
-+	# 猎鸭改成自己补：duck_hunt.gd 的 _mp8_ensure_duck_spawns()，
-+	# 沿 z=104 这排按间距 5 向两侧交替延伸。
-+	# [MP8] "workstationspawns" 已从这里**移除**（2026-08-16，T21）：
-+	# 枪械工厂那 4 个工位在场地四角，通用算法取相邻两点的中点 = 四条边的中点，
-+	# 实测 4 个新位里有 3 个落在实体内部（probe33 量的）：
-+	#   mid(0-1) @ (-7.29, 0.00) → 配方指示灯那面墙的碰撞盒 Box 4×4.5×9，距离 0.00
-+	#   mid(2-3) @ (10.75, 0.10) → 货盘 0.10 + 墙体碰撞盒 0.34
-+	#   mid(3-0) @ ( 1.68,-7.88) → 中央料台 desk left 1.62（工作台半宽 1.18，擦上）
-+	# 现在改由 manufacture_gun.gd 的 _mp8_expand_workstations() 按"四角配对"自己摆
-+	# （每个原版工位沿墙朝场地中心平移 3.2 米加一张搭档桌）。
-+	# 全项目只有 manufacture_gun 用这个容器名（已 grep 确认），摘掉不影响别的小游戏。
++	# [MP8] "duckplayerspawnpositions" was **removed** from here (2026-08-15, T6b).
++	# The generic algorithm takes midpoints of adjacent points, and for Duck Hunt's 3 points it produces **overlapping** spawn points —
++	# with j=1 the midpoint of (-5,+5) = 0, exactly on top of a vanilla Marker3D. In testing, two pairs of ducks ended up stacked together.
++	# Duck Hunt now does its own top-up in _mp8_ensure_duck_spawns() in duck_hunt.gd,
++	# extending along the z=104 row at a spacing of 5, alternating between both sides.
++	# [MP8] "workstationspawns" was **removed** from here (2026-08-16, T21).
++	# Manufacture Gun's 4 stations sit in the corners of the arena, so the generic midpoints = the midpoints of the four edges,
++	# and in testing 3 of the 4 new spots landed inside solid objects (measured with probe33).
++	#   mid(0-1) @ (-7.29, 0.00) → collision box Box 4×4.5×9 of the wall with the recipe indicator lights, distance 0.00
++	#   mid(2-3) @ (10.75, 0.10) → pallet 0.10 + wall collision box 0.34
++	#   mid(3-0) @ ( 1.68,-7.88) → central parts table desk left 1.62 (workbench half-width 1.18, grazing it)
++	# Now manufacture_gun.gd's _mp8_expand_workstations() places them itself using "corner pairing"
++	# (each vanilla station is shifted 3.2 m along the wall toward the arena center, plus a partner desk).
++	# Only manufacture_gun uses this container name in the whole project (confirmed with grep), so removing it doesn't affect other minigames.
 +	"spectatepositions",
 +]
 +
-+# [MP8] A/B 开关：排查崩溃时用来隔离"是本 mod 的运行时改动造成的"还是"原版就崩"。
-+#   mp8notopup  = 不做出生点补位
-+#   mp8audit    = **打**侦察日志（下面 _mp8_audit_on）
-+# 都是命令行传入，缓存在 _ready() 里（每帧/每节点读 cmdline 太浪费）。
++# [MP8] A/B switches, used when debugging crashes to tell "caused by this mod's runtime changes" apart from "vanilla crashes anyway".
++#   mp8notopup  = skip the spawn point top-up
++#   mp8audit    = **print** the diagnostic log (see _mp8_audit_on below)
++# Both are passed on the command line and cached in _ready() (reading cmdline every frame or for every node is too wasteful).
 +var _mp8_no_topup: bool = false
 +
-+# [MP8] 2026-08-25 从**反向开关改成 opt-in**（原来是 `mp8noaudit` 才关）。
-+# 🩸 起因：真人局日志实测，`[MP8-AUDIT]` 转储占 **8.1%**（14425 行里 1174 行，
-+# 每加载一个小游戏打 30 行）—— 玩家从不传 `mp8noaudit`，所以**发布版一直在打**。
-+# 同一份日志里碎骨者那个 `Node not found` 才占 3.0%，而我当时还跟用户说"别管它"。
-+# 自己常开的诊断噪音是它的 2.7 倍，纯诊断、对玩家零价值 —— 这个才该先关。
++# [MP8] 2026-08-25 changed from **an off switch to opt-in** (it used to be on unless `mp8noaudit` was passed).
++# 🩸 The reason is that in real-player match logs, the `[MP8-AUDIT]` dump made up **8.1%** (1174 of 14425 lines,
++# 30 lines per minigame load) — players never pass `mp8noaudit`, so **release builds were printing it the whole time**.
++# In the same log, Spine Breaker's `Node not found` was only 3.0%, and back then I even told the user "don't worry about it".
++# Our own always-on diagnostic noise was 2.7 times that, purely diagnostic with zero value for players — this is what should have been turned off first.
 +#
-+# 现在：编辑器里、带 `-debug-tools` 的测试台、或显式传 `mp8audit` 才打；
-+# 正式游玩（Steam 双击，什么都不传）天然安静。`mp8noaudit` 保留为强制关。
++# Now it only prints in the editor, on the test rig with `-debug-tools`, or when `mp8audit` is passed explicitly.
++# Normal play (Steam double-click, nothing passed) is naturally quiet. `mp8noaudit` is kept as a forced off switch.
 +var _mp8_audit_on: bool = false
 +
-+# [MP8] L1a —— 把主菜单提示弹窗的 Label 换成 AUTOWRAP_WORD_SMART。
++# [MP8] L1a — switch the Label of the main menu notice dialog to AUTOWRAP_WORD_SMART.
 +#
-+# 原版是 `AUTOWRAP_WORD`：**只在词边界断行**。中文没有空格，于是一整句中文
-+# 压根不换行，横向溢出后被外面那个 clip_contents 的 ScrollContainer 裁掉两头
-+# （实测：「版本对不上，两边必须同版。你：v2.1.2+overtime-1.6」显示成
-+#  「对不上，两边必须同版。你：v2.1.2+overtim」，头尾都没了）。
++# Vanilla uses `AUTOWRAP_WORD`, which **only breaks lines at word boundaries**. Chinese has no spaces, so a whole Chinese sentence
++# never wraps at all, overflows horizontally, and gets both ends clipped by the outer clip_contents ScrollContainer
++# (in testing, the Chinese for "Versions don't match, both sides must be on the same version. You: v2.1.2+overtime-1.6" showed up as
++#  "don't match, both sides must be on the same version. You: v2.1.2+overtim", with both the start and the end missing).
 +#
-+# 这不是我们引入的问题 —— 原版所有中文提示（LOC_ROOM_DISBANDED 之类）都受影响，
-+# 只是那些串短、碰巧没超一行。改成 WORD_SMART 对它们同样是净改善。
-+# 代价：很长的 ASCII 串会被从中间切开（v2.1.2+ov / ertime-1.6），可读，不好看。
++# This isn't a problem we introduced — all of vanilla's Chinese notices (LOC_ROOM_DISBANDED and the like) are affected,
++# those strings are just short and happen not to exceed one line. Switching to WORD_SMART is a net improvement for them too.
++# The cost is that very long ASCII strings get cut in the middle (v2.1.2+ov / ertime-1.6). Readable, just not pretty.
 +#
-+# ⚠️ 只改换行方式，**不动尺寸**。把那个 512×192 的框撑大（L1b）也试过：能撑，
-+# 但天真地给个固定高度会让 Label 比框还高、上下都冒出去，得按文本实际高度算。
-+# 收益只是「能放更多字」，而文案已经按 ≤105 px 的预算写死了，所以不做。
++# ⚠️ Only the wrap mode changes, **not the size**. Enlarging that 512×192 box (L1b) was tried too. It can be enlarged,
++# but naively giving it a fixed height makes the Label taller than the box and spill out at the top and bottom. It would have to be computed from the text's actual height.
++# The only gain would be "fitting more text", and the copy is already written to a ≤105 px budget, so it isn't done.
 +func _mp8_fix_dialog_label(handler) -> void :
 +
 +	if handler == null or not is_instance_valid(handler):
 +		return
 +	var lbl = handler.get("message_label")
 +	if lbl == null or not is_instance_valid(lbl) or not (lbl is Label):
-+		print("[MP8] 弹窗 Label 没找到，跳过换行修正（不影响功能）")
++		print("[MP8] Dialog Label not found, skipping the wrap fix (doesn't affect functionality)")
 +		return
 +	(lbl as Label).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 +
@@ -348,30 +357,30 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +		_mp8_extend_lobby.call_deferred(node)
 +		return
 +
-+	# [MP8] L1a：主菜单那个提示弹窗的换行方式（见 _mp8_fix_dialog_label）
++	# [MP8] L1a - wrap mode of the main menu notice dialog (see _mp8_fix_dialog_label)
 +	if node is DialogMessageHandler:
 +		_mp8_fix_dialog_label.call_deferred(node)
 +		return
 +
-+	# [MP8] 开局快照 —— **无条件**打一行（理由同 _mp8_boot_banner）。
-+	# 玩家报「XX 卡住了」「少了个人」时，这一行把「哪个小游戏、几个人、本端是房主还是客机」
-+	# 钉在日志里。没有它，光看报告分不清是那个小游戏的问题、还是某个人数档的问题 ——
-+	# 而这两者在本项目里是完全不同的排查路径。
++	# [MP8] Match start snapshot — **always** prints one line (same reason as _mp8_boot_banner).
++	# When a player reports "XX got stuck" or "someone is missing", this line pins "which minigame, how many players, host or client"
++	# into the log. Without it, the report alone can't tell whether it's that minigame's problem or a problem with a player-count tier —
++	# and in this project those are completely different debugging paths.
 +	if node is Minigame:
-+		print("[MP8] 开局：%s ｜ %d 人 ｜ 本端=%s" % [
++		print("[MP8] Match start: %s | %d players | this peer=%s" % [
 +			String(node.name),
 +			PlayerManager.player_presences.size(),
-+			("房主" if multiplayer.is_server() else "客机"),
++			("host" if multiplayer.is_server() else "client"),
 +		])
 +
-+	# [MP8-AUDIT] 只读侦察：小游戏进树时把出生点相关的节点/数组全打出来，不改任何东西
++	# [MP8-AUDIT] Read-only diagnostic. When a minigame enters the tree, print every spawn-related node/array without changing anything
 +	if node is Minigame and _mp8_audit_on:
 +		_mp8_audit.call_deferred(node)
 +
 +	if _mp8_no_topup:
 +		return
 +
-+	# [MP8] T4b：数组式出生点（见下方 _mp8_topup_spawn_arrays 的大段注释）
++	# [MP8] T4b - array-style spawn points (see the long comment on _mp8_topup_spawn_arrays below)
 +	if node is Minigame:
 +		_mp8_topup_spawn_arrays.call_deferred(node)
 +
@@ -380,9 +389,9 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +
 +	_mp8_topup.call_deferred(node)
 +
-+# 大厅的玩家展示位（3D 模型 + 名牌 + 换装器）是 @export 数组，场景里只填了 4 项。
-+# update_player_list() 按 counter 逐个索引，第 5 人就越界，人不会显示。
-+# 这里复制最后一个展示位，沿最后两位的间距继续排下去，补到 MAX_PLAYERS 个。
++# The lobby player display slots (3D model + nametag + customization assigner) are @export arrays, and the scene only fills in 4 entries.
++# update_player_list() indexes them one by one by counter, so the 5th player goes out of bounds and doesn't show up.
++# Here the last display slot is copied and laid out further along the spacing of the last two, up to MAX_PLAYERS.
 +func _mp8_extend_lobby(h) -> void :
 +
 +	if not is_instance_valid(h):
@@ -390,12 +399,12 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +
 +	var n: int = h.players.size()
 +
-+	print("[MP8] extend_lobby 命中 handler=%s players=%d models=%s" % [
++	print("[MP8] extend_lobby hit handler=%s players=%d models=%s" % [
 +		str(h.get_path()), n, str(h.get("player_models"))
 +	])
 +
 +	if n < 2 or n >= MAX_PLAYERS:
-+		print("[MP8]   跳过（n=%d 不在 2..%d 之间）" % [n, MAX_PLAYERS])
++		print("[MP8]   skipped (n=%d is not between 2..%d)" % [n, MAX_PLAYERS])
 +		return
 +
 +	if h.customization_assigners.size() < n or h.nametags.size() < n:
@@ -403,10 +412,10 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +
 +	var parent = h.players[0].get_parent()
 +
-+	# 原版这 4 个位本来就是对的（美术把真实摆位烘进了 Armature 局部坐标，
-+	# 每个位的偏移都不一样，所以千万别去重排它们）。
-+	# 做法：把这 4 个位整份复制，再整体平移一段当第二排。
-+	# 副本继承完全相同的烘焙偏移，所以第二排的排布和原版一模一样，只是往前挪了。
++	# The 4 vanilla slots are already correct (the artist baked the real placement into Armature local coordinates,
++	# and each slot's offset is different, so never rearrange them).
++	# The approach is to copy these 4 slots as a whole, then shift the whole set to form a second row.
++	# The copies inherit exactly the same baked offsets, so the second row is laid out just like vanilla, only moved forward.
 +	for j in range(MAX_PLAYERS - n):
 +
 +		var src_slot = h.players[j % n]
@@ -414,7 +423,7 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +		var src_nametag = h.nametags[j % n]
 +
 +		if not src_slot.is_ancestor_of(src_assigner) or not src_slot.is_ancestor_of(src_nametag):
-+			print("[MP8] 展示位 %d 结构异常，跳过" % (j % n))
++			print("[MP8] Display slot %d has an unexpected structure, skipping" % (j % n))
 +			continue
 +
 +		var rel_a: NodePath = src_slot.get_path_to(src_assigner)
@@ -430,39 +439,39 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +		h.customization_assigners.append(dup.get_node(rel_a))
 +		h.nametags.append(dup.get_node(rel_t))
 +
-+	# 椅子也照搬：把场景里可见的装饰椅子整组复制并平移同样的量，
-+	# 第二排的人就落在和原版一样的相对位置上。
++	# Chairs get copied too. The visible decorative chairs in the scene are duplicated as a group and shifted by the same amount,
++	# so the players in the second row land in the same relative positions as in vanilla.
 +	_mp8_clone_chairs(parent, MP8_ROW2_OFFSET)
 +
-+	# 第二排更靠近摄像机，稍微拉远一点留出余量
++	# The second row is closer to the camera, so pull the camera back a little for some margin
 +	var cam = parent.get_parent().get_node_or_null("Camera3D")
 +	if cam:
 +		var before = cam.position
 +		cam.position = Vector3(before.x, before.y * 1.08, before.z * 1.22)
 +		print("[MP8] camera %s -> %s" % [str(before), str(cam.position)])
 +
-+	print("[MP8] lobby slots: %d -> %d（第二排平移 %s）" % [n, h.players.size(), str(MP8_ROW2_OFFSET)])
++	print("[MP8] lobby slots: %d -> %d (second row offset %s)" % [n, h.players.size(), str(MP8_ROW2_OFFSET)])
 +
-+	# 排完立刻打一次，4 秒后再打一次：
-+	# 两次一致 -> 公式生效但视觉判断有误；两次不同 -> 被别的代码覆盖了。
-+	_mp8_dump_slots(h, "刚排完")
++	# Print once right after laying out, and again 4 seconds later.
++	# Same both times -> the formula works but the visual judgment was wrong. Different -> something else overwrote it.
++	_mp8_dump_slots(h, "just laid out")
 +	await get_tree().create_timer(4.0).timeout
 +	if is_instance_valid(h):
-+		_mp8_dump_slots(h, "4秒后")
++		_mp8_dump_slots(h, "after 4s")
 +
 +
-+# 第二排相对原版 4 位的平移量。只有这一个数需要调：
-+#   z 变大 = 更靠近摄像机（更靠画面下方），x 变大 = 更靠右。
++# Offset of the second row relative to the 4 vanilla slots. This is the only number that needs tuning.
++#   larger z = closer to the camera (lower on screen), larger x = further right.
 +const MP8_ROW2_OFFSET := Vector3(0.6, 0.0, 5.2)
 +
 +
-+# 把场景里可见的装饰椅子整组复制一份并平移同样的量，
-+# 这样第二排的人和椅子的相对关系跟原版完全一致。
++# Duplicate the visible decorative chairs in the scene as a group and shift them by the same amount,
++# so the second row's players and chairs line up with each other exactly as in vanilla.
 +func _mp8_clone_chairs(parent, offset: Vector3) -> void :
 +
 +	var env = parent.get_parent().get_node_or_null("lobby environment1")
 +	if env == null:
-+		print("[MP8] 找不到 lobby environment1，跳过椅子")
++		print("[MP8] Can't find lobby environment1, skipping chairs")
 +		return
 +
 +	if env.has_node("MP8ChairRow"):
@@ -488,16 +497,16 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +		d.visible = true
 +		cloned += 1
 +
-+	print("[MP8] 复制椅子 %d 把，平移 %s" % [cloned, str(offset)])
++	print("[MP8] Copied %d chairs, offset %s" % [cloned, str(offset)])
 +
 +
 +func _mp8_dump_slots(h, tag: String) -> void :
 +
-+	# [MP8] 2026-08-25 跟 _mp8_audit 同族的诊断转储，一起改成 opt-in。
++	# [MP8] 2026-08-25 a diagnostic dump from the same family as _mp8_audit, switched to opt-in along with it.
 +	if not _mp8_audit_on:
 +		return
 +
-+	print("[MP8] ---- 展示位坐标（%s） ----" % tag)
++	print("[MP8] ---- Display slot positions (%s) ----" % tag)
 +	for i in h.players.size():
 +		var s = h.players[i]
 +		if not is_instance_valid(s):
@@ -509,7 +518,7 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +		])
 +
 +
-+# 在展示位子树里找椅子网格。找得到 -> 椅子跟着位走；找不到 -> 椅子是场景里的独立装饰。
++# Look for a chair mesh in the display slot's subtree. Found -> the chair moves with the slot. Not found -> the chair is separate scene decoration.
 +func _mp8_find_chair(node: Node) -> String :
 +
 +	for c in node.get_children():
@@ -520,10 +529,10 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +			return deeper
 +	return ""
 +
-+# [MP8-AUDIT] 纯只读侦察，不改任何节点、不改任何数组，只打日志。
-+# 目的：一局就看清每个小游戏的出生点到底存在哪、哪些没被 MP8_SPAWN_CONTAINERS 覆盖。
-+# 源码里出生点有两种存法：容器节点（get_children 取点）和 @export Array[Node3D]（直接是引用数组），
-+# 后者没有"容器"可言，所以这里两种都打。
++# [MP8-AUDIT] Purely read-only diagnostic. Changes no nodes and no arrays, only prints logs.
++# The goal is to see in a single match where each minigame's spawn points actually live, and which ones MP8_SPAWN_CONTAINERS doesn't cover.
++# The source stores spawn points in two ways - container nodes (points via get_children) and @export Array[Node3D] (a plain array of references),
++# and the latter has no "container" at all, so both kinds are printed here.
 +func _mp8_audit(mg: Node) -> void :
 +
 +	if not is_instance_valid(mg):
@@ -533,12 +542,12 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	if mg.get_script():
 +		script_path = String(mg.get_script().resource_path)
 +
-+	print("[MP8-AUDIT] ========== 小游戏 '%s' ==========" % str(mg.name))
-+	print("[MP8-AUDIT] script=%s is_server=%s 玩家数=%d" % [
++	print("[MP8-AUDIT] ========== Minigame '%s' ==========" % str(mg.name))
++	print("[MP8-AUDIT] script=%s is_server=%s players=%d" % [
 +		script_path, str(multiplayer.is_server()), PlayerManager.player_presences.size()
 +	])
 +
-+	print("[MP8-AUDIT] -- 脚本属性 --")
++	print("[MP8-AUDIT] -- Script properties --")
 +	for p in mg.get_property_list():
 +
 +		if not (int(p.get("usage", 0)) & PROPERTY_USAGE_SCRIPT_VARIABLE):
@@ -549,19 +558,19 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +
 +		if v is Array:
 +			if v.size() > 0 and v.size() < MAX_PLAYERS:
-+				print("[MP8-AUDIT]   [数组] %s 长度=%d" % [pname, v.size()])
++				print("[MP8-AUDIT]   [array] %s length=%d" % [pname, v.size()])
 +			continue
 +
 +		if v is Node3D:
 +			var ln: String = pname.to_lower()
 +			if ln.contains("spawn") or ln.contains("position"):
-+				print("[MP8-AUDIT]   [容器] %s -> '%s' 子节点=%d" % [
++				print("[MP8-AUDIT]   [container] %s -> '%s' children=%d" % [
 +					pname, str(v.name), v.get_child_count()
 +				])
 +
-+	print("[MP8-AUDIT] -- 子树里带 spawn/position 的节点 --")
++	print("[MP8-AUDIT] -- Nodes in the subtree with spawn/position --")
 +	_mp8_audit_walk(mg, mg, 0)
-+	print("[MP8-AUDIT] ========== 侦察结束 ==========")
++	print("[MP8-AUDIT] ========== Diagnostic done ==========")
 +
 +
 +func _mp8_audit_walk(root: Node, node: Node, depth: int) -> void :
@@ -574,13 +583,13 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +		var ln: String = String(c.name).to_lower()
 +		if ln.contains("spawn") or ln.contains("position"):
 +
-+			print("[MP8-AUDIT]   %s [%s] 子节点=%d" % [
++			print("[MP8-AUDIT]   %s [%s] children=%d" % [
 +				str(root.get_path_to(c)), c.get_class(), c.get_child_count()
 +			])
 +
-+			# 把点位坐标也打出来：补位要"按原版间隔平移复制"，
-+			# 得先知道原版间隔是多少。静态读 .scn 读不了（二进制+脚本依赖），
-+			# 运行时读到的还是真实世界坐标，更准。
++			# Print the point coordinates too. The top-up needs to "copy with a shift at the vanilla spacing",
++			# so first we need to know what the vanilla spacing is. Reading the .scn statically doesn't work (binary + script dependencies),
++			# and reading at runtime gives real world coordinates, which is more accurate anyway.
 +			if c.get_child_count() > 0 and c.get_child_count() <= 12:
 +				for gc in c.get_children():
 +					if gc is Node3D:
@@ -590,25 +599,25 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +						])
 +
 +			if c is Node3D:
-+				print("[MP8-AUDIT]       (容器自身) gpos=%s" % str(c.global_position))
++				print("[MP8-AUDIT]       (container itself) gpos=%s" % str(c.global_position))
 +
 +		_mp8_audit_walk(root, c, depth + 1)
 +
 +
-+# [MP8] ============ T4b：数组式出生点的补位 ============
++# [MP8] ============ T4b - top-up for array-style spawn points ============
 +#
-+# 出生点在源码里有**两种存法**，节点名白名单（MP8_SPAWN_CONTAINERS）只覆盖了第一种：
++# Spawn points are stored **in two ways** in the source, and the node-name allowlist (MP8_SPAWN_CONTAINERS) only covers the first.
 +#
-+#   (a) 容器式  `@export var xxx_node: Node3D`        取点用 node.get_children()
-+#   (b) 数组式  `@export var xxx: Array[Node3D]`      **直接索引数组**
++#   (a) container style  `@export var xxx_node: Node3D`        points come from node.get_children()
++#   (b) array style      `@export var xxx: Array[Node3D]`      **indexes the array directly**
 +#
-+# (b) 式压根没有"容器"这个概念 —— 往 `PlayerSpawnPositions` 容器里塞 Marker 完全无效，
-+# 因为 spawn_players() 读的是那个烘死了 4 个引用的数组。三个 (b) 式的小游戏
-+# （雷区 1 / 逆向行进 2 / 吸烟小憩 4）因此一直没法适配，这就是 HANDOFF 的 P1-C。
++# Style (b) has no concept of a "container" at all — stuffing Markers into the `PlayerSpawnPositions` container does nothing,
++# because spawn_players() reads that array with its 4 baked-in references. The three style (b) minigames
++# (Exploding Collar Race 1 / Escalator Pit 2 / Smoke Break 4) couldn't be adapted because of this, which is P1-C in HANDOFF.
 +#
-+# 属性名 `player_spawn_positions` 是**从反编译源码逐个读出来的确定事实，不是猜的**。
-+# green_pea 用同名属性但存的是容器（Node3D），所以这里按**类型**分流：
-+# 只有真是 Array 才走这条路，容器仍旧交给已验证过的节点名那条路，互不打架。
++# The property name `player_spawn_positions` is **a fact read out of the decompiled source one by one, not a guess**.
++# green_pea uses the same property name but stores a container (Node3D) in it, so here it branches by **type**.
++# Only a real Array takes this path. Containers still go down the already-verified node-name path, so the two don't clash.
 +const MP8_SPAWN_ARRAY_PROPS: Array[String] = [
 +	"player_spawn_positions",
 +]
@@ -619,8 +628,8 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	if not is_instance_valid(mg):
 +		return
 +
-+	# 小游戏自己管出生点的（逆向行进按履带摆位、猎鸭按鸭子排摆位），这里一律不插手。
-+	# 用 Object.get() 取标志位：属性不存在时返回 null，不会报错。
++	# Minigames that manage their own spawn points (Escalator Pit places by escalator track, Duck Hunt by the duck row) are left alone here.
++	# The flag is read with Object.get(), which returns null without an error when the property doesn't exist.
 +	if mg.get("mp8_owns_spawns") == true:
 +		return
 +
@@ -651,8 +660,8 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +		var added := PackedStringArray()
 +
 +		for p in extra:
-+			# 模板取**离新点最近的那个原始点**：位置以外的属性（旋转、缩放、脚本）
-+			# 就近继承。吸烟小憩要用 global_rotation，抄错朝向人会背对着栏杆。
++			# The template is **the original point nearest to the new point**. Properties other than position (rotation, scale, script)
++			# are inherited from the nearest one. Smoke Break uses global_rotation, and copying the wrong facing would leave players with their backs to the railing.
 +			var tmpl: Node3D = originals[0]
 +			var best: float = INF
 +			for o in originals:
@@ -668,32 +677,32 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +			arr.append(dup)
 +			added.append("(%.2f, %.2f, %.2f)" % [p.x, p.y, p.z])
 +
-+		# 自检：把最小间距打出来。两点重合是这类补位最典型的坏法
-+		# （通用取中点算法对 3 个点就会算出重合位，猎鸭上栽过），
-+		# 光看"4 -> 8 成功"这行日志是看不出来的。
++		# Self-check - print the minimum spacing. Two points overlapping is the most typical way this kind of top-up goes wrong
++		# (the generic midpoint algorithm produces overlapping spots for 3 points, which bit us in Duck Hunt),
++		# and you can't tell from the "4 -> 8 succeeded" log line alone.
 +		var min_d: float = INF
 +		for i in arr.size():
 +			for j in range(i + 1, arr.size()):
 +				min_d = minf(min_d, arr[i].global_position.distance_to(arr[j].global_position))
 +
-+		print("[MP8] spawn array '%s' (%s): %d -> %d，新增 %s，最小间距 %.2f 米%s" % [
++		print("[MP8] spawn array '%s' (%s): %d -> %d, added %s, min spacing %.2f m%s" % [
 +			pname, str(mg.name), originals.size(), arr.size(),
 +			", ".join(added), min_d,
-+			"  ⚠️ 太近！" if min_d < 0.8 else ""
++			"  ⚠️ Too close!" if min_d < 0.8 else ""
 +		])
 +
 +
-+# 在原始点的**凸包内**再挑 want-n 个点，使所有点之间的最小间距尽量大。
++# Pick want-n more points **inside the convex hull** of the original points, maximizing the minimum spacing between all points.
 +#
-+# 两条硬约束，都是踩过坑总结出来的：
-+#   1. **不动原始点** —— 原版坐标是唯一被背书过"一定在界内"的东西。
-+#   2. **新点只能是原始点的凸组合** —— 凸组合必落在凸包内，天然不会跑到场地外面去
-+#      （猎鸭第一版按原间距往外扩，实测有人跳出地图）。
++# Two hard constraints, both learned from pitfalls hit in practice.
++#   1. **Don't move the original points** — the vanilla coordinates are the only thing vouched for as "definitely in bounds".
++#   2. **New points can only be convex combinations of original points** — a convex combination always lands inside the hull, so it can never end up outside the arena
++#      (the first Duck Hunt version expanded outward at the original spacing, and in testing someone jumped off the map).
 +#
-+# 做法是最远点插入：候选池 = 每两个原始点之间的 1/8..7/8 等分点，
-+# 每轮挑"离已选点集最远"的那个。比"取相邻两点中点"稳得多 ——
-+# 后者对 4 个等距共线点会算出**两个完全重合**的新点（实测：逆向行进的
-+# mid(1,2) 与 mid(3,0) 相差 0.02 米，两个人叠在一起）。
++# The method is farthest-point insertion. The candidate pool = the 1/8..7/8 division points between every pair of original points,
++# and each round picks the one "farthest from the already chosen set". Much more robust than "midpoint of adjacent points" —
++# the latter produces **two exactly overlapping** new points for 4 evenly spaced collinear points (in testing, Escalator Pit's
++# mid(1,2) and mid(3,0) were 0.02 m apart, with two players stacked on top of each other).
 +func _mp8_spread_inside(originals: Array[Vector3], want: int) -> Array[Vector3] :
 +
 +	var chosen: Array[Vector3] = originals.duplicate()
@@ -732,9 +741,9 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	if not is_instance_valid(container):
 +		return
 +
-+	# 小游戏自己管出生点的，容器这条路也别插手 —— 否则会往容器里塞一堆
-+	# **没人读的** Marker（逆向行进实测多出 4 个），日志上还会打出一行
-+	# "PlayerSpawnPositions: 4 -> 8" 误导排查。
++	# Minigames that manage their own spawn points shouldn't be touched via the container path either — otherwise the container gets stuffed with
++	# Markers **nobody reads** (Escalator Pit got 4 extra in testing), and the log would also print a line
++	# "PlayerSpawnPositions: 4 -> 8" that misleads debugging.
 +	var up: Node = container
 +	while up != null:
 +		if up is Minigame:
@@ -767,65 +776,65 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
  func is_active() -> bool:
  
  	if not multiplayer:
-@@ -81,6 +812,12 @@ func set_game_scene(_game_scene: PackedScene):
+@@ -81,6 +821,13 @@ func set_game_scene(_game_scene: PackedScene):
  
  func create_backend():
  
-+	# [MP8] 换后端 = 上一局的连线状态作废。版本互报的两张账本跟着清，
-+	# 否则残留的 network_id 会让下一局的「有人被挡在门外」判错
-+	# （见 _mp8_on_raw_peer_disconnected）。
++	# [MP8] Switching backend = the previous match's connection state is void. Clear both version-report ledgers along with it,
++	# otherwise leftover network_ids make the next match misjudge "someone was kept out"
++	# (see _mp8_on_raw_peer_disconnected).
 +	_mp8_peer_versions.clear()
 +	_mp8_peers_accepted.clear()
++	_mp8_host_version = ""
 +
  	if active_backend:
  
  		active_backend.free()
-@@ -269,3 +1006,420 @@ func remove_player_rpc(_network_id: int):
+@@ -269,3 +1016,529 @@ func remove_player_rpc(_network_id: int):
  		var player_info = active_backend.connected_players[_network_id]
  		active_backend.disconnected_players[_network_id] = player_info
  		active_backend.connected_players.erase(_network_id)
 +
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 帧时间探针（opt-in：`mp8perf`）—— 定位 8 人卡顿卡在哪一层
++# [MP8] Frame time probe (opt-in via `mp8perf`) — finds which layer the 8-player lag is in
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 起因：玩家报「隧道险境和立足之本 8 人卡得跟 ppt 一样，**所有人都卡**」（T50 ⑤）。
-+# 读代码已经排掉四条（见 HANDOFF T50 ⑤）：不是我们的每帧代码（一行都没加）、
-+# 不是多摆了对象、不是同步器流量（这两关最低）、不是纯网络延迟（所有人都卡）。
-+# 而且**同样 8 人猎鸭不卡** —— 所以是这两个场景特有的东西 × 人数。
++# Background. Players reported "Train Race and Disco Dodge lag like a slideshow with 8 players, **for everyone**" (T50 ⑤).
++# Reading the code already ruled out four things (see HANDOFF T50 ⑤). It's not our per-frame code (not a single line was added),
++# not extra objects placed, not synchronizer traffic (lowest in these two levels), and not pure network latency (everyone lags).
++# Also, **8-player Duck Hunt doesn't lag** — so it's something specific to these two scenes × player count.
 +#
-+# 读到这儿就该停手上测量了。本探针每 2 秒打一行，把一帧的开销拆成三层：
++# At this point it's time to stop reading and start measuring. This probe prints a line every 2 seconds, splitting a frame's cost into three layers.
 +#
-+#   process   —— 脚本逻辑（_process / _physics_process 里的 GDScript）
-+#   physics   —— 物理步进（刚体、碰撞、角色控制器）
-+#   draw/obj  —— 渲染（绘制调用数、被绘制的对象数）
++#   process   — script logic (GDScript in _process / _physics_process)
++#   physics   — physics stepping (rigid bodies, collisions, character controllers)
++#   draw/obj  — rendering (draw call count, drawn object count)
 +#
-+# **三者哪个跟着人数涨，根因就在哪一层** —— 这是本探针唯一的目的。
-+# 横比方法：同样 8 开，分别跑猎鸭（不卡）和隧道险境（卡），对比同一行的数字。
++# **Whichever of the three grows with player count is the layer where the root cause lives** — that's the only purpose of this probe.
++# How to compare. With the same 8 instances, run Duck Hunt (no lag) and Train Race (lag) separately, and compare the numbers on the same line.
 +#
-+# 挂在 NetworkManager 而不是某个小游戏脚本：它是 autoload、跨小游戏常驻，
-+# 一处改动就能覆盖全部 15 个小游戏，否则没法做上面那个横比。
++# It hangs off NetworkManager rather than a minigame script because NetworkManager is an autoload that persists across minigames.
++# One change covers all 15 minigames, otherwise the side-by-side comparison above wouldn't be possible.
 +#
-+# ⚠️ 用 Timer 而不是 _process：本脚本没有 _process，加一个有覆盖基类的风险（同 T49 的做法）。
-+# ⚠️ opt-in，发布版玩家双击启动什么都不传 → 一个字节都不写（同侦察日志的规矩）。
-+# ⚠️ 写**每实例一份文件**，不靠 print：8 开时所有实例共用一个 godot.log 会互相盖字，
-+#    这一轮已经栽过一次（见 HANDOFF T49「常备诊断」）。性能数据糊了等于白跑。
-+#    文件名用进程号而不是 peer id —— autoload 的 _ready 跑在联机建立之前，那时候还没有 peer id。
-+# ⚠️ 每行 flush：测完是被 stop.ps1 强杀的，不 flush 缓冲里的全丢。
++# ⚠️ Uses a Timer instead of _process. This script has no _process, and adding one risks overriding the base class (same approach as T49).
++# ⚠️ Opt-in. A release player launching by double-click passes nothing → not a single byte is written (same rule as the diagnostic log).
++# ⚠️ Writes **one file per instance** instead of relying on print. With 8 instances all sharing one godot.log, the output overwrites itself,
++#    which already bit us once this round (see HANDOFF T49 "standing diagnostics"). Garbled perf data means the whole run was wasted.
++#    The file name uses the process id instead of the peer id — autoload _ready runs before the connection is set up, when there is no peer id yet.
++# ⚠️ Flush every line. After testing, the game is force-killed by stop.ps1, and without a flush everything in the buffer is lost.
 +var _mp8_perf_on: bool = false
 +var _mp8_perf_timer: Timer = null
 +var _mp8_perf_f: FileAccess = null
 +
 +func _mp8_perf_start() -> void :
 +
-+	var args := Array(OS.get_cmdline_args())
-+	_mp8_perf_on = args.has("mp8perf")
++	_mp8_perf_on = mp8_args().has("mp8perf")
 +	if not _mp8_perf_on:
 +		return
 +
 +	_mp8_perf_f = FileAccess.open("user://mp8_perf_%d.log" % OS.get_process_id(), FileAccess.WRITE)
-+	print("[MP8-PERF] 帧时间探针已开（每 2 秒一行）→ user://mp8_perf_%d.log" % OS.get_process_id())
++	print("[MP8-PERF] Frame time probe on (one line every 2 s) → user://mp8_perf_%d.log" % OS.get_process_id())
 +
 +	_mp8_perf_timer = Timer.new()
 +	_mp8_perf_timer.wait_time = 2.0
@@ -839,14 +848,14 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	if not _mp8_perf_on:
 +		return
 +
-+	# 当前在玩哪个小游戏 —— 不带这个，横比时对不上是哪一关的数
++	# Which minigame is currently being played — without this, the side-by-side numbers can't be matched to a level
 +	var where: String = "?"
 +	if Globals != null:
 +		var mg = Globals.get("current_minigame_identifier")
 +		if mg != null:
 +			where = str(mg)
 +
-+	var line: String = "[MP8-PERF] %-14s fps=%5.1f | 脚本 %6.2f ms | 物理 %6.2f ms | 绘制调用 %5d | 绘制对象 %5d | 节点 %5d | 玩家 %d" % [
++	var line: String = "[MP8-PERF] %-14s fps=%5.1f | script %6.2f ms | physics %6.2f ms | draw calls %5d | draw objects %5d | nodes %5d | players %d" % [
 +		where,
 +		Performance.get_monitor(Performance.TIME_FPS),
 +		Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
@@ -863,97 +872,127 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] T53 版本不匹配的**可执行提示**（2026-08-31）
++# [MP8] T53 **actionable messages** for version mismatches (2026-08-31)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 原版对所有不匹配只有一句话（`LOC_TAG_VERSION_MISMATCH`）：
-+#     「连接失败。您当前的游戏版本与该房间不符。」
-+# 它没告诉玩家**该做什么** —— 因为握手比的是整串相等
-+# （`enet_backend.gd:133` / `steam_backend.gd:169`），下面四种情形走同一条路：
-+#   我的 mod 旧 / 我的 mod 新 / 房主没装 mod / 我没装而房主装了。
-+# 前三种要做的事完全不同（我更新 / 房主更新 / 卸载还原），第四种更是连
-+# 「去装 mod」这个动作都提示不到。1.5 又要挡一批人，所以这次把话说清楚。
++# Vanilla has just one sentence for every mismatch (`LOC_TAG_VERSION_MISMATCH`).
++#     "Connection failed. Your current game version does not match this lobby."
++# It doesn't tell the player **what to do** — because the handshake compares the whole string for equality
++# (`enet_backend.gd:133` / `steam_backend.gd:169`), and the four cases below all take the same path.
++#   my mod is older / my mod is newer / the host has no mod / I have no mod but the host does.
++# The first three need completely different actions (I update / host updates / uninstall and restore), and for the fourth
++# we can't even prompt the action "go install the mod". 1.5 is going to block another batch of people, so this time we spell it out.
 +#
-+# ── 为什么需要互相报一次版本 ──
-+# 拒绝时客机手上只有 `RefuseReason.VersionMismatch` 一个枚举，**不知道房主是什么版本**，
-+# 光凭这个分不出「房主是原版」还是「房主 mod 版本不同」。
-+# 所以房主在**每个 peer 连上的那一刻**先报一次自己的完整版本串，客机收到后回报自己的。
++# ── Why the two sides report their versions to each other ──
++# On refusal the client only has the `RefuseReason.VersionMismatch` enum and **doesn't know the host's version**,
++# so from that alone it can't tell "host is on vanilla" apart from "host is on a different mod version".
++# So the host reports its full version string **the moment each peer connects**, and the client replies with its own once it receives it.
 +#
-+# 判据是**收没收到**，不是收到了什么：收到 → 串里有确切版本，能算出谁新谁旧；
-+# 没收到 → 对面没有这套握手。⚠️「没装」与「版本太老」**分不开**，
-+# 所以文案只能说「未回报版本」，不能断言「对方没装」。
++# The criterion is **whether anything was received**, not what was received. Received → the string has the exact version, so we can work out who is newer.
++# Not received → the other side doesn't have this handshake. ⚠️ "Not installed" and "version too old" **can't be told apart**,
++# so the text can only say "no version reported", and can't claim "they don't have it installed".
 +#
-+# 🩸 **两个方向的精确度不一样（2026-09-03 实测，别记混）**：
-+#   · **房主判断客机**：1.5 的客机**会**回报（它的 mp8_hello_rpc 回给服务器，而房主就是服务器）
-+#     → 修好之后**立刻**就能精确点名 1.5 的人。没收到 = 原版或 ≤1.4。
-+#   · **客机判断房主**：1.5 的房主**永远不会**回报 —— 它的 hello 挂在 `on_peer_connected` 上，
-+#     而那个信号对被拒的人根本不发（就是本次修的 bug）。
-+#     所以 **1.5↔1.6 这一次不匹配，客机侧只能落到情形 ③**，无论我们这边怎么改。
-+#     没收到 = 原版 / ≤1.4 / **或 1.5**。要两边都 ≥ MP8_HELLO_SINCE 才精确。
++# 🩸 **The two directions differ in precision (tested 2026-09-03, don't mix them up)**.
++#   · **Host judging a client**: a 1.5 client **does** reply (its mp8_hello_rpc replies to the server, and the host is the server)
++#     → once this is fixed, 1.5 players can be named precisely **right away**. Not received = vanilla or ≤1.4.
++#   · **Client judging the host**: a 1.5 host **will never** report — its hello hangs off `on_peer_connected`,
++#     and that signal is never emitted for refused players (that's exactly the bug fixed this time).
++#     So **for this 1.5↔1.6 mismatch, the client side can only land in case ③**, no matter what we change on our side.
++#     Not received = vanilla / ≤1.4 / **or 1.5**. Both sides need to be ≥ MP8_HELLO_SINCE for it to be precise.
 +#
-+# ── 第四种情形（我没装、房主装了）为什么只能显示在房主屏幕上 ──
-+# 那台客机跑的是**原版代码**，我们一行都改不到，它必然显示原版那句话。
-+# 唯一还能说话的是房主 —— 所以那条提示发到**房主的大厅消息条**
-+# （`lobby_handler.send_lobby_message`，原版自带、复制房间号时就在用），
-+# 让房主告诉进不来的那位。这是这一种能做到的全部，别指望客机端。
++# ── Why the fourth case (I have no mod, the host does) can only be shown on the host's screen ──
++# That client runs **vanilla code** that we can't change a single line of, so it will always show the vanilla sentence.
++# The only one who can still say anything is the host — so that message goes to **the host's lobby message bar**
++# (`lobby_handler.send_lobby_message`, built into vanilla and already used when copying the lobby code),
++# so the host can tell the person who can't get in. That's all that can be done for this case, don't count on the client side.
 +#
-+# ⚠️ 给原版客机发这条 RPC，会在**他那台机器**的日志里留一行「方法不存在」的错误。
-+#    无害（节点存在、只是没这个方法），且他本来就要被拒；换来的是第四种情形有救。
++# ⚠️ The hello RPCs live on a separate child node, MP8Hello, not on NetworkManager itself.
++#    Godot identifies RPCs by their position in each node's sorted RPC list, so extra RPCs on NetworkManager would
++#    shift vanilla's and could land on a different method in another build. A vanilla or older client simply has no
++#    MP8Hello node, so the engine drops the message with one error line on their machine and nothing else happens.
 +
-+signal mp8_join_blocked(text: String)   # 房主侧：有人被版本挡住了，带上给房主看的话
++signal mp8_join_blocked(text: String)   # Host side - someone was blocked by version, carries the text to show the host
 +
-+var _mp8_host_version: String = ""              # 客机侧：房主报来的完整版本串
-+var _mp8_peer_versions: Dictionary = {}         # 房主侧：network_id -> 对方版本串
-+var _mp8_peers_accepted: Dictionary = {}        # 房主侧：真正被收编过的 peer（见下）
++var _mp8_host_version: String = ""              # Client side - the full version string reported by the host
++var _mp8_peer_versions: Dictionary = {}         # Host side - network_id -> that peer's version string
++var _mp8_peers_accepted: Dictionary = {}        # Host side - peers that were actually accepted (see below)
++var _mp8_hello: MP8Hello = null                 # The MP8Hello child node that carries the two hello RPCs
 +
 +
-+# 🩸 2026-09-03 实测修正：钩子原先挂的是 `on_peer_connected`，**那个信号对被拒的人根本不发**。
++# Carries the version hello in both directions. Version strings from the network are untrusted text, so both handlers
++# keep only a short run of version characters before storing anything.
++class MP8Hello extends Node:
++
++	# Client side - the host reports its version. Only the host may send this.
++	@rpc("any_peer", "call_remote", "reliable")
++	func hello_rpc(full_version: String) -> void :
++		if multiplayer.get_remote_sender_id() != 1:
++			return
++		var nm: Node = get_parent()
++		nm.set("_mp8_host_version", nm.call("mp8_clean_version", full_version))
++		hello_back_rpc.rpc_id(1, Globals.game_version)
++
++	# Host side - a client answers with its own version, stored under the peer that really sent it
++	@rpc("any_peer", "call_remote", "reliable")
++	func hello_back_rpc(full_version: String) -> void :
++		if not multiplayer.is_server():
++			return
++		var nm: Node = get_parent()
++		var versions: Dictionary = nm.get("_mp8_peer_versions")
++		versions[multiplayer.get_remote_sender_id()] = nm.call("mp8_clean_version", full_version)
++
++
++# 🩸 Fix from testing on 2026-09-03. The hook used to hang off `on_peer_connected`, and **that signal is never emitted for refused players**.
 +#
-+# 原版后端的入房链条（enet_backend.gd / steam_backend.gd 形状完全相同）：
-+#     multiplayer.peer_connected      ← 引擎层，**每个连上来的人都发**
-+#       → _on_player_connected() → send_client_data_rpc.rpc_id(对方)
-+#       → 对方回 receive_client_data_rpc(自己的 client_data)
++# The vanilla backend join chain (enet_backend.gd / steam_backend.gd have exactly the same shape)
++#     multiplayer.peer_connected      ← engine level, **emitted for everyone who connects**
++#       → _on_player_connected() → send_client_data_rpc.rpc_id(peer)
++#       → peer replies with receive_client_data_rpc(its own client_data)
 +#           if client_game_version != Globals.game_version:
-+#               refuse_client_rpc.rpc_id(对方, VersionMismatch)
-+#               return                                   ← 被拒的人走这条，到此为止
++#               refuse_client_rpc.rpc_id(peer, VersionMismatch)
++#               return                                   ← refused players take this path and stop here
 +#       → acknowledge_client_data_rpc()
-+#             on_peer_connected.emit()                   ← **只有通过版本检查的人才走到这里**
++#             on_peer_connected.emit()                   ← **only players who pass the version check get here**
 +#
-+# 后果（实测）：版本不符的人一个 hello 都收不到，
-+#   · 房主侧的「有人被挡在门外」（情形 ④）**从来没触发过**；
-+#   · 客机侧 `_mp8_host_version` 恒为空 → `mp8_mismatch_text()` 永远落到情形 ③，
-+#     ①②⑤ 三个分支**不可达**。
-+# 对照实验坐实：原版客机被拒时它的日志里连「方法不存在」都没有（= 房主没发过 hello），
-+# 而同版本成功入房时房主的 `_mp8_peer_versions` 里确实有对方版本（= 机制本身没坏）。
++# The consequence (tested) is that players with a mismatched version never receive a single hello,
++#   · the host-side "someone was kept out" (case ④) **has never fired**,
++#   · on the client side `_mp8_host_version` is always empty → `mp8_mismatch_text()` always lands in case ③,
++#     so the three branches ①②⑤ are **unreachable**.
++# A control experiment confirmed it. When a vanilla client was refused, its log didn't even have "method does not exist" (= the host never sent hello),
++# while on a successful same-version join the host's `_mp8_peer_versions` did hold the peer's version (= the mechanism itself works).
 +#
-+# 修法：改挂**引擎层**的 `multiplayer.peer_connected`。
-+# 我们在 autoload 的 _ready() 里连，比后端节点（`set_active_backend` 时才创建）连得早，
-+# 所以我们的 hello 会**先于** `send_client_data_rpc` 出门；两者同为 reliable、同一条信道，
-+# 于是 hello 必定先于拒绝到达对方。
++# The fix is to hook the **engine-level** `multiplayer.peer_connected` instead.
++# We connect in the autoload's _ready(), earlier than the backend node does (it's only created at `set_active_backend`),
++# so our hello goes out **before** `send_client_data_rpc`. Both are reliable and on the same channel,
++# so hello is guaranteed to reach the peer before the refusal does.
 +#
-+# ⚠️ 同时废掉了原来那个「等 2 秒再看」的形状：实测从 peer_connected 到
-+# peer_disconnected 只有 **2 毫秒**（本机 ENet，大厅场景帧率极高），等 2 秒时人早走光了。
-+# 判定改挂 `peer_disconnected` —— 那是确定性的时刻，不是猜的时长。
++# ⚠️ This also drops the old "wait 2 seconds and check" approach. In testing, going from peer_connected to
++# peer_disconnected took only **2 ms** (local ENet, very high lobby frame rate), so after 2 seconds everyone was long gone.
++# The decision now hangs off `peer_disconnected` — a deterministic moment, not a guessed duration.
 +func _mp8_version_hooks() -> void :
++
++	_mp8_hello = MP8Hello.new()
++	_mp8_hello.name = "MP8Hello"
++	add_child(_mp8_hello)
 +
 +	multiplayer.peer_connected.connect(_mp8_on_raw_peer_connected)
 +	multiplayer.peer_disconnected.connect(_mp8_on_raw_peer_disconnected)
 +
-+	# 游戏层的 on_peer_connected = 「这个人通过了版本检查、被收编了」。
-+	# 拿它记账，`peer_disconnected` 时就能分辨「正常离开」还是「被挡在门外」。
++	# The game-level on_peer_connected = "this person passed the version check and was accepted".
++	# We record it, so on `peer_disconnected` we can tell "left normally" apart from "was kept out".
 +	on_peer_connected.connect(func(nid): _mp8_peers_accepted[nid] = true)
 +
 +
-+# 房主：任何人一连上（**在版本检查之前**）就先报一次自己的版本。
++# Host - as soon as anyone connects (**before the version check**), report our own version first.
 +func _mp8_on_raw_peer_connected(network_id: int) -> void :
 +
 +	if not multiplayer.is_server():
 +		return
 +
-+	mp8_hello_rpc.rpc_id(network_id, Globals.game_version)
++	_mp8_hello.hello_rpc.rpc_id(network_id, Globals.game_version)
 +
 +
-+# 房主：peer 断开。若它从没被收编过，说明它是被版本挡下的 —— 这是情形 ④ 的触发点。
++# Host - a peer disconnected. If it was never accepted, it was blocked by version — this is the trigger for case ④.
 +func _mp8_on_raw_peer_disconnected(network_id: int) -> void :
 +
 +	var theirs: String = String(_mp8_peer_versions.get(network_id, ""))
@@ -962,40 +1001,41 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	if not multiplayer.is_server():
 +		return
 +
-+	# 正常玩过一场再离开的人：收编过，不是被拒
++	# Someone who played a match normally and then left was accepted, not refused
 +	if _mp8_peers_accepted.has(network_id):
 +		_mp8_peers_accepted.erase(network_id)
 +		return
 +
-+	# 收编过的名单里没有他 → 他连上了却没进来。ENet/Steam 两个后端里，
-+	# 唯一会让人「连上但不收编」的分支就是版本不符那一条。
++	# They're not on the accepted list → they connected but never got in. Across both the ENet and Steam backends,
++	# the only branch that leaves someone "connected but not accepted" is the version mismatch one.
 +	mp8_join_blocked.emit(_mp8_blocked_text_for_host(theirs))
 +
 +
-+@rpc("any_peer", "call_remote", "reliable")
-+func mp8_hello_rpc(full_version: String) -> void :
-+	_mp8_host_version = full_version
-+	mp8_hello_back_rpc.rpc_id(1, Globals.game_version)
++# Version strings from the network are untrusted. Keep at most 64 version characters (letters, digits, . + -)
++# so a peer can't put arbitrary sentences, links or megabytes of text into the refusal dialog or the host's lobby bar.
++func mp8_clean_version(s: String) -> String :
++	var out: String = ""
++	for ch in s.substr(0, 256):
++		if out.length() >= 64:
++			break
++		var c: int = ch.unicode_at(0)
++		var ok: bool = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
++		if ok or ch == "." or ch == "+" or ch == "-":
++			out += ch
++	return out
 +
 +
-+@rpc("any_peer", "call_remote", "reliable")
-+func mp8_hello_back_rpc(full_version: String) -> void :
-+	if not multiplayer.is_server():
-+		return
-+	_mp8_peer_versions[multiplayer.get_remote_sender_id()] = full_version
-+
-+
-+# 从完整版本串里拆出 mod 标签（没有就是空串 = 原版）。串长这样：`v2.1.2+overtime-1.5`
++# Extract the mod tag from the full version string (none means an empty string = vanilla). The string looks like `v2.1.2+overtime-1.5`
 +func _mp8_tag_of(full_version: String) -> String:
 +	var i: int = full_version.find("+overtime-")
 +	return "" if i < 0 else full_version.substr(i + 1)
 +
 +
-+# 版本号比大小：`overtime-1.5` → [1, 5]，逐段比。
-+# 认不出来的一律当相等（宁可少说一句，也不要说反）。
++# Version comparison - `overtime-1.5` → [1, 5], compared segment by segment. An edition suffix like `-en` is ignored here.
++# Anything unrecognized counts as equal (better to say too little than to say it backwards).
 +func _mp8_cmp_tag(a: String, b: String) -> int:
-+	var pa := a.trim_prefix("overtime-").split(".")
-+	var pb := b.trim_prefix("overtime-").split(".")
++	var pa := a.trim_prefix("overtime-").get_slice("-", 0).split(".")
++	var pb := b.trim_prefix("overtime-").get_slice("-", 0).split(".")
 +	for i in maxi(pa.size(), pb.size()):
 +		var x: int = int(pa[i]) if i < pa.size() and pa[i].is_valid_int() else 0
 +		var y: int = int(pb[i]) if i < pb.size() and pb[i].is_valid_int() else 0
@@ -1004,43 +1044,51 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	return 0
 +
 +
++# Edition suffix of a tag. `overtime-1.7-en` → "en", `overtime-1.6` → "" (the upstream edition).
++# Different editions never share a lobby, even with the same numbers, because their network protocols differ.
++func _mp8_edition_of(tag: String) -> String:
++	var v: String = tag.trim_prefix("overtime-")
++	var i: int = v.find("-")
++	return "" if i < 0 else v.substr(i + 1)
++
++
 +func _mp8_zh() -> bool:
 +	return TranslationServer.get_locale().to_upper().begins_with("ZH")
 +
 +
-+# ── 客机侧：被拒时显示什么 ──────────────────────────────────────────────
-+# 由 lobby_scene.gd 的 _on_join_refused 调用，取代 tr("LOC_TAG_VERSION_MISMATCH")。
++# ── Client side - what to show on refusal ──────────────────────────────────────────────
++# Called by _on_join_refused in lobby_scene.gd, replacing tr("LOC_TAG_VERSION_MISMATCH").
 +#
-+# 🩸 **改这里之前先读这一段（2026-09-03 实测，全部有截图存档）。**
++# 🩸 **Read this section before changing anything here (tested 2026-09-03, all backed by archived screenshots).**
 +#
-+# 落点是主菜单的 `DialogMessageHandler`（`GameManager.main_menu_dialog_message`
-+# → `main_menu` 的一个 Label）。那个 Label 待在一个 **clip_contents=true 的
-+# ScrollContainer** 里，外面套着固定 512×192 的 Panel，而且**没有可见滚动条**。
++# The text ends up in the main menu's `DialogMessageHandler` (`GameManager.main_menu_dialog_message`
++# → a Label in `main_menu`). That Label sits in a **clip_contents=true
++# ScrollContainer**, wrapped in a fixed 512×192 Panel, and **has no visible scrollbar**.
 +#
-+#   · **硬预算：Label 高 ≤ 105 px 才完整可见。** 超出的部分被静默裁掉。
-+#     中文行高 36 px（3 行 = 105）；英文行高 29 px（3 行 = 87，**4 行 = 117 就裁掉半行**）。
-+#   · 1.5 那版文案是「两段 + 两行版本串」，实测**只显示第一句** ——
-+#     「怎么办」和版本串玩家一个字都没看到过。整个 T53 的价值从没送达。
-+#   · 由此推出一条硬取舍：**英文在「开头标识」与「动作句」之间只能二选一**，
-+#     两样都要必定 4 行。中文字密，两样放得下。
++#   · **Hard budget: the Label must be ≤ 105 px tall to be fully visible.** Anything beyond that is silently clipped.
++#     Chinese line height is 36 px (3 lines = 105). English line height is 29 px (3 lines = 87, **4 lines = 117 clips half a line**).
++#   · The 1.5 copy was "two paragraphs + two version-string lines", and in testing **only the first sentence showed** —
++#     players never saw a single word of the "what to do" part or the version strings. None of T53's value ever got through.
++#   · That leads to a hard trade-off. **In English you can only have one of the "opening label" and the "action sentence"**,
++#     since having both always takes 4 lines. Chinese is denser and fits both.
 +#
-+# ⚠️ 另一条（同样实测）：Label 的 autowrap 原本是 `AUTOWRAP_WORD`，**只在词边界断行**。
-+#    中文没有空格，于是一整句中文**不换行**，横向溢出被裁掉两头。
-+#    1.5 的中文文案没炸纯属运气 —— 里面正好有 `Overtime`、`1.4` 这些 ASCII 词提供了断点。
-+#    现已由 `_mp8_fix_dialog_label()` 在运行时改成 `AUTOWRAP_WORD_SMART`（见那个函数）。
++# ⚠️ One more thing (also tested). The Label's autowrap was originally `AUTOWRAP_WORD`, which **only breaks at word boundaries**.
++#    Chinese has no spaces, so a whole Chinese sentence **doesn't wrap** and overflows horizontally with both ends clipped.
++#    The 1.5 Chinese copy only survived by luck — it happened to contain ASCII words like `Overtime` and `1.4` that provided break points.
++#    It's now switched to `AUTOWRAP_WORD_SMART` at runtime by `_mp8_fix_dialog_label()` (see that function).
 +#
-+# **改完必须重新量一遍**：本机就能验，不需要真的跑出版本不匹配 ——
-+# 写 `GameManager.main_menu_dialog_message` 再调一次 `check_for_message()`
-+# 就是一模一样的渲染路径。（记得先置 `Globals.splash_screen_viewed = true`，
-+# 否则画面停在开场 logo，主菜单 UI 根本没露面。）
++# **After any change, measure it again**. It can be checked locally without actually producing a version mismatch —
++# write `GameManager.main_menu_dialog_message` and call `check_for_message()` again,
++# which is exactly the same render path. (Remember to set `Globals.splash_screen_viewed = true` first,
++# otherwise the screen stays on the opening logo and the main menu UI never shows up.)
 +
-+# 「从哪一版开始，房主会主动回报自己的版本」。
-+# 🩸 **发版时手动核对这个数**：它等于本次修复实际发出去的那个版本号，
-+# 不会自己跟着 MP8_VERSION_TAG 走。填错只会让情形 ③ 那句话里的数字不准，不影响功能。
-+const MP8_HELLO_SINCE: String = "1.6"
++# "The version from which the host actively reports its own version".
++# 🩸 **Check this number by hand when releasing**. It equals the version number this fix actually shipped in,
++# and doesn't follow MP8_VERSION_TAG by itself. Getting it wrong only makes the number in case ③'s sentence inaccurate, it doesn't affect functionality.
++const MP8_HELLO_SINCE: String = "1.7-en"
 +
 +
-+# "v2.1.2+overtime-1.5" -> "1.5"（没有 tag 就回空串）
++# "v2.1.2+overtime-1.5" -> "1.5" (returns an empty string if there's no tag)
 +func _mp8_tag_num(full_version: String) -> String:
 +	return _mp8_tag_of(full_version).trim_prefix("overtime-")
 +
@@ -1057,104 +1105,113 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	var mine: String = Globals.game_version
 +	var theirs: String = _mp8_host_version
 +
-+	# ③ 房主没回报版本 → 原版，或者早于 MP8_HELLO_SINCE（那些版本不回报）。
-+	#    这两者分不开，所以只陈述可观测的事实「未回报」，不断言「房主没装」。
++	# ③ The host reported no version → vanilla, or older than MP8_HELLO_SINCE (those versions don't report).
++	#    The two can't be told apart, so only state the observable fact "not reported", and don't claim "the host has no mod".
 +	if theirs.is_empty():
 +		if zh:
-+			return ("连接失败：版本不一致。房主未回报 Overtime 版本，可能未安装或低于 "
-+				+ MP8_HELLO_SINCE + "。\n您的版本：" + mine)
++			return ("Can't join: host sent no Overtime version (maybe missing or below "
++				+ MP8_HELLO_SINCE + ").\nYour version: " + mine)
 +		return ("Version mismatch: the host reported no Overtime version.\nYour build: " + mine)
 +
 +	var my_tag: String = _mp8_tag_of(mine)
 +	var their_tag: String = _mp8_tag_of(theirs)
 +	var cmp: int = _mp8_cmp_tag(my_tag, their_tag)
 +
-+	# 版本行只列**有差异的那一段**：①② 差在 mod 版本，⑤ 差在游戏本体。
-+	# 两条完整串放不进 3 行，而且这几种情形玩家两边版本都知道，不需要转发完整串。
-+	# （只有情形 ③ 保留完整串 —— 那正是要发给房主去核对的东西。）
++	# The version line lists **only the part that differs**. ①② differ in the mod version, ⑤ differs in the base game.
++	# Two full strings won't fit in 3 lines, and in these cases the player knows both versions, so the full strings don't need relaying.
++	# (Only case ③ keeps the full string — that's exactly what gets sent to the host to check.)
 +
-+	# ⑤ mod 版本相同却仍被拒 → 差的是游戏本体
++	# ⑥ A different edition of Overtime (for example upstream 1.6 and 1.7-en). They can never share a lobby.
++	if _mp8_edition_of(my_tag) != _mp8_edition_of(their_tag):
++		return ("Can't join: this lobby runs a different Overtime edition.\nYou "
++			+ _mp8_tag_num(mine) + " / Host " + _mp8_tag_num(theirs))
++
++	# ⑤ Same mod version but still refused → the difference is the base game
 +	if cmp == 0:
 +		if zh:
-+			return ("连接失败：Overtime 版本相同，游戏本体版本不同。\n您 "
-+				+ _mp8_base_of(mine) + " ／ 房主 " + _mp8_base_of(theirs))
++			return ("Can't join: same Overtime version, different base game version.\nYou "
++				+ _mp8_base_of(mine) + " / Host " + _mp8_base_of(theirs))
 +		return ("Version mismatch: same Overtime build, different game version.\nYou "
 +			+ _mp8_base_of(mine) + " · Host " + _mp8_base_of(theirs))
 +
-+	# ① 我的版本较旧
++	# ① My version is older
 +	if cmp < 0:
 +		if zh:
-+			return ("连接失败：您的 Overtime 版本低于房主，请下载新版重新安装。\n您 "
-+				+ _mp8_tag_num(mine) + " ／ 房主 " + _mp8_tag_num(theirs))
++			return ("Can't join: your Overtime is older. Get the new version and reinstall.\nYou "
++				+ _mp8_tag_num(mine) + " / Host " + _mp8_tag_num(theirs))
 +		return ("Version mismatch: your Overtime build is older.\nYou "
 +			+ _mp8_tag_num(mine) + " · Host " + _mp8_tag_num(theirs))
 +
-+	# ② 我的版本较新
++	# ② My version is newer
 +	if zh:
-+		return ("连接失败：您的 Overtime 版本高于房主，请房主更新至相同版本。\n您 "
-+			+ _mp8_tag_num(mine) + " ／ 房主 " + _mp8_tag_num(theirs))
++		return ("Can't join: your Overtime is newer. Ask the host to update to match.\nYou "
++			+ _mp8_tag_num(mine) + " / Host " + _mp8_tag_num(theirs))
 +	return ("Version mismatch: your Overtime build is newer.\nYou "
 +		+ _mp8_tag_num(mine) + " · Host " + _mp8_tag_num(theirs))
 +
 +
-+# ── 房主侧：④ 有人进不来时，给房主的一行提示 ────────────────────────────
-+# 这是第四种情形（对方没装 mod）**唯一**能说话的地方，见本节开头的说明。
++# ── Host side - ④ a one-line notice to the host when someone can't get in ────────────────────────────
++# This is the **only** place where the fourth case (the peer has no mod) can say anything, see the notes at the start of this section.
 +func _mp8_blocked_text_for_host(their_version: String) -> String:
 +
-+	# ⚠️ 这条的落点是**大厅消息条**（lobby_handler.send_lobby_message），
-+	#    与客机那个弹窗是两个控件，长度上限**没量过**。先按短的写。
++	# ⚠️ This one ends up in the **lobby message bar** (lobby_handler.send_lobby_message),
++	#    which is a different control from the client's dialog, and its length limit **hasn't been measured**. Written short for now.
 +	var zh: bool = _mp8_zh()
 +	var tag: String = MP8_VERSION_TAG.trim_prefix("overtime-")
 +
-+	# 不写死「低于 X」：这条是给房主看的，而房主自己的 tag 与 MP8_HELLO_SINCE
-+	# 在开发期并不相等，写两个数会自相矛盾（实测：「低于 1.6。本房间为 1.5。」）。
++	# Don't hard-code "below X". This text is for the host, and the host's own tag and MP8_HELLO_SINCE
++	# aren't equal during development, so writing both numbers would contradict itself (in testing, "below 1.6. This lobby is on 1.5.").
 +	if their_version.is_empty():
 +		if zh:
-+			return ("一名玩家因版本不一致被拒绝加入：对方未安装 Overtime，或版本过旧。"
-+				+ "本房间为 " + tag + "。")
++			return ("A player was refused (version mismatch): they don't have Overtime, or theirs is too old. "
++				+ "This lobby is on " + tag + ".")
 +		return ("A player was refused: no Overtime, or a build too old. This lobby is on "
 +			+ tag + ".")
 +
 +	var their_tag: String = _mp8_tag_num(their_version)
 +	if their_tag.is_empty():
 +		if zh:
-+			return "一名玩家因版本不一致被拒绝加入：对方使用原版。本房间为 " + tag + "。"
++			return "A player was refused (version mismatch): they are on vanilla. This lobby is on " + tag + "."
 +		return "A player was refused: they are on vanilla. This lobby is on " + tag + "."
++
++	if _mp8_edition_of(_mp8_tag_of(their_version)) != _mp8_edition_of(MP8_VERSION_TAG):
++		return ("A player was refused: they run a different Overtime edition (" + their_tag
++			+ "), this lobby " + tag + ".")
 +
 +	var cmp: int = _mp8_cmp_tag(_mp8_tag_of(their_version), MP8_VERSION_TAG)
 +	if cmp == 0:
 +		if zh:
-+			return ("一名玩家因版本不一致被拒绝加入：Overtime 版本相同，游戏本体版本不同"
-+				+ "（对方 " + _mp8_base_of(their_version) + "）。")
++			return ("A player was refused (version mismatch): same Overtime version, different base game version"
++				+ " (theirs " + _mp8_base_of(their_version) + ").")
 +		return ("A player was refused: same Overtime build, different game version (theirs "
 +			+ _mp8_base_of(their_version) + ").")
 +
 +	if zh:
-+		return ("一名玩家因版本不一致被拒绝加入：对方 Overtime " + their_tag
-+			+ "，本房间 " + tag + "。")
++		return ("A player was refused (version mismatch): their Overtime " + their_tag
++			+ ", this lobby " + tag + ".")
 +	return ("A player was refused: their Overtime " + their_tag
 +		+ ", this lobby " + tag + ".")
 +
 +
-+# ═════════════ [MP8] Steam 房间人数上限的重新宣示 ═════════════
++# ═════════════ [MP8] Re-asserting the Steam lobby member limit ═════════════
 +#
-+# 容量守卫（_mp8_cap_locked）只管得住 NetworkManager.max_player_count 这个**变量**。
-+# 但 Steam 房间的成员上限是**Steam 侧的状态**，由 Steam.setLobbyMemberLimit() 设定，
-+# 守卫够不着。
++# The capacity guard (_mp8_cap_locked) can only protect the **variable** NetworkManager.max_player_count.
++# But the Steam lobby member limit is **Steam-side state**, set by Steam.setLobbyMemberLimit(),
++# which the guard can't reach.
 +#
-+# 已知案例：MachineParty+ 的「Make Lobby Public」会执行
-+#     max_players = clampi(max_players, MIN_PLAYERS, MAX_PLAYERS_CAP)   # CAP 硬编码 4
++# A known case is MachineParty+'s "Make Lobby Public", which runs
++#     max_players = clampi(max_players, MIN_PLAYERS, MAX_PLAYERS_CAP)   # CAP hard-coded to 4
 +#     Steam.setLobbyMemberLimit(id, max_players)
-+# 房主一按那个开关，房间就被 Steam 夹到 4 人 —— 第 5 个人会被 Steam 直接拒收，
-+# 而且我们这边任何日志都不会响（因为不是我们的变量被改）。
-+# 它的 UI 上那个 stepper 最大也只到 4，所以「想开 8 人公开房」在它那儿
-+# 根本表达不出来 —— 改回去不算违背房主意愿。
++# As soon as the host flips that switch, Steam clamps the lobby to 4 — the 5th player gets refused by Steam directly,
++# and none of our logs make a sound (because it isn't our variable being changed).
++# Its UI stepper also only goes up to 4, so "I want an 8-player public lobby" simply can't be expressed
++# there — setting it back doesn't go against the host's wishes.
 +#
-+# 做法：房主侧每 2 秒核一次，低于我们的容量就设回去，并打一行日志。
-+# 不打架：MP+ 只在 publish() 里设一次 member limit，它那个 2 秒定时器只改 lobby data。
++# The approach is to check every 2 seconds on the host side, and if it's below our capacity, set it back and log a line.
++# No tug-of-war. MP+ only sets the member limit once in publish(), and its 2-second timer only changes lobby data.
 +#
-+# ⚠️ 全程用 has_method / has_signal 守着 —— 这版 GodotSteam 暴露了哪些方法
-+# 我没法静态确认，缺哪个就安静跳过，绝不因为它崩。
++# ⚠️ Guarded throughout with has_method / has_signal — I can't statically confirm which methods this GodotSteam build exposes,
++# so if one is missing it quietly skips, and never crashes because of it.
 +var _mp8_lobby_timer: Timer = null
 +var _mp8_lobby_last_fix: int = -1
 +
@@ -1178,7 +1235,7 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	if active_backend == null:
 +		return
 +
-+	# lobby_id 只在 Steam 后端子类上，基类 MultiplayerBackend 没有 —— 鸭子类型取值
++	# lobby_id only exists on the Steam backend subclass, not on the base MultiplayerBackend — read it duck-typed
 +	var lobby_id: int = int(active_backend.get("lobby_id") if active_backend.get("lobby_id") != null else 0)
 +	if lobby_id <= 0:
 +		return
@@ -1186,18 +1243,80 @@ diff --git a/modules/multiplayer/network_manager.gd b/modules/multiplayer/networ
 +	if not (Engine.has_singleton("Steam") or ClassDB.class_exists("Steam")):
 +		return
 +
-+	# 有 getter 就先读、只在真的被压小时才改；没有 getter 就无脑设（幂等）
++	# If there's a getter, read first and only restore the known clamp to 4 (MachineParty+ can't express more than 4).
++	# Any other lower limit, like 2 or 3, is the host's own choice and is left alone. Without a getter, just set it blindly (idempotent)
 +	if Steam.has_method("getLobbyMemberLimit"):
 +		var cur: int = int(Steam.getLobbyMemberLimit(lobby_id))
-+		if cur >= max_player_count or cur <= 0:
++		if cur != 4 or cur >= max_player_count:
 +			return
 +		if not Steam.has_method("setLobbyMemberLimit"):
 +			return
 +		Steam.setLobbyMemberLimit(lobby_id, max_player_count)
 +		if _mp8_lobby_last_fix != cur:
 +			_mp8_lobby_last_fix = cur
-+			push_warning("[MP8] Steam 房间上限被别的 mod 压到 %d（已知案例：MachineParty+ 的「Make Lobby Public」），已设回 %d" % [cur, max_player_count])
++			push_warning("[MP8] Steam lobby limit was lowered to %d by another mod (known case: MachineParty+'s 'Make Lobby Public'), set back to %d" % [cur, max_player_count])
 +	else:
 +		if Steam.has_method("setLobbyMemberLimit"):
 +			Steam.setLobbyMemberLimit(lobby_id, max_player_count)
++
++
++# ═══════════════════════════════════════════════════════════════════════════
++# [MP8] Release hardening helpers, shared by every patched script
++# ═══════════════════════════════════════════════════════════════════════════
++
++# Launch arguments for the mod's own dev switches. Release builds (MP8_DEV_TOOLS false) always get an empty list,
++# so every mp8* flag keeps its default and none of the editors, debug keys or rule switches can be turned on.
++func mp8_args() -> Array :
++	if not MP8_DEV_TOOLS:
++		return []
++	return Array(OS.get_cmdline_args())
++
++
++# True when the RPC being handled was sent by the host, or is a local call.
++# RPCs that only the host is meant to send check this first, so a modified client can't call them on anyone.
++func mp8_sender_is_host(mp: MultiplayerAPI) -> bool :
++	var s: int = mp.get_remote_sender_id()
++	return s == 0 or s == 1
++
++
++# Range and finiteness checks for numbers that arrive over the network.
++# NaN, infinite or absurdly large transforms can break physics and rendering on every machine.
++func mp8_finite(x: float, limit: float = 100000.0) -> bool :
++	return is_finite(x) and absf(x) <= limit
++
++
++func mp8_finite_v2(v: Vector2, limit: float = 100000.0) -> bool :
++	return mp8_finite(v.x, limit) and mp8_finite(v.y, limit)
++
++
++func mp8_finite_v3(v: Vector3, limit: float = 100000.0) -> bool :
++	return mp8_finite(v.x, limit) and mp8_finite(v.y, limit) and mp8_finite(v.z, limit)
++
++
++# A name or label from another player, safe for a plain Label. Control characters such as newlines are dropped
++# (they could forge extra lines) and the length is capped.
++func mp8_plain_text(s: String, max_len: int = 32) -> String :
++	var out: String = ""
++	for ch in s.substr(0, max_len * 4):
++		if out.length() >= max_len:
++			break
++		var c: int = ch.unicode_at(0)
++		if c < 32 or c == 127:
++			continue
++		out += ch
++	return out
++
++
++# Text for a RichTextLabel with BBCode on. Every "[" becomes the [lb] escape tag, so the text can't open tags.
++func mp8_bbcode_text(s: String, max_len: int = 32) -> String :
++	return mp8_plain_text(s, max_len).replace("[", "[lb]")
++
++
++# Text that ends up inside a file name. Path and reserved characters are dropped as well, so it can't leave user://
++func mp8_file_text(s: String, max_len: int = 32) -> String :
++	var out: String = ""
++	for ch in mp8_plain_text(s, max_len):
++		if not "\\/:*?\"<>|.".contains(ch):
++			out += ch
++	return out if out != "" else "x"
 +

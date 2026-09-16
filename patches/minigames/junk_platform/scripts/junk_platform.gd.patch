@@ -1,130 +1,130 @@
 diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_platform/scripts/junk_platform.gd
 --- a/minigames/junk_platform/scripts/junk_platform.gd
 +++ b/minigames/junk_platform/scripts/junk_platform.gd
-@@ -30,21 +30,399 @@ var finished: bool = false
+@@ -30,21 +30,404 @@ var finished: bool = false
  
  var player_count: int = 0
  
-+# [MP8] ===== 残骸平台扩到 8 个 =====
++# [MP8] ===== Expand Junk Platform to 8 platforms =====
 +#
-+# 这个小游戏是**每人一个实体平台**，不是补个出生点就行的那种：
-+# 一个平台 = Area3D 碰撞体 + 平台视觉件 + 损伤指示圈 + 压缩机 + 警报音源，共 5 组节点。
++# This minigame has **a physical platform per player**, so it isn't the kind where adding a spawn point is enough.
++# One platform = Area3D collider + platform visuals + damage indicator ring + compactor + alarm audio source, 5 groups of nodes in total.
 +#
-+# ---- 场景是怎么搭的（逆向出来的，改之前必读）----
++# ---- How the scene is built (reverse-engineered, read this before changing anything) ----
 +#
-+# 1. **平台碰撞体是静止的，视觉件挂在会旋转的 `visuals base` 上**。
-+#    对面那半玩家把 `camera_base` 和 `visuals_base` 一起绕 Y 转 180°，
-+#    于是 1 号平台底下换成了对角那个平台的视觉件——所以脚本里要重新指认
-+#    （`platform_visuals` → `platform_visuals_flipped`）。**翻转配对 = 正对角。**
++# 1. **Platform colliders are static, while the visuals hang off the rotating `visuals base`**.
++#    For the half of the players on the far side, `camera_base` and `visuals_base` are rotated 180° around Y together,
++#    so platform 1 ends up with the diagonally opposite platform's visuals under it — which is why the script re-identifies them
++#    (`platform_visuals` → `platform_visuals_flipped`). **Flip pairing = directly diagonal.**
 +#
-+# 2. **编号不可信，位置才可信**：`platform main parent1` 并不在 `Platform1` 底下
-+#    （实测 parent1 在 (-13,+13)，而 Platform1 在 (-13,-13)），
-+#    而且对角两个平台**互相引用同一批视觉件**（1 引用 1 和 3，3 引用 3 和 1）。
-+#    所以搬家**必须按空间位置认组**，不能按编号认，否则会把同一个节点搬两次。
++# 2. **Numbering can't be trusted, only positions can**. `platform main parent1` is not under `Platform1`
++#    (tested, parent1 is at (-13,+13) while Platform1 is at (-13,-13)),
++#    and the two diagonal platforms **reference the same set of visuals** (1 references 1 and 3, 3 references 3 and 1).
++#    So moving things **must group them by spatial position**, not by number, or the same node gets moved twice.
 +#
-+# 3. `junk platform compactors` 这个父节点自带 -90° 旋转，
-+#    压缩机的局部坐标要乘上父变换才是世界坐标（换算后每台确实在对应平台正上方）。
++# 3. The `junk platform compactors` parent node has its own -90° rotation,
++#    so a compactor's local coordinates must be multiplied by the parent transform to get world coordinates (after converting, each one really is right above its platform).
 +#
-+# ---- 布局（2026-08-16 用户定案）----
++# ---- Layout (settled by the user on 2026-08-16) ----
 +#
-+# 原版 4 个平台在 (±13, 0, ±13)、半径 6，彼此间距 26（边缘空隙 14）——是**孤岛**。
++# The 4 vanilla platforms sit at (±13, 0, ±13) with radius 6, 26 apart (14 gap between edges) — they're **islands**.
 +#
-+# ⚠️ 初版排成"两排各 4 个"（z=±13，x=±6.5/±19.5）：功能全正常，但间距压到 13、
-+#    边缘只剩 1 的空隙，**人一步就能走到别人的平台上**，孤岛感没了。
++# ⚠️ The first version laid them out as "two rows of 4" (z=±13, x=±6.5/±19.5). Everything worked, but spacing dropped to 13
++#    with only a gap of 1 between edges, so **a player could step straight onto someone else's platform** and the island feel was gone.
 +#
-+# 定案（用户 2026-08-16）：**八边形** —— 原版那 4 个一动不动，
-+# 新增 4 个摆在 0°/90°/180°/270° 方位、半径 MP8_NEW_RADIUS 处，
-+# 并各自绕 Y 转 45° 让朝向和站位一致。半径 22.5 时相邻边缘间隙约 4.1（初版是 1.0），走不过去。
++# Final decision (user, 2026-08-16) — an **octagon**. The 4 vanilla platforms don't move at all,
++# and the 4 new ones are placed at bearings 0°/90°/180°/270° at radius MP8_NEW_RADIUS,
++# each rotated 45° around Y so its facing matches where it stands. At radius 22.5 the gap between neighboring edges is about 4.1 (the first version had 1.0), too wide to walk across.
 +#
-+# ⚠️⚠️ **相机一律保持原版，一个字都不改**（用户 2026-08-16 明确要求，等他的反馈再说）。
-+# 上一版的"自动后拉构图"已经**默认关掉**，只在传 mp8junkcam 时才跑（见 _mp8_pull_camera_back）。
-+# 上一版为什么被否：自动构图是沿视线后退的，而视线俯角 34.5°，
-+# 退 9 个单位就把相机抬到 y≈28、高过压缩机顶端 y≈27，顶盖糊在画面上方挡视野。
++# ⚠️⚠️ **The camera stays exactly as in vanilla, not a single character changed** (the user explicitly asked for this on 2026-08-16, pending their feedback).
++# The previous version's "automatic pull-back framing" is now **off by default** and only runs when mp8junkcam is passed (see _mp8_pull_camera_back).
++# Why the previous version was rejected. Auto-framing backs off along the line of sight, and with the view pitched down 34.5°,
++# backing off 9 units raises the camera to y≈28, above the top of the compactors at y≈27, so their lids smear across the top of the frame and block the view.
 +#
-+# 相机不动的代价是**构图余量由原版决定，不能再靠拉相机去凑**：
-+# 原版近侧那排平台（z=+13）中心已经压在画面下边界附近，
-+# 所以圆环半径一大，正前方那个平台就会掉到画面外面去。
-+# `_mp8_report_camera()` 会把每个平台在两种朝向下的"进没进画面"直接打进日志，
-+# 不用靠人盯着画面猜。半径可以用命令行 mp8junkr=<半径> 临时改，不用重新编译。
++# The cost of not moving the camera is that **framing headroom is set by vanilla and can no longer be fixed by pulling the camera back**.
++# The centers of vanilla's near row of platforms (z=+13) already sit close to the bottom edge of the frame,
++# so once the ring radius gets bigger, the platform directly in front drops out of frame.
++# `_mp8_report_camera()` writes whether each platform is "in frame" under both orientations straight to the log,
++# so nobody has to guess by staring at the screen. The radius can be changed temporarily with the command-line arg mp8junkr=<radius>, no recompile needed.
 +
-+# 新平台所在半径。原版四角在 √(13²+13²) = 18.38 处。
-+# 半径越大离得越开，但正前方那个平台也越贴近相机（相机在 z=27.66）：
-+#   18.38（同一个圆）→ 相邻间隙仅 2.1，可能还是能走过去
-+#   22.5            → 间隙 4.1，基本走不过去
-+# ⚠️ 相机现在不动了，所以这个值是**唯一的旋钮**，构图好不好全看它。
-+# 命令行 mp8junkr=<半径> 可临时覆盖，不用重新编译（配合日志里的 [MP8-CAM] 体检行调）。
++# Radius for the new platforms. The vanilla corners are at √(13²+13²) = 18.38.
++# A bigger radius spreads them out more, but also brings the platform directly in front closer to the camera (the camera is at z=27.66).
++#   18.38 (same circle) → neighbor gap only 2.1, might still be walkable
++#   22.5            → gap 4.1, basically not walkable
++# ⚠️ The camera doesn't move anymore, so this value is **the only knob** and the framing depends entirely on it.
++# The command-line arg mp8junkr=<radius> can override it temporarily without a recompile (tune it alongside the [MP8-CAM] health-check lines in the log).
 +const MP8_NEW_RADIUS: float = 22.5
 +
-+# 新平台绕 Y 转 45°，让它的朝向和"站在 45° 方位"这件事一致（用户要求）
++# Rotate the new platforms 45° around Y so their facing matches "standing at a 45° bearing" (user request)
 +const MP8_NEW_YAW_DEGREES: float = 45.0
 +
-+# 玩家落位：platforms[i] ↔ 出生点[i] ↔ 第 i 个玩家，而 platforms 的顺序是
-+# **原版 4 个在前、复制件在后**，所以边界情况天然分成两半：
-+#   P1~P4 = 原版四角平台（原始节点，位置一动没动）
-+#   P5~P8 = 新增的 45° 方位平台（复制件 + 转了 45°）
-+# 于是"只有复制件坏"的症状就是 P5~P8 全出问题，和"某一侧坏"区分得很干净。
-+# P8 还占着数组末位，按下标索引的越界会先打在他身上。
++# Player placement. platforms[i] ↔ spawn point[i] ↔ player i, and platforms are ordered
++# **the 4 vanilla ones first, duplicates after**, so edge cases naturally split into two halves.
++#   P1~P4 = the vanilla corner platforms (original nodes, positions untouched)
++#   P5~P8 = the new platforms at 45° bearings (duplicates + rotated 45°)
++# So the symptom of "only the duplicates are broken" is all of P5~P8 failing, which is cleanly distinguishable from "one side is broken".
++# P8 also holds the last slot in the array, so out-of-bounds indexing hits them first.
 +
 +var _mp8_expanded: bool = false
 +
 +
-+# [MP8] ===== 调试设施：右上角"我是谁" + 数字键切落石速度 =====
++# [MP8] ===== Debug aids — "who am I" in the top right + number keys to change rock drop speed =====
 +#
-+# 1. **右上角玩家 id**：8 开的时候光看画面分不清哪个窗口是谁
-+#    （平台名牌能看出"这个平台是谁的"，但看不出"我正在操作的是谁"）。
-+# 2. **数字键切落石速度**：原版落石节奏很快（3 秒一批、10 秒内加速到 1 秒一批），
-+#    想看清楚指示圈/塌陷/压缩机根本来不及。用户 2026-08-16 要求把倍数交给按钮控制。
++# 1. **Player id in the top right**. With 8 instances open you can't tell whose window is whose just from the picture
++#    (platform nameplates show "whose platform this is", but not "who I'm controlling").
++# 2. **Number keys change rock drop speed**. Vanilla drops rocks fast (a batch every 3 seconds, speeding up to a batch every 1 second within 10 seconds),
++#    far too fast to get a good look at the indicator rings / collapses / compactors. On 2026-08-16 the user asked for the multiplier to be controlled by keys.
 +#
-+# ⚠️ 落石计时器**只在服务器上跑**（junk_handler 里 `if multiplayer.is_server()` 才连 timeout），
-+# 所以按键必须走 RPC 通知服务器，客户端自己改本地的值没有任何效果。
++# ⚠️ The rock drop timer **only runs on the server** (junk_handler only connects timeout under `if multiplayer.is_server()`),
++# so key presses have to notify the server via RPC. A client changing its own local value has no effect at all.
 +
 +const MP8_JUNK_SPEED_KEYS: Dictionary = {
-+	KEY_1: 1.0,    # 原速
-+	KEY_2: 2.0,    # 2 倍慢
-+	KEY_3: 5.0,    # 5 倍慢
-+	KEY_4: 10.0,   # 10 倍慢
-+	KEY_5: 0.0,    # 暂停落石
++	KEY_1: 1.0,    # normal speed
++	KEY_2: 2.0,    # 2x slower
++	KEY_3: 5.0,    # 5x slower
++	KEY_4: 10.0,   # 10x slower
++	KEY_5: 0.0,    # pause rock drops
 +}
 +
-+# [MP8] 调试辅助总开关（用户 2026-08-16 要求：收尾时这三样必须关掉）。
-+# 管三样东西：① 数字键切落石速度 ② 右上角"我是谁" ③ 平台头顶名牌。
-+# 跟着 `-debug-tools` 走 —— 测试台一定带它，**发布版一定不带**，所以正式游玩天然是干净的。
-+# 想在测试台上也关掉看正式效果：传 `mp8nojunkdebug`。
++# [MP8] Master switch for debug aids (on 2026-08-16 the user required all three to be off for the final wrap-up).
++# It controls three things. ① number keys for rock drop speed ② "who am I" in the top right ③ nameplates above platforms.
++# It follows `-debug-tools` — the test rig always passes it and **release builds never do**, so real play is naturally clean.
++# To turn them off on the test rig too and see what real play looks like, pass `mp8nojunkdebug`.
 +var _mp8_debug_aids: bool = false
 +var _mp8_junk_keys: bool = false
 +var _mp8_junk_mult: float = 1.0
 +var _mp8_junk_base_interval: float = 0.0
 +var _mp8_junk_base_min: float = 0.0
 +var _mp8_debug_canvas: CanvasLayer = null
-+# [MP8] 2026-08-25 用户要的「暂停落石」可点按钮。键盘 5 仍然有效，两者走同一条 RPC。
++# [MP8] 2026-08-25 the clickable "pause rock drops" button the user asked for. Key 5 still works, and both go through the same RPC.
 +var _mp8_junk_btn: Button = null
 +var _mp8_id_label: Label = null
 +var _mp8_junk_label: Label = null
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8-DIAG] 残骸平台常备诊断（T49 建起来的，**opt-in，发布版不写**）
++# [MP8-DIAG] Standing Junk Platform diagnostics (built for T49, **opt-in, release builds write nothing**)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 现象（玩家报 + 本机 8 开复现）：人都掉下去了，局不结算，垃圾一直掉，帧数崩。
-+# 已知：`[MP8] 残骸平台结算` 一次都没打过 → check_game_end() 从没越过
-+#       `active_players.size() > 1`，即**有人没被判死**。
++# Symptom (player report + reproduced with 8 local instances) — everyone fell off, the match doesn't settle, junk keeps falling, the frame rate collapses.
++# Known so far. `[MP8] Junk Platform results` was never printed once → check_game_end() never got past
++#       `active_players.size() > 1`, meaning **someone was never judged dead**.
 +#
-+# 要分的就一件事：
-+#   A. `event_fallen` 打了、`emit_died` 没打  → 坠落触发了，但那条 1.5 秒 tween
-+#      到不了终点（判死链断在后半段）；
-+#   B. 两个都没打                              → 坠落**根本没触发**，人落在某个
-+#      碰撞面上站住了（probe72 量到 45°/135°/225°/315° 方位 r=14~24.5 有一层
-+#      y=-0.06 的面，高于虚空平面 y=-2.00）。周期快照里的 **y 值**直接给答案。
++# There's only one thing to tell apart.
++#   A. `event_fallen` printed but `emit_died` didn't  → the fall triggered, but that 1.5-second tween
++#      never reaches its end (the death chain breaks in the second half).
++#   B. Neither printed                              → the fall **never triggered at all**, and the player landed on some
++#      collision surface and stood there (probe72 measured a surface at y=-0.06 at bearings 45°/135°/225°/315°, r=14~24.5,
++#      above the void plane at y=-2.00). The **y value** in the periodic snapshots gives the answer directly.
 +#
-+# ⚠️ 写**每个实例一份文件**（user://mp8_diag_<peer>.log）：8 开时所有实例共用一个
-+#    godot.log，互相盖字，那份日志是花的、读不出来。这条是本诊断存在的主要理由。
-+# ⚠️ **每行 flush**：卡死的局是被强杀的，不 flush 缓冲里的东西全丢。
++# ⚠️ Writes **one file per instance** (user://mp8_diag_<peer>.log). With 8 instances they all share one
++#    godot.log and overwrite each other, so that log is garbled and unreadable. That's the main reason this diagnostic exists.
++# ⚠️ **Flush every line**. A hung match gets force-killed, and without flushing everything in the buffer is lost.
 +#
-+# 【2026-08-27 用户定：留下转常备，不删】T49 那次就是靠快照里
-+# 「y=-999 且 active=false」一眼定的性 —— 那是 `kill_rpc()` 的指纹，
-+# 直接把「人被杀了但账没销」和「人根本没死」两种情况分开了。
-+# 开关跟侦察日志同一个规矩（`-debug-tools` / `mp8diag` / 编辑器），
-+# **发布版玩家双击启动什么都不传 → 一个字节都不写**。
++# [Decided by the user on 2026-08-27 — keep it as a standing feature, don't delete it] T49 was pinned down at a glance from the snapshots'
++# "y=-999 and active=false" — that's the fingerprint of `kill_rpc()`,
++# and it cleanly separated "the player was killed but never taken off the books" from "the player never died at all".
++# The switch follows the same rule as the diagnostic log (`-debug-tools` / `mp8diag` / editor),
++# so **a release player who double-clicks to launch passes nothing → not a single byte is written**.
 +var _mp8_diag_on: bool = false
 +var _mp8_diag_f: FileAccess = null
 +var _mp8_diag_timer: Timer = null
@@ -133,8 +133,8 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
  func _ready() -> void :
  	super._ready()
  
-+	# [MP8] ⚠️ 开关必须在 _mp8_expand_platforms() **之前**算好：
-+	# 平台头顶名牌是在扩平台那一步里建的，晚了就来不及拦。
++	# [MP8] ⚠️ The flags must be computed **before** _mp8_expand_platforms().
++	# The nameplates above platforms are built during platform expansion, so any later is too late to block them.
 +	_mp8_init_flags()
 +
 +	_mp8_diag_start()
@@ -142,9 +142,9 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +
  	camera.current = true
  
-+	# [MP8] 扩平台。**必须在 spawn_players() 之前跑完**——出生点是从平台位置推的，
-+	# 而垃圾的掉落点又是从出生点推的（add_spawn_point(id, 出生点 + 20米)）。
-+	if not Array(OS.get_cmdline_args()).has("mp8noexpand"):
++	# [MP8] Expand platforms. **Must finish before spawn_players()** — spawn points are derived from platform positions,
++	# and junk drop points are in turn derived from spawn points (add_spawn_point(id, spawn point + 20 m)).
++	if not NetworkManager.mp8_args().has("mp8noexpand"):
 +		_mp8_expand_platforms()
 +
  	if multiplayer.is_server():
@@ -153,8 +153,8 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
  		countdown_state.tick.connect(_on_countdown_tick)
  		countdown_state.expired.connect(_on_countdown_expired)
  
-+	# [MP8] 调试设施。落石基准值必须在这里记下来——后面按键是"原值 × 倍数"，
-+	# 不记基准的话反复按会变成连乘（按两次 5 倍就成了 25 倍）。
++	# [MP8] Debug aids. The base drop values must be recorded here — key presses later apply "original value × multiplier",
++	# and without a recorded base, pressing repeatedly would compound (pressing 5x twice would give 25x).
 +	_mp8_init_debug()
 +
  	if GameManager.local_game:
@@ -162,45 +162,45 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
  		minigame_ready.emit(1)
  
 +
-+# [MP8] 调试辅助开关，必须在建任何 HUD / 名牌之前算好
++# [MP8] Debug aid flags, must be computed before any HUD / nameplate is built
 +func _mp8_init_flags() -> void :
 +
-+	var args: Array = Array(OS.get_cmdline_args())
-+	# [MP8] 2026-08-25 调整优先级：**显式传 mp8junkdebug 胜过 mp8nojunkdebug**。
-+	# 原因：`play.ps1` 的 `-Clean` 会自动带上 `mp8nojunkdebug`（让测试台画面干净），
-+	# 而按项目规矩 `-Clean` 是必带的 —— 老写法里 nojunk 压过一切，
-+	# 于是「想在 -Clean 局里看右上角面板」这件事**根本做不到**（`-Extra mp8junkdebug` 也会被压掉）。
-+	# 发布版两个开关都不传，所以正式游玩仍然天然干净，收尾要求不受影响。
++	var args: Array = NetworkManager.mp8_args()
++	# [MP8] 2026-08-25 priority change — **explicitly passing mp8junkdebug beats mp8nojunkdebug**.
++	# The reason is that `-Clean` in `play.ps1` automatically adds `mp8nojunkdebug` (to keep the test rig picture clean),
++	# and by project convention `-Clean` is always passed — in the old code nojunk overrode everything,
++	# so "showing the top-right panel in a -Clean match" was **simply impossible** (`-Extra mp8junkdebug` got overridden too).
++	# Release builds pass neither flag, so real play is still naturally clean and the wrap-up requirement is unaffected.
 +	_mp8_debug_aids = args.has("mp8junkdebug") \
 +		or (args.has("-debug-tools") and not args.has("mp8nojunkdebug"))
 +	_mp8_junk_keys = _mp8_debug_aids or args.has("mp8junkkeys")
 +
-+	# [MP8] 视角模式（2026-08-25 用户要求做 B / C 两版对比，当天实机定案采用 C）：
-+	#   不传  = **C**（MP8_VIEW_DEFAULT），下面这行注释以前写的是"原样"，
-+	#           那是 B/C 定案之前的行为，已过期 —— 现在默认就是 C。
-+	#   =a   = 原样：2 个朝向（0°/180°），混合双环布局，与改动前逐值一致
-+	#   =b   = 4 个朝向（0/90/180/270），**布局不动**
-+	#   =c   = 8 个朝向（每 45°），布局改成同半径正八边形
-+	# 判据与代价见 MP8_VIEW_STEPS 上面那一大段。
++	# [MP8] View mode (on 2026-08-25 the user asked for B / C versions to compare, and C was chosen after live testing the same day)
++	#   not passed = **C** (MP8_VIEW_DEFAULT). This comment line used to say "original",
++	#           which was the behavior before B/C was decided and is now outdated — the default is C now.
++	#   =a   = original, 2 orientations (0°/180°), mixed double-ring layout, identical value for value to before the change
++	#   =b   = 4 orientations (0/90/180/270), **layout unchanged**
++	#   =c   = 8 orientations (every 45°), layout changed to a regular octagon at a single radius
++	# See the long block above MP8_VIEW_STEPS for the criteria and trade-offs.
 +	var vm: String = _mp8_arg("mp8junkview=").to_lower()
 +	_mp8_view_mode = vm if MP8_VIEW_STEPS.has(vm) else MP8_VIEW_DEFAULT
 +	if vm != "" and not MP8_VIEW_STEPS.has(vm):
-+		push_warning("[MP8] 残骸平台：mp8junkview=%s 不认识，按默认 C 跑（只认 a / b / c）" % vm)
-+	print("[MP8] 残骸平台：视角模式 = %s（%d 个朝向，步长 %.0f°）" % [
-+		("原样" if _mp8_view_mode == MP8_VIEW_VANILLA else _mp8_view_mode.to_upper()),
++		push_warning("[MP8] Junk Platform: mp8junkview=%s not recognized, running with default C (only a / b / c are accepted)" % vm)
++	print("[MP8] Junk Platform: view mode = %s (%d orientations, step %.0f°)" % [
++		("original" if _mp8_view_mode == MP8_VIEW_VANILLA else _mp8_view_mode.to_upper()),
 +		int(round(360.0 / _mp8_facing_step())), _mp8_facing_step()
 +	])
 +
 +
-+# [MP8] 调试设施初始化：记基准值、建 HUD
++# [MP8] Debug aid init. Record base values and build the HUD
 +func _mp8_init_debug() -> void :
 +
 +	if junk_handler != null:
 +		_mp8_junk_base_interval = junk_handler.spawn_interval
 +		_mp8_junk_base_min = junk_handler.min_spawn_interval
 +
-+	# 起始倍数：命令行 mp8junkslow=<倍率> 优先；没传就在调试台默认 5 倍慢
-+	# （用户 2026-08-16："把石头的倒计时拉长 5 倍"），发布版不带 -debug-tools 则保持原速。
++	# Starting multiplier. The command-line arg mp8junkslow=<multiplier> takes priority. If it isn't passed, the debug rig defaults to 5x slower
++	# (user, 2026-08-16, "make the rock countdown 5x longer"), and release builds without -debug-tools keep normal speed.
 +	var v: String = _mp8_arg("mp8junkslow=")
 +	if v.is_valid_float():
 +		_mp8_junk_mult = float(v)
@@ -214,7 +214,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	_mp8_update_junk_hud()
 +
 +
-+# [MP8] 调试覆盖层，右上角 id 和落石速度提示共用一个
++# [MP8] Debug overlay, shared by the top-right id and the rock drop speed hint
 +func _mp8_debug_layer() -> CanvasLayer:
 +	if _mp8_debug_canvas == null:
 +		_mp8_debug_canvas = CanvasLayer.new()
@@ -223,9 +223,9 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	return _mp8_debug_canvas
 +
 +
-+# [MP8] 给调试 Label 套上游戏自己的字体。
-+# ⚠️ 不套的话用的是默认主题字体，**字距是坏的**：实测字会挤成一团
-+# （"P3  id 104..." 显示成 "P36idc104..."），空格换半角也没用。见猎鸭那边同样的坑。
++# [MP8] Apply the game's own font to debug Labels.
++# ⚠️ Without it the default theme font is used and **its letter spacing is broken**. In testing the text crammed together
++# ("P3  id 104..." shows up as "P36idc104..."), and switching to half-width spaces doesn't help. See the same pitfall on the Duck Hunt side.
 +func _mp8_style_label(lbl: Label, color: Color) -> void :
 +
 +	var f = load("res://fonts/Terminal F4.ttf")
@@ -238,14 +238,14 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 +
 +
-+# [MP8] 右上角常驻显示"我是谁"：玩家名 + 网络 id。
++# [MP8] Always show "who am I" in the top right, with player name + network id.
 +#
-+# 这是**第一人称 HUD**，每台机器只显示自己那个人。
-+# 名字要等 PlayerManager 填好，_ready 时不一定拿得到，所以
-+# spawn_players 广播名牌时会再调一次刷新（见 mp8_set_platform_labels_rpc）。
++# This is a **first-person HUD**. Each machine only shows its own player.
++# The name has to wait for PlayerManager to fill it in and may not be available in _ready, so
++# spawn_players calls this again to refresh when it broadcasts nameplates (see mp8_set_platform_labels_rpc).
 +func _mp8_show_id_hud() -> void :
 +
-+	# [MP8] 收尾要求（用户 2026-08-16）：正式游玩不显示，只在调试台出现
++	# [MP8] Wrap-up requirement (user, 2026-08-16) — hidden in real play, only shown on the debug rig
 +	if not _mp8_debug_aids:
 +		return
 +
@@ -255,7 +255,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		lbl.offset_left = -420.0
 +		lbl.offset_top = 12.0
 +		lbl.offset_right = -16.0
-+		# [MP8] 2026-08-25 从 52 加高到 150：现在这块要放三行（谁 / 视角模式 / 我的朝向）
++		# [MP8] 2026-08-25 raised from 52 to 150, since this block now holds three lines (who / view mode / my orientation)
 +		lbl.offset_bottom = 150.0
 +		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 +		_mp8_style_label(lbl, Color(1.0, 0.95, 0.4))
@@ -267,20 +267,20 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	if PlayerManager.player_presences.has(me):
 +		who = String(PlayerManager.player_presences[me].network_name)
 +
-+	# [MP8] 2026-08-25：加两行视角信息 —— B/C 两版对比时全靠这个分辨自己在哪一档。
-+	# 朝向是**本机**的值（每台机器各转各的），所以 8 个窗口应该显示 8 个不同的数（C 版）
-+	# 或两两相同（B 版）。全都一样 = 朝向没生效，第一眼就能看出来。
++	# [MP8] 2026-08-25 — added two lines of view info. When comparing B/C, this is the only way to tell which setting you're on.
++	# The orientation is **this machine's** value (each machine rotates on its own), so the 8 windows should show 8 different numbers (version C)
++	# or matching pairs (version B). All identical = orientation isn't being applied, which is obvious at first glance.
 +	var lines := PackedStringArray()
 +	lines.append(("id %d" % me) if who == "" else ("%s   id %d" % [who, me]))
-+	lines.append("视角 %s   共 %d 档" % [
-+		("原样" if _mp8_view_mode == MP8_VIEW_VANILLA else _mp8_view_mode.to_upper()),
++	lines.append("view %s   %d steps total" % [
++		("original" if _mp8_view_mode == MP8_VIEW_VANILLA else _mp8_view_mode.to_upper()),
 +		int(round(360.0 / _mp8_facing_step()))
 +	])
-+	lines.append("我的朝向 %.0f°" % _mp8_my_facing)
++	lines.append("my orientation %.0f°" % _mp8_my_facing)
 +	_mp8_id_label.text = "\n".join(lines)
 +
 +
-+# [MP8] 落石速度提示（只有开了调试键才显示，免得挡正式游玩的画面）
++# [MP8] Rock drop speed hint (only shown when debug keys are on, so it doesn't block the picture in real play)
 +func _mp8_update_junk_hud() -> void :
 +
 +	if not _mp8_junk_keys:
@@ -298,22 +298,22 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +
 +	var state: String
 +	if _mp8_junk_mult <= 0.0:
-+		state = "暂停落石"
++		state = "drops paused"
 +	elif is_equal_approx(_mp8_junk_mult, 1.0):
-+		state = "原速（%.1f 秒一批）" % _mp8_junk_base_interval
++		state = "normal speed (a batch every %.1f s)" % _mp8_junk_base_interval
 +	else:
-+		state = "%.0f 倍慢（%.1f 秒一批）" % [_mp8_junk_mult, _mp8_junk_base_interval * _mp8_junk_mult]
++		state = "%.0fx slower (a batch every %.1f s)" % [_mp8_junk_mult, _mp8_junk_base_interval * _mp8_junk_mult]
 +
-+	_mp8_junk_label.text = "[落石调试] %s    1=原速 2=2倍慢 3=5倍慢 4=10倍慢 5=暂停" % state
++	_mp8_junk_label.text = "[Drop debug] %s    1=normal 2=2x slower 3=5x slower 4=10x slower 5=pause" % state
 +
-+	# [MP8] 2026-08-25 用户要求：把同一个开关做成**可点按钮**。
-+	# 键盘 5 仍然有效 —— 两者走同一条 mp8_set_junk_speed_rpc，不会各记各的状态。
-+	# ⚠️ 这个小游戏**没有捕获鼠标**（全工程 grep 不到它设 Input.mouse_mode），所以按钮点得到；
-+	#    别的小游戏照抄之前先确认这一点，鼠标被捕获的地方按钮是死的。
-+	# [MP8] 2026-08-25 用户定：**按钮只在房主出现**，客机只留数字键 5。
-+	# 理由：暂停是**全局**的（真正停计时器的 `_mp8_apply_junk_speed()` 只在服务器跑），
-+	# 8 个窗口各摆一个可点按钮 = 任何一个客机都能一键停掉全场落石，鼠标误触代价太大。
-+	# 数字键保持所有端可用 —— 那是原有行为，而且按键不像按钮那样容易误碰。
++	# [MP8] 2026-08-25 user request — make the same switch a **clickable button**.
++	# Key 5 still works — both go through the same mp8_set_junk_speed_rpc, so they never track separate state.
++	# ⚠️ This minigame **doesn't capture the mouse** (grepping the whole project finds nothing setting Input.mouse_mode for it), so the button is clickable.
++	#    Check this before copying it into other minigames. Where the mouse is captured, the button is dead.
++	# [MP8] 2026-08-25 the user decided — **the button only appears for the host**, clients only keep number key 5.
++	# The reason is that pausing is **global** (`_mp8_apply_junk_speed()`, which actually stops the timer, only runs on the server),
++	# and a clickable button in each of 8 windows = any client could stop rock drops for everyone with one click, too costly for a stray mouse click.
++	# Number keys stay available on all peers — that's the existing behavior, and keys aren't as easy to hit by accident as a button.
 +	if multiplayer.is_server() and _mp8_junk_btn == null:
 +		var b := Button.new()
 +		b.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -329,20 +329,20 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		_mp8_debug_layer().add_child(b)
 +		_mp8_junk_btn = b
 +
-+	# 客机上按钮压根没建（见上），所以这里必须判空
++	# The button is never created on clients (see above), so this null check is required
 +	if _mp8_junk_btn != null:
-+		_mp8_junk_btn.text = "继续落石" if _mp8_junk_mult <= 0.0 else "暂停落石"
++		_mp8_junk_btn.text = "Resume drops" if _mp8_junk_mult <= 0.0 else "Pause drops"
 +
 +
-+# [MP8] 按钮点一下 = 在「暂停」与「原速」之间切。
-+# 走的是和数字键 5 完全同一条 RPC，所以 8 个窗口的状态永远一致，
-+# 也不需要另外记一个"上次是几倍慢"——按钮只管暂停/恢复，细分速度还是用数字键。
++# [MP8] One click of the button = toggle between "paused" and "normal speed".
++# It uses exactly the same RPC as number key 5, so all 8 windows always agree,
++# and there's no need to separately remember "how many times slower it was last time" — the button only pauses/resumes, finer speeds still use the number keys.
 +func _mp8_toggle_junk_pause() -> void :
 +	mp8_set_junk_speed_rpc.rpc(0.0 if _mp8_junk_mult > 0.0 else 1.0)
 +
 +
-+# [MP8] 数字键切落石速度。
-+# 按键在**任何一台机器**上都能按，但真正生效的是服务器上的计时器，所以走 RPC 广播。
++# [MP8] Number keys change rock drop speed.
++# Keys can be pressed on **any machine**, but the timer that matters is on the server, so this goes through an RPC broadcast.
 +func _unhandled_key_input(event: InputEvent) -> void :
 +
 +	if not _mp8_junk_keys:
@@ -357,33 +357,38 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	get_viewport().set_input_as_handled()
 +
 +
-+# [MP8] any_peer：谁按的键谁发起；call_local 让按键那台自己也立刻刷新 HUD。
-+# 每台机器都收到 → 8 个窗口的提示行保持一致，不会出现"我按了但别人那儿还是旧值"。
++# [MP8] Only the host may change drop speed (the keys only exist in dev builds). call_local makes the host refresh its own HUD right away too.
++# Every machine receives it → the hint line stays consistent across all 8 windows, with no "I pressed it but others still show the old value".
 +@rpc("any_peer", "call_local", "reliable")
 +func mp8_set_junk_speed_rpc(mult: float) -> void :
++
++	if not NetworkManager.mp8_sender_is_host(multiplayer):
++		return
++	if not (NetworkManager.mp8_finite(mult, 1000.0)):
++		return
 +
 +	_mp8_junk_mult = mult
 +	if multiplayer.is_server():
 +		_mp8_apply_junk_speed()
 +	_mp8_update_junk_hud()
-+	print("[MP8] 落石速度 -> %s" % [
-+		"暂停" if mult <= 0.0 else ("%.0f 倍慢" % mult if mult > 1.0 else "原速")
++	print("[MP8] Drop speed -> %s" % [
++		"paused" if mult <= 0.0 else ("%.0fx slower" % mult if mult > 1.0 else "normal speed")
 +	])
 +
 +
-+# [MP8] 真正改计时器的地方，**只有服务器跑**。
-+# 倍数同时作用在 spawn_interval 和 min_spawn_interval 上：
-+# 原版是"开局 3 秒一批，10 秒内线性加速到 1 秒一批"，两个端点一起乘才是整条曲线放慢，
-+# 只乘起点的话照样会在 10 秒后加速到 1 秒一批，等于没调。
++# [MP8] Where the timer actually gets changed. **Only runs on the server**.
++# The multiplier applies to both spawn_interval and min_spawn_interval.
++# Vanilla is "a batch every 3 seconds at the start, speeding up linearly to a batch every 1 second within 10 seconds". Multiplying both endpoints slows the whole curve,
++# while multiplying only the start would still speed up to a batch every 1 second after 10 seconds, which is the same as not tuning it.
 +func _mp8_apply_junk_speed() -> void :
 +
 +	if junk_handler == null or _mp8_junk_base_interval <= 0.0:
 +		return
 +
-+	# [MP8] 2026-08-25：把「暂停」写进处理器的**状态**，不能只停一下计时器。
-+	# 只停计时器的话，`set_active(true)`（新一轮开始 / 处理器重新激活）会**无条件**
-+	# 把它重新点着，暂停被悄悄撤销而 HUD 还显示着「暂停落石」。
-+	# 这就是「暂停保证全局生效」缺的那一块 —— 状态必须留在被控对象身上。
++	# [MP8] 2026-08-25 — write "paused" into the handler's **state**, don't just stop the timer once.
++	# If only the timer is stopped, `set_active(true)` (a new round starts / the handler is reactivated) will **unconditionally**
++	# restart it, silently undoing the pause while the HUD still shows "drops paused".
++	# That was the missing piece of "the pause is guaranteed to apply everywhere" — the state has to live on the object being controlled.
 +	junk_handler.mp8_paused = (_mp8_junk_mult <= 0.0)
 +
 +	if _mp8_junk_mult <= 0.0:
@@ -394,18 +399,18 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	junk_handler.spawn_interval = _mp8_junk_base_interval * _mp8_junk_mult
 +	junk_handler.min_spawn_interval = _mp8_junk_base_min * _mp8_junk_mult
 +
-+	# 计时器已经按旧间隔跑着了，不重启的话这一轮还是旧节奏（按下去像没反应）
++	# The timer is already running on the old interval. Without a restart this cycle keeps the old pace (pressing the key seems to do nothing)
 +	if junk_handler.active and junk_handler.timer != null:
 +		junk_handler.timer.start(junk_handler.spawn_interval)
 +
  func fade_in_ambience():
  	for speaker_controller in ambience_speaker_controllers:
  		speaker_controller.speaker.volume_linear = 0
-@@ -71,6 +449,864 @@ func initialize(_round_number: int, _total_rounds: int, _scores: Dictionary = {}
+@@ -71,6 +454,866 @@ func initialize(_round_number: int, _total_rounds: int, _scores: Dictionary = {}
  
  	state_machine.transition_to_rpc.rpc(&"Round", {"round": _round_number, "total": _total_rounds})
  
-+# [MP8] 把 4 个平台扩成 MAX_PLAYERS 个。
++# [MP8] Expand the 4 platforms to MAX_PLAYERS.
 +func _mp8_expand_platforms() -> void :
 +
 +	if _mp8_expanded:
@@ -416,8 +421,8 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		return
 +	_mp8_expanded = true
 +
-+	# ---- 1. 按空间位置把"每个平台的一整套家当"认出来 ----
-+	# 不按编号认（见文件头第 2 条）：编号对不上，而且对角平台互相引用同一批节点。
++	# ---- 1. Identify "each platform's whole kit" by spatial position ----
++	# Not by number (see item 2 in the file header). The numbers don't line up, and diagonal platforms reference the same nodes.
 +	var groups: Array = []
 +	for p in platforms:
 +		groups.append({"platform": p, "nodes": [], "pos": p.global_position})
@@ -434,14 +439,14 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +			if child is Node3D:
 +				_mp8_assign_to_nearest(groups, child)
 +
-+	# 警报音源是根节点下的散件（speaker_indicator alarm1..4）
++	# The alarm audio sources are loose pieces under the root node (speaker_indicator alarm1..4)
 +	for child in get_children():
 +		if child is Node3D and String(child.name).begins_with("speaker_indicator alarm"):
 +			_mp8_assign_to_nearest(groups, child)
 +
-+	# ---- 2. 复制出缺的那几套 ----
-+	# 复制整组并**整体平移**，这样组内的相对关系（压缩机在平台正上方等）自动保持，
-+	# 不需要知道任何绝对偏移量——就是大厅排布那条血泪教训（坑第 8 条）。
++	# ---- 2. Duplicate the missing sets ----
++	# Duplicate the whole group and **translate it as a unit**, so relationships within the group (compactor right above the platform, etc.) are kept automatically
++	# without needing to know any absolute offsets — that's the hard-learned lesson from the lobby layout (pitfall #8).
 +	var all_groups: Array = groups.duplicate()
 +	for i in range(n, target):
 +		var src: Dictionary = groups[i % n]
@@ -463,8 +468,8 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +
 +		all_groups.append(clone)
 +
-+	# ---- 3. 搬位置 ----
-+	# 原版那 4 个**一动不动**（delta = 0），只有新增的 4 个要搬到 45° 方位上。
++	# ---- 3. Move positions ----
++	# The 4 vanilla ones **don't move at all** (delta = 0), only the 4 new ones get moved to the 45° bearings.
 +	var original_positions: Array = []
 +	for g in groups:
 +		original_positions.append(g["pos"])
@@ -477,17 +482,17 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		var delta: Vector3 = slots[i] - g["pos"]
 +		delta.y = 0.0
 +		if delta.length() < 0.01:
-+			continue  # 原版那几个，不动
++			continue  # the vanilla ones, don't move
 +
-+		# 新平台还要绕场地中心转 45°，让它的朝向和站位一致（用户要求）。
-+		# 整组一起转：绕 Y 轴旋转后再平移，组内相对关系（压缩机在正上方）保持不变。
-+		# [MP8] C 版里原版那 4 块也要搬，但**只改半径、方位角不变**，所以它们的 yaw 是 0；
-+		# 只有新增的那 4 块要转 45° 让朝向和站位一致（i >= n 就是新增的）。
++		# New platforms also rotate 45° around the arena center so their facing matches where they stand (user request).
++		# The whole group rotates together. Rotate around Y then translate, so relationships within the group (compactor right above) stay unchanged.
++		# [MP8] In version C the 4 vanilla ones move too, but **only their radius changes and their bearing stays the same**, so their yaw is 0.
++		# Only the 4 new ones rotate 45° so their facing matches where they stand (i >= n means new).
 +		var yaw: float = deg_to_rad(MP8_NEW_YAW_DEGREES) if i >= n else 0.0
 +		_mp8_move_group(g, slots[i], yaw)
 +
-+	# [MP8] 记下**搬完之后**的最终位置：B/C 模式按朝向重新指认美术时要拿它做几何匹配
-+	# （见 _mp8_rebind_for_facing）。g["pos"] 是搬之前的，不能用。
++	# [MP8] Record the final positions **after moving**. B/C modes use them for geometric matching when re-identifying visuals by orientation
++	# (see _mp8_rebind_for_facing). g["pos"] is from before the move and can't be used.
 +	_mp8_groups_final.clear()
 +	for i in all_groups.size():
 +		var gg: Dictionary = all_groups[i]
@@ -500,87 +505,87 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	_mp8_report_gaps(slots)
 +	_mp8_check_pairing(slots)
 +
-+	# ---- 4. 重新接线：自己那套 + 对角那套 ----
-+	# ⚠️ duplicate() 不会重映射指向别处的 @export 引用（坑第 14 条），
-+	# 不接的话 8 个平台会全指向原来那 4 套，塌一个亮一片。
++	# ---- 4. Rewire, own set + diagonal set ----
++	# ⚠️ duplicate() doesn't remap @export references that point elsewhere (pitfall #14),
++	# so without rewiring all 8 platforms would point at the original 4 sets, and one collapse would light up a whole area.
 +	for i in all_groups.size():
-+		# ⚠️ 配对**必须按位置算**，不能用下标算术（本文件开头第 2 条：编号不可信，位置才可信）。
-+		# 曾经写成 `(i + size/2) % size`，在八边形的槽位顺序下是错的：
++		# ⚠️ Pairing **must be computed by position**, not by index arithmetic (item 2 at the top of this file, numbering can't be trusted, only positions can).
++		# It used to be `(i + size/2) % size`, which is wrong for the octagon's slot order.
 +		#   0:(-13,-13) 1:(13,-13) 2:(13,13) 3:(-13,13) 4:(0,22.5) 5:(22.5,0) 6:(0,-22.5) 7:(-22.5,0)
-+		# i+4 会把 0 配给 4，即 (-13,-13) 配 (0,22.5)，**根本不是 180° 对位**。
-+		# 正确的是 0↔2、1↔3、4↔6、5↔7。
++		# i+4 pairs 0 with 4, i.e. (-13,-13) with (0,22.5), which is **not a 180° pairing at all**.
++		# The correct pairs are 0↔2, 1↔3, 4↔6, 5↔7.
 +		var partner: int = _mp8_opposite_index(slots, i)
 +		_mp8_wire_platform(all_groups[i], all_groups[partner])
 +
-+		# 接线明细进日志：指示圈接的是哪个节点、有几个环。
-+		# "我的圈跟着别人的垃圾亮"只有对着这行才判得出来，光看画面分不清是接错还是原版就这样。
++		# Log the wiring details, which node the indicator ring is wired to and how many rings it has.
++		# "My ring lights up with someone else's junk" can only be diagnosed against this line. From the picture alone you can't tell miswiring from vanilla behavior.
 +		var pl: JunkPlatformPlatform = all_groups[i]["platform"]
 +		var own_i: Node3D = _mp8_pick(all_groups[i], "damage indicator")
 +		var far_i: Node3D = _mp8_pick(all_groups[partner], "damage indicator")
-+		print("[MP8-WIRE] 平台%d (%.0f,%.0f) 环数=%d 自己的圈=%s 翻转后的圈=%s(平台%d)" % [
++		print("[MP8-WIRE] platform%d (%.0f,%.0f) rings=%d own ring=%s flipped ring=%s(platform%d)" % [
 +			i + 1, slots[i].x, slots[i].z, pl.damage_circles.size(),
-+			"无" if own_i == null else own_i.name,
-+			"无" if far_i == null else far_i.name, partner + 1
++			"none" if own_i == null else own_i.name,
++			"none" if far_i == null else far_i.name, partner + 1
 +		])
 +
-+	# ---- 5. 出生点补到一样多，顺序和平台一一对应 ----
++	# ---- 5. Pad spawn points to the same count, in one-to-one order with the platforms ----
 +	_mp8_rebuild_spawn_points(slots)
 +
-+	# ---- 6. 相机构图 ----
-+	# 先记下**原版相机**：此刻 camera_base 还没被转 180°，这是唯一干净的基准，
-+	# 逐人模式判"谁的平台顶到边缘"要用它。
++	# ---- 6. Camera framing ----
++	# First record the **vanilla camera**. camera_base hasn't been rotated 180° yet at this point, so this is the only clean baseline,
++	# and per-player mode needs it to judge "whose platform is pushed against the edge".
 +	if camera != null:
 +		_mp8_cam_xf0 = camera.global_transform
 +		_mp8_cam_fov0 = camera.fov
 +
-+	# 默认**全场统一**后拉+下移+广角（用户 2026-08-16 选定的那一版）。
-+	# 在这里做而不是逐人发 RPC，是因为偏移加在 camera_base 的**局部**空间里，
-+	# 之后 camera_base 转 180° 时偏移跟着一起转，两边天然对称，不需要知道谁在哪边。
-+	if not Array(OS.get_cmdline_args()).has("mp8junkcamper"):
++	# By default **the whole arena uniformly** pulls back + lowers + widens the FOV (the version the user picked on 2026-08-16).
++	# It's done here rather than via per-player RPCs because the offset is added in camera_base's **local** space,
++	# so when camera_base later rotates 180° the offset rotates with it, both sides are naturally symmetric, and nobody needs to know who's on which side.
++	if not NetworkManager.mp8_args().has("mp8junkcamper"):
 +		var c: Vector3 = _mp8_cam_values()
 +		_mp8_apply_camera(c.x, c.y, c.z)
 +
-+	# 构图好不好不靠肉眼猜——体检结果直接进日志。
++	# Framing quality isn't judged by eye — the health check results go straight into the log.
 +	_mp8_report_camera(all_groups, slots)
 +
-+	# ---- 7. 每个平台上方挂个名牌 ----
++	# ---- 7. Hang a nameplate above each platform ----
 +	_mp8_build_platform_labels()
 +
-+	print("[MP8] 残骸平台：%d -> %d 个（原版四角不动 + 45°方位新增 4 个，半径 %.1f，相机保持原版）" % [
++	print("[MP8] Junk Platform: %d -> %d platforms (vanilla corners unmoved + 4 new at 45° bearings, radius %.1f, camera kept vanilla)" % [
 +		n, platforms.size(), _mp8_radius()
 +	])
 +
 +
-+# [MP8] 每个平台上方挂一个名牌。
++# [MP8] Hang a nameplate above each platform.
 +#
-+# 4 个平台时不需要这东西：你的相机把你的平台摆在正前方，一眼就认得出。
-+# 8 个平台时同一排挤了 4 个，光靠位置认不出哪个是自己的，所以补一个。
++# With 4 platforms this isn't needed. Your camera puts your platform right in front, so you recognize it at a glance.
++# With 8 platforms, 4 are crammed into one row and position alone can't tell you which one is yours, so this was added.
 +#
-+# 高度 8：玩家站在平台上（人高约 2），压缩机静止位在 27 米高、砸下来会经过中间，
-+# 挂 8 米既在人头顶上方、又不会被压缩机顶到画面外。
-+# 挂成平台的**子节点**，于是平台塌陷（visible=false）时名牌跟着消失，不用另外管。
++# Height 8. Players stand on the platform (about 2 tall), and the compactor rests 27 m up and passes through the space between when it slams down,
++# so hanging it at 8 m keeps it above players' heads without the compactor pushing it out of frame.
++# It's a **child node** of the platform, so when the platform collapses (visible=false) the nameplate disappears with it, no extra handling needed.
 +const MP8_LABEL_HEIGHT: float = 8.0
 +const MP8_LABEL_FONT_SIZE: int = 96
 +
 +var _mp8_platform_labels: Array[Label3D] = []
-+var _mp8_label_names: Array = []   # 服务器在 spawn_players 里填，填完广播
++var _mp8_label_names: Array = []   # filled by the server in spawn_players, then broadcast
 +
 +
 +func _mp8_build_platform_labels() -> void :
 +
 +	_mp8_platform_labels.clear()
 +
-+	# ⚠️ **`_mp8_label_names` 必须无条件撑到平台数**，哪怕名牌关掉也一样。
-+	# `spawn_players()` 里是 `_mp8_label_names[nearest] = 名字` 按下标写的，
-+	# 数组空着就是越界写 —— 正是坑第 13 条那个模式（发行版模板不带边界检查，
-+	# 越界写直接是 0xc0000005 原生崩溃）。
++	# ⚠️ **`_mp8_label_names` must always be sized to the platform count**, even when nameplates are off.
++	# `spawn_players()` writes `_mp8_label_names[nearest] = name` by index,
++	# so an empty array means an out-of-bounds write — exactly the pattern from pitfall #13 (release templates don't bounds-check,
++	# and an out-of-bounds write is an outright 0xc0000005 native crash).
 +	_mp8_label_names.clear()
 +	for p in platforms:
 +		_mp8_label_names.append("")
 +
-+	# [MP8] 收尾要求（用户 2026-08-16）：平台头顶名牌正式游玩不显示，只在调试台出现。
-+	# 代价是 8 个平台时光靠位置认不出哪个是自己的（这正是当初加名牌的理由），
-+	# 用户看过画面后决定不要，按他的定。
++	# [MP8] Wrap-up requirement (user, 2026-08-16) — nameplates above platforms are hidden in real play and only shown on the debug rig.
++	# The cost is that with 8 platforms you can't tell which one is yours by position alone (which is exactly why nameplates were added),
++	# but the user looked at it and decided against them, so we go with their call.
 +	if not _mp8_debug_aids:
 +		return
 +
@@ -588,7 +593,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		var lbl := Label3D.new()
 +		lbl.name = "MP8NameLabel"
 +		lbl.text = ""
-+		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED  # 两侧玩家的相机差 180°，必须始终朝向观者
++		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED  # cameras on the two sides differ by 180°, so it must always face the viewer
 +		lbl.font_size = MP8_LABEL_FONT_SIZE
 +		lbl.outline_size = 24
 +		lbl.modulate = Color(1.0, 0.95, 0.4)
@@ -601,24 +606,24 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		_mp8_platform_labels.append(lbl)
 +
 +
-+# [MP8] 服务器算好"第 i 个平台归谁"，广播给所有人。
-+# 名牌本身在每台机器的 _ready 里就建好了，这里只发文字。
++# [MP8] The server works out "who owns platform i" and broadcasts it to everyone.
++# The nameplates themselves are already built in each machine's _ready, this only sends the text.
 +@rpc("authority", "call_local", "reliable")
 +func mp8_set_platform_labels_rpc(names: Array) -> void :
 +
 +	for i in _mp8_platform_labels.size():
 +		if i < names.size():
-+			_mp8_platform_labels[i].text = String(names[i])
++			_mp8_platform_labels[i].text = NetworkManager.mp8_plain_text(str(names[i]))
 +		else:
 +			_mp8_platform_labels[i].text = ""
 +
-+	# [MP8] 这时 PlayerManager 一定已经填好了，顺便把右上角的"我是谁"刷成带名字的版本
++	# [MP8] PlayerManager is definitely filled in by now, so also refresh the top-right "who am I" to the version with the name
 +	_mp8_show_id_hud()
 +
 +
-+# [MP8] 把一整组家当搬到新位置，并绕自身中心转 yaw。
-+# 先绕组的原中心旋转、再整体平移 —— 这样组内相对关系（压缩机在平台正上方、
-+# 指示圈套在平台上）完全保持，不需要知道任何绝对偏移量。
++# [MP8] Move a whole group's kit to a new position and rotate it by yaw around its own center.
++# Rotate around the group's original center first, then translate as a unit — so relationships within the group (compactor right above the platform,
++# indicator ring around the platform) are fully preserved without needing any absolute offsets.
 +func _mp8_move_group(g: Dictionary, target: Vector3, yaw: float) -> void :
 +
 +	var center: Vector3 = g["pos"]
@@ -634,8 +639,8 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		node.global_transform.basis = basis_rot * node.global_transform.basis
 +
 +
-+# [MP8] 把相邻平台之间的**边缘间隙**打进日志。
-+# 这是"能不能走到别人平台上"的直接判据：初版间隙只有 1，人一步就跨过去了。
++# [MP8] Log the **edge gap** between neighboring platforms.
++# This is the direct test for "can you walk onto someone else's platform". The first version's gap was only 1, one step would carry you across.
 +func _mp8_report_gaps(slots: Array[Vector3]) -> void :
 +
 +	var radius: float = 6.0
@@ -650,12 +655,12 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +			).length()
 +			min_gap = minf(min_gap, d - radius * 2.0)
 +
-+	print("[MP8] 平台最小边缘间隙 %.2f（原版四角之间是 %.2f，间隙太小人能走过去）" % [
++	print("[MP8] Minimum platform edge gap %.2f (between vanilla corners it's %.2f, too small a gap lets players walk across)" % [
 +		min_gap, 26.0 - radius * 2.0
 +	])
 +
 +
-+# [MP8] 把一个节点归给离它最近的平台（只看水平距离，压缩机在 28 米高空）
++# [MP8] Assign a node to the nearest platform (horizontal distance only, the compactors are 28 m up)
 +func _mp8_assign_to_nearest(groups: Array, node: Node3D) -> void :
 +
 +	var best: int = -1
@@ -667,15 +672,15 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		if d < best_dist:
 +			best_dist = d
 +			best = i
-+	# 离最近的平台还超过一个平台直径，说明是场地公共件（灯光、地面），不归任何平台
++	# Farther than one platform diameter from the nearest platform means it's a shared arena piece (lights, floor) and belongs to no platform
 +	if best >= 0 and best_dist < 12.0:
 +		groups[best]["nodes"].append(node)
 +
 +
-+# [MP8] 8 个槽位的世界坐标。
-+# 前 4 个 = 原版四角**原地不动**（保持"孤岛"间距 26）；
-+# 后 4 个 = 在 45° 方位、半径 MP8_NEW_RADIUS 处。
-+# 顺序必须和 platforms 数组一致（原始 4 个在前、复制件在后）。
++# [MP8] World coordinates of the 8 slots.
++# The first 4 = vanilla corners **left in place** (keeping the "island" spacing of 26).
++# The last 4 = at the 45° bearings, radius MP8_NEW_RADIUS.
++# The order must match the platforms array (original 4 first, duplicates after).
 +func _mp8_slot_positions(original_positions: Array) -> Array[Vector3]:
 +
 +	var out: Array[Vector3] = []
@@ -683,11 +688,11 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	for p in original_positions:
 +		out.append(Vector3(p.x, 0.0, p.z))
 +
-+	# 原版四角在 ±45°、±135°；新的插在 0°、90°、180°、270°
++	# Vanilla corners are at ±45° and ±135°. The new ones go at 0°, 90°, 180°, 270°
 +	var r: float = _mp8_radius()
 +
-+	# [MP8] C 版：原版那 4 块也搬到同一半径上，凑成正八边形（**方位角不变，只改半径**）。
-+	# 这是 B/C 唯一的布局差别 —— 45° 只有在同半径时才是对称角，才可能一人一个朝向。
++	# [MP8] Version C — the 4 vanilla ones also move onto the same radius to form a regular octagon (**bearing unchanged, only radius changes**).
++	# This is the only layout difference between B and C — 45° is only a symmetry angle at equal radius, which is what makes one orientation per player possible.
 +	if _mp8_view_mode == "c":
 +		for i in out.size():
 +			var a: float = atan2(out[i].x, out[i].z)
@@ -699,16 +704,16 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	return out
 +
 +
-+# [MP8] 读命令行 "<前缀>=<值>"，没传就返回空串
++# [MP8] Read a command-line arg "<prefix>=<value>", returns an empty string if not passed
 +func _mp8_arg(prefix: String) -> String:
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var s: String = String(a)
 +		if s.begins_with(prefix):
 +			return s.substr(prefix.length())
 +	return ""
 +
 +
-+# [MP8] 新平台半径，命令行 mp8junkr=<半径> 可覆盖（相机不动了，这是唯一的构图旋钮）
++# [MP8] New platform radius, overridable with the command-line arg mp8junkr=<radius> (the camera doesn't move anymore, so this is the only framing knob)
 +func _mp8_radius() -> float:
 +	var v: String = _mp8_arg("mp8junkr=")
 +	if v.is_valid_float():
@@ -716,12 +721,12 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	return MP8_NEW_RADIUS
 +
 +
-+# [MP8] 找 i 号槽的 180° 对位槽：把 (x,z) 取反之后离得最近的那个。
++# [MP8] Find slot i's 180° opposite slot, the one closest to (x,z) negated.
 +#
-+# 为什么必须这么算：对面那半玩家把 visuals_base 绕 Y 转了 180°，
-+# 于是原本长在世界坐标 V 的视觉件会渲染到 (-V.x, -V.z) 去。
-+# 那个位置正是"对位平台"的碰撞体所在，所以平台 i 在翻转后必须改用**对位平台**的视觉件。
-+# 配对关系完全由几何决定，和数组下标没有任何关系。
++# Why it has to be computed this way. The far-side half of the players have visuals_base rotated 180° around Y,
++# so visuals that live at world position V get rendered at (-V.x, -V.z).
++# That position is exactly where the "opposite platform's" collider is, so after flipping, platform i must use the **opposite platform's** visuals.
++# The pairing is determined entirely by geometry and has nothing to do with array indices.
 +func _mp8_opposite_index(slots: Array[Vector3], i: int) -> int:
 +
 +	var target := Vector2( - slots[i].x, - slots[i].z)
@@ -735,9 +740,9 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	return best
 +
 +
-+# [MP8] 配对自检：翻转配对必须是**对合**（我的对位的对位 = 我自己），
-+# 而且不能有两个平台抢同一个对位。任何一条不满足都说明槽位摆得不对称，
-+# 会表现成"我的指示圈跟着别人的垃圾亮"——肉眼很难直接看出是配对错了。
++# [MP8] Pairing self-check. The flip pairing must be an **involution** (my opposite's opposite = me),
++# and no two platforms may claim the same opposite. If either fails, the slots aren't laid out symmetrically,
++# which shows up as "my indicator ring lights up with someone else's junk" — very hard to recognize by eye as a pairing bug.
 +func _mp8_check_pairing(slots: Array[Vector3]) -> void :
 +
 +	var partners: Array[int] = []
@@ -758,43 +763,43 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		txt.append("%d(%.0f,%.0f)->%d" % [
 +			i + 1, slots[i].x, slots[i].z, partners[i] + 1
 +		])
-+	print("[MP8] 翻转配对 %s：%s" % [
-+		"❌不成立（槽位不是 180° 对称）" if bad else "✓对合成立",
++	print("[MP8] Flip pairing %s: %s" % [
++		"❌does not hold (slots are not 180° symmetric)" if bad else "✓involution holds",
 +		" ".join(txt)
 +	])
 +
 +
-+# [MP8] 把一个平台的引用全部指回它自己那套家当，flipped 指向对角那套
-+# [MP8] 🩸 T49（2026-08-27）：**这四类不是同一种东西，不能一起按朝向重指认。**
++# [MP8] Point all of a platform's references back to its own kit, with flipped pointing at the diagonal set
++# [MP8] 🩸 T49 (2026-08-27) — **these four kinds are not the same thing and can't all be re-identified by orientation together.**
 +#
-+# probe73 把它们各自挂在哪量清楚了：
++# probe73 measured exactly where each one is attached.
 +#
-+#   damage indicator (37 个)      → `visuals base` 底下        ✅ 跟着 visuals_base 转
-+#   platform main    (4 个)       → `visuals base` 底下        ✅ 跟着转
-+#   compactor        (35 个)      → `junk platform compactors` ❌ **根的子节点，不转**
-+#   speaker_indicator alarm (4 个)→ 根的 alarm1..4             ❌ **不转**
++#   damage indicator (37)         → under `visuals base`       ✅ rotates with visuals_base
++#   platform main    (4)          → under `visuals base`       ✅ rotates with it
++#   compactor        (35)         → `junk platform compactors` ❌ **child of root, doesn't rotate**
++#   speaker_indicator alarm (4)   → alarm1..4 under root       ❌ **doesn't rotate**
 +#
-+# 重指认的**前提**是「这东西跟着 visuals_base 转走了，所以要找此刻落在我头上的那一套」。
-+# 后两类根本不转 —— 对它们做重指认，等于让平台去驱动一台**物理上不在它头上**的压缩机。
++# The **premise** of re-identifying is "this thing rotated away with visuals_base, so find the set that's currently above me".
++# The last two kinds don't rotate at all — re-identifying them means making a platform drive a compactor that is **not physically above it**.
 +#
-+# 三个症状全是这么来的（用户 2026-08-27 实测）：
-+#   · 「残骸超过五个了还不落下压缩机」 —— 这块平台驱动的那台在别处；
-+#   · 「有的玩家被压缩机砸了还能看见」 —— 每台机器朝向不同 → 各砸各的，
-+#      你这台砸下来的那个人，服务器根本没砸（判定已经归服务器独裁了）；
-+#   · 局结束不了 —— 该死的人不死。
++# All three symptoms came from this (user tested on 2026-08-27).
++#   · "More than five pieces of debris and the compactor still doesn't come down" — the one this platform drives is somewhere else.
++#   · "Some players can still be seen after being crushed by the compactor" — each machine has a different orientation → each slams its own,
++#      and the player your machine crushed was never crushed on the server (hit detection is already decided solely by the server).
++#   · The match can't end — players who should die don't.
 +#
-+# 所以 `fixed` 这个参数存在的意义就一句：**压缩机和警报音必须永远绑自己那一组**，
-+# 那是几何决定的、每台机器算出来都一样，不掺朝向。
-+# 不传 fixed 时退回 own（布局阶段的初次接线，两者本来就是同一组）。
++# So the sole reason the `fixed` parameter exists is that **compactors and alarm audio must always bind to their own group**,
++# which is determined by geometry, comes out the same on every machine, and has no orientation mixed in.
++# When fixed isn't passed it falls back to own (initial wiring during layout, where the two are the same group anyway).
 +func _mp8_wire_platform(own: Dictionary, partner: Dictionary, fixed = null) -> void :
 +
 +	var p: JunkPlatformPlatform = own["platform"]
 +
-+	# 跟着转的两类：按朝向重指认（own = 此刻落在这块平台头上的那一组）
++	# The two kinds that rotate get re-identified by orientation (own = the group currently above this platform)
 +	var own_indicator: Node3D = _mp8_pick(own, "damage indicator")
 +	var own_visual: Node3D = _mp8_pick(own, "platform main")
 +
-+	# 不跟着转的两类：永远取**自己那一组**，与朝向无关
++	# The two kinds that don't rotate always take **their own group**, regardless of orientation
 +	var src_fixed: Dictionary = own if fixed == null else fixed
 +	var own_compactor = _mp8_pick(src_fixed, "compactor")
 +	var own_alarm = _mp8_pick(src_fixed, "speaker_indicator alarm")
@@ -835,7 +840,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	p.assign_indicators()
 +
 +
-+# 从一组家当里按名字前缀挑一个（复制件名字前面加了 "MP8_<序号>_"，所以用 contains）
++# Pick one node from a group's kit by name prefix (duplicates have "MP8_<index>_" prepended to their names, hence contains)
 +func _mp8_pick(group: Dictionary, keyword: String):
 +	for node in group["nodes"]:
 +		if String(node.name).contains(keyword):
@@ -843,9 +848,9 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	return null
 +
 +
-+# [MP8] 出生点补到和平台一样多，并且**顺序与平台严格一致**。
-+# 垃圾掉落点是从出生点推的（spawn_players 里 add_spawn_point(id, 出生点+20米)），
-+# 出生点没跟着平台走的话，垃圾会掉到旧位置的虚空里。
++# [MP8] Pad spawn points to match the platform count, with **order strictly matching the platforms**.
++# Junk drop points are derived from spawn points (add_spawn_point(id, spawn point + 20 m) in spawn_players),
++# so if spawn points don't follow the platforms, junk falls into the void at the old positions.
 +func _mp8_rebuild_spawn_points(slots: Array[Vector3]) -> void :
 +
 +	var container: Node3D = player_spawn_position_node
@@ -867,87 +872,87 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		if i >= all.size():
 +			break
 +		var m: Node3D = all[i]
-+		# 站在平台中心，稍微抬高一点免得卡进碰撞体
++		# Stand at the platform center, raised slightly so we don't get stuck in the collider
 +		m.global_position = slots[i] + Vector3(0.0, template.global_position.y, 0.0)
 +
 +
-+# [MP8] ═══════════ 视角模式 B / C（2026-08-25 用户要求做两版对比）═══════════
++# [MP8] ═══════════ View modes B / C (on 2026-08-25 the user asked for two versions to compare) ═══════════
 +#
-+# 起因：8 个人挤在 2 个朝向里，远端那几个被近端的挡住。
++# What prompted it is 8 players crammed into 2 orientations, with the far ones blocked by the near ones.
 +#
-+# ---- 为什么原版只有 2 个朝向 ----
++# ---- Why vanilla only has 2 orientations ----
 +#
-+# 转朝向时**相机和美术是一起转的**（`camera_base` + `visuals_base`），
-+# 而平台的**碰撞体/逻辑节点不动**（Platform1..4 钉在 ±13）。
-+# 于是 `visuals_base` 一转，原来盖在 A 平台上的那套美术就跑到别的平台头上，
-+# 所以每块平台必须**重新指认此刻落在它头上的那一套** —— 原版拿
-+# `platform_visuals` / `platform_visuals_flipped` 两个槽做这件事，**只有两态**。
-+# 这就是 0°/180° 的全部由来。
++# When the orientation changes, **the camera and visuals rotate together** (`camera_base` + `visuals_base`),
++# while the platforms' **colliders/logic nodes stay put** (Platform1..4 pinned at ±13).
++# So once `visuals_base` rotates, the visuals that sat over platform A end up over another platform,
++# and every platform must **re-identify the set currently above it** — vanilla uses
++# two slots for this, `platform_visuals` / `platform_visuals_flipped`, **so there are only two states**.
++# That's the whole origin of 0°/180°.
 +#
-+# 🩸 **那不是硬限制，是「只准备了两态」。** 重新指认这件事可以按几何算，
-+# 任意角度都算得出来 —— 前提是那个角度得把「美术组」映射回「平台位置」上，
-+# 也就是**必须是平台环的对称角**。B 和 C 的差别就在这一条。
++# 🩸 **That isn't a hard limit, it's "only two states were prepared".** Re-identifying can be computed geometrically
++# for any angle — provided that angle maps "visual groups" back onto "platform positions",
++# i.e. it **must be a symmetry angle of the platform ring**. That's exactly where B and C differ.
 +#
-+# ---- B：布局不动，4 个朝向 ----
++# ---- B — layout unchanged, 4 orientations ----
 +#
-+# 现在是**混合双环**：内环 4 块 r=18.38 在 45/135/225/315°，外环 4 块 r=22.5 在 0/90/180/270°。
-+#   转 90° → 内环落到内环、外环落到外环 ✅
-+#   转 45° → 内环会落到外环的**角度**上，但**半径对不上** ❌
-+# 所以只能 4 档。8 个人两两共用一个朝向，而共用的那两块正好是 θ±22.5° 那两块 ——
-+# **都是离相机最近的，并排贴在画面下缘**，谁也挡不到谁。
++# Right now it's a **mixed double ring**. Inner ring of 4 at r=18.38 at 45/135/225/315°, outer ring of 4 at r=22.5 at 0/90/180/270°.
++#   Rotate 90° → inner lands on inner, outer lands on outer ✅
++#   Rotate 45° → inner lands on the outer ring's **angles**, but **the radius doesn't match** ❌
++# So there are only 4 settings. The 8 players share orientations in pairs, and the two platforms in each shared pair are exactly the ones at θ±22.5° —
++# **both closest to the camera, side by side along the bottom edge of the frame**, so neither blocks the other.
 +#
-+# ---- C：凑成正八边形，8 个朝向 ----
++# ---- C — form a regular octagon, 8 orientations ----
 +#
-+# 把**原版那 4 块也搬到 r=22.5**（方位角不变，只改半径），45° 就成了对称角 → 一人一档。
-+# ⚠️ 这**推翻了用户 2026-08-16「原版那 4 个一动不动」的定案**。
-+#    但那条定案的目的是孤岛感/间隙，而 C 在这一点上**更好**：
-+#    正八边形 r=22.5，相邻圆心距 2R·sin(22.5°) = 17.22，减两个平台半径 6 → **间隙 5.2**，
-+#    比现在混合双环的 4.1 还宽（当初被否掉的同半径 18.38 只有 2.1，那才是走得过去的那版）。
++# Move **the 4 vanilla ones out to r=22.5 too** (bearing unchanged, only radius changes), and 45° becomes a symmetry angle → one setting per player.
++# ⚠️ This **overturns the user's 2026-08-16 decision that "the 4 vanilla ones don't move at all"**.
++#    But the point of that decision was the island feel / gap, and C is **better** on that front.
++#    Regular octagon r=22.5, neighboring center distance 2R·sin(22.5°) = 17.22, minus two platform radii of 6 → **gap 5.2**,
++#    wider than the current mixed double ring's 4.1 (the rejected same-radius 18.38 only had 2.1, and that was the walkable one).
 +#
-+# ---- 两版都不碰的东西 ----
++# ---- What neither version touches ----
 +#
-+# 相机的**位置和 fov** 仍然走原有那套（`mp8junkcam=` / `_mp8_apply_camera`），这里只改朝向。
-+# 相机层级里没有别的自由挂点可用：
-+#   `Camera3D.rotation`  被 `anim_camera sway`（autoplay）**每帧**写
-+#   `CameraDefault`      被 `shaker_camera shake` 当 Target 写
-+#   `ShakerComponent3D`  本身就是抖动件
-+# **只有 `camera_base` 没人抢**，所以朝向只能转它。
-+# 【用户 2026-08-25 实机定案：**用 C 版**（“看着基本没问题”）】
-+# 所以默认就是 c；另外两档降为**对照用的调试旋钮**，传 mp8junkview=a / =b 才走。
-+#   a = 原样（2 个朝向，混合双环，与本轮之前逐值一致）
-+#   b = 4 个朝向，布局不动
-+#   c = 8 个朝向，正八边形（**当前默认**）
++# The camera's **position and fov** still go through the existing path (`mp8junkcam=` / `_mp8_apply_camera`), only orientation changes here.
++# There's no other free attachment point available in the camera hierarchy.
++#   `Camera3D.rotation`  is written **every frame** by `anim_camera sway` (autoplay)
++#   `CameraDefault`      is written by `shaker_camera shake` as its Target
++#   `ShakerComponent3D`  is itself the shake component
++# **Only `camera_base` has nobody fighting over it**, so orientation can only rotate that.
++# [User's live-test decision on 2026-08-25 — **use version C** ("looks basically fine")]
++# So the default is c. The other two settings are demoted to **debug knobs for comparison**, only used when mp8junkview=a / =b is passed.
++#   a = original (2 orientations, mixed double ring, identical value for value to before this round)
++#   b = 4 orientations, layout unchanged
++#   c = 8 orientations, regular octagon (**current default**)
 +const MP8_VIEW_STEPS: Dictionary = {"a": 180.0, "b": 90.0, "c": 45.0}
 +const MP8_VIEW_DEFAULT: String = "c"
-+# 走原版那条两态路的档位（`platform_visuals` ↔ `_flipped` 开关）。
-+# 其余档位一律走 `_mp8_apply_view()` 的几何重新指认。
++# The setting that takes vanilla's two-state path (the `platform_visuals` ↔ `_flipped` toggle).
++# All other settings use geometric re-identification via `_mp8_apply_view()`.
 +const MP8_VIEW_VANILLA: String = "a"
 +
 +var _mp8_view_mode: String = MP8_VIEW_DEFAULT
 +var _mp8_my_facing: float = 0.0
-+# 搬完位置之后的每组家当：{"platform":, "nodes":, "pos": 最终世界坐标}
++# Each group's kit after moving, `{"platform":, "nodes":, "pos": final world coordinates}`
 +var _mp8_groups_final: Array = []
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 🩸 T49 兜底闸：把「已经被杀、但账没销」的人清出 active_players
++# [MP8] 🩸 T49 safety gate — clear players who are "already killed but never taken off the books" out of active_players
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 这道闸**不是为某一个 bug 加的**，是结构性的：
-+# 本局是纯淘汰制（`active_players.size() <= 1` 才结束），而**没有任何超时兜底** ——
-+# 少销一个人 = 这一小局永久卡死：垃圾一直掉、残骸越堆越多、帧数一路崩，玩家只能强退。
-+# T49 那次就是压缩机在客机上把人 `kill_rpc` 掉了、`emit_died` 却没在服务器上发出来
-+#（根因已在 `junk_platform_compactor.gd` 修掉）。以后再冒出别的「杀了但没销账」的
-+# 路径，最多晚几秒，不会再卡死整局。
++# This gate **wasn't added for any one bug**, it's structural.
++# This match is pure elimination (it only ends at `active_players.size() <= 1`), and **there is no timeout fallback at all** —
++# one player not taken off the books = this minigame hangs forever. Junk keeps falling, debris piles up, the frame rate keeps collapsing, and players can only force-quit.
++# T49 was the compactor killing a player on a client via `kill_rpc` while `emit_died` never fired on the server
++# (the root cause is fixed in `junk_platform_compactor.gd`). If some other "killed but not taken off the books"
++# path shows up later, it'll be a few seconds late at most instead of hanging the whole match.
 +#
-+# 判据用 `active == false`：`kill_rpc()` 一定会把它置 false（那是判死的唯一表现），
-+# 活人恒为 true。**不用坐标判据**（`y < -100` 之类）—— 那是症状不是本质，换个杀法就漏。
++# The test is `active == false`. `kill_rpc()` always sets it to false (that's the only sign of being judged dead),
++# and living players are always true. **No position test** (`y < -100` and the like) — that's a symptom, not the essence, and a different kill method would slip past it.
 +#
-+# ⚠️ **宽限期必须长过 `fall_rpc` 那条 1.5 秒 tween**：摔落是先 `active = false`、
-+#    1.5 秒之后才 `emit_died`。宽限期短了会把**正在坠落的人**提前销账 ——
-+#    名次会乱，还可能在人还在空中时就结算。
-+# ⚠️ **只在 `junk_handler.active` 时扫**：开局之前全场 `active` 都是 false
-+#    （`set_active_rpc(true)` 与 `junk_handler.set_active(true)` 是同一时刻发的），
-+#    少了这道门，倒计时阶段就会把所有人一次清空。
++# ⚠️ **The grace period must be longer than the 1.5-second tween in `fall_rpc`**. A fall sets `active = false` first,
++#    and only calls `emit_died` 1.5 seconds later. Too short a grace period would take **players who are mid-fall** off the books early —
++#    placements would get scrambled, and results might even run while someone is still in the air.
++# ⚠️ **Only sweep while `junk_handler.active`**. Before the match starts everyone's `active` is false
++#    (`set_active_rpc(true)` and `junk_handler.set_active(true)` are sent at the same moment),
++#    so without this gate the countdown phase would clear everyone at once.
 +const MP8_SWEEP_TICK: float = 1.0
 +const MP8_SWEEP_GRACE: float = 3.0
 +var _mp8_dead_since: Dictionary[int, float] = {}
@@ -958,23 +963,23 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	return float(MP8_VIEW_STEPS.get(_mp8_view_mode, 180.0))
 +
 +
-+# [MP8] 这个人该用哪个朝向。
-+# 相机静止时在 +Z 侧朝 -Z 看，所以朝向 = 平台的方位角 `atan2(x, z)`，按模式步长取整。
-+# ⚠️ **step=180 时与原版逐例等价**，所以三种模式可以统一走这一个函数：
-+#    (±13,+13) → ±45° → 取整到 0；(±13,−13) → ±135° → 取整到 180。
++# [MP8] Which orientation this player should use.
++# At rest the camera is on the +Z side looking toward -Z, so orientation = the platform's bearing `atan2(x, z)`, rounded to the mode's step.
++# ⚠️ **With step=180 this is equivalent to vanilla case by case**, so all three modes can share this one function.
++#    (±13,+13) → ±45° → rounds to 0. (±13,−13) → ±135° → rounds to 180.
 +func _mp8_facing_for(pos: Vector3) -> float:
 +	var step: float = _mp8_facing_step()
 +	var bearing: float = rad_to_deg(atan2(pos.x, pos.z))
 +	return fposmod(round(bearing / step) * step, 360.0)
 +
 +
-+# [MP8] 按当前朝向，把每块平台指认到「此刻落在它头上」的那套美术。
++# [MP8] Based on the current orientation, point each platform at the set of visuals "currently above it".
 +#
-+# `visuals_base` 转了 deg，所以原来在 g 处的美术现在在 R(deg)·g；
-+# 要找盖住平台 p 的那一组，就是找 **g ≈ R(−deg)·p**。
++# `visuals_base` rotated by deg, so visuals that were at g are now at R(deg)·g.
++# Finding the group covering platform p means finding **g ≈ R(−deg)·p**.
 +#
-+# ⚠️ B/C 模式下**绝不能**再走原版那句 `platform_visuals = platform_visuals_flipped`：
-+#    那是两态开关，这里已经直接指认成正确的一套了，再翻一次就翻错。
++# ⚠️ In B/C modes this **must never** go through vanilla's `platform_visuals = platform_visuals_flipped` again.
++#    That's a two-state toggle, and here the correct set has already been assigned directly, so flipping again would flip it wrong.
 +func _mp8_rebind_for_facing(deg: float) -> void :
 +
 +	if _mp8_groups_final.is_empty():
@@ -982,12 +987,12 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +
 +	var inv := Basis(Vector3.UP, deg_to_rad( - deg))
 +	var hit: int = 0
-+	# [MP8] 单射自检（T49 顺手加的）：本函数是**逐块独立取最近**，没有任何机制
-+	# 保证两块平台不会指到同一组美术。真撞上的后果是「一台压缩机被两块平台共用、
-+	# 另一台没人用」—— 肉眼极难看出来，只会表现成「那块平台的压缩机怎么不下来」。
-+	# 正八边形 + 45° 整数倍理论上是干净的置换，所以这里**不修正、只报**：
-+	# 一旦响了就说明槽位摆得不对称，该去查布局而不是在这里打补丁。
-+	# （翻转配对那边有 `_mp8_check_pairing()` 查对合，这条路一直缺同等的校验。）
++	# [MP8] Injectivity self-check (added along the way during T49). This function **picks the nearest independently for each platform**, and nothing
++	# guarantees two platforms won't point at the same visual group. If they ever do, the result is "one compactor shared by two platforms,
++	# and another used by nobody" — nearly impossible to spot by eye, it only shows up as "why won't that platform's compactor come down".
++	# A regular octagon + integer multiples of 45° is a clean permutation in theory, so this **only reports and doesn't correct**.
++	# If it ever fires, the slots aren't laid out symmetrically, and the layout should be investigated instead of patching things here.
++	# (The flip pairing side has `_mp8_check_pairing()` checking the involution, and this path always lacked an equivalent check.)
 +	var taken: Dictionary = {}
 +
 +	for g in _mp8_groups_final:
@@ -1019,14 +1024,14 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +
 +		var key: String = str(best.get("pos", Vector3.ZERO))
 +		if taken.has(key):
-+			print("[MP8] 残骸平台：⚠️ 朝向 %.0f° 重指认撞车 —— 平台 %s 和 %s 都指到了 %s 那组美术（压缩机会被两块平台共用）" % [
++			print("[MP8] Junk Platform: ⚠️ re-identification collision at orientation %.0f° — platforms %s and %s both point at the %s visual group (a compactor will be shared by two platforms)" % [
 +				deg, String(pl.name), String(taken[key]), key
 +			])
 +		taken[key] = String(pl.name)
 +
-+		# 拿平台本体 + 那一组的家当拼一个临时组，复用已经验过的接线函数。
-+		# 第三个参数 `g` = **这块平台自己那一组** —— 压缩机与警报音只认它，
-+		# 不跟着朝向走（理由见 _mp8_wire_platform 头上那段）。
++		# Build a temporary group from the platform itself + that group's kit, reusing the already-verified wiring function.
++		# The third argument `g` = **this platform's own group** — compactors and alarm audio only recognize that one
++		# and don't follow orientation (see the block above _mp8_wire_platform for why).
 +		_mp8_wire_platform(
 +			{"platform": pl, "nodes": best["nodes"]},
 +			(far if not far.is_empty() else best),
@@ -1034,12 +1039,12 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		)
 +		hit += 1
 +
-+	print("[MP8] 残骸平台：朝向 %.0f° → 重新指认了 %d/%d 块平台的美术" % [
++	print("[MP8] Junk Platform: orientation %.0f° → re-identified visuals for %d/%d platforms" % [
 +		deg, hit, _mp8_groups_final.size()
 +	])
 +
 +
-+# [MP8] B/C 模式下的整套视角切换。**本机执行，每台机器各转各的。**
++# [MP8] Full view switch for B/C modes. **Runs locally, each machine rotates on its own.**
 +func _mp8_apply_view(deg: float) -> void :
 +
 +	_mp8_my_facing = deg
@@ -1051,65 +1056,65 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	_mp8_show_id_hud()
 +
 +
-+# [MP8] ===== 相机：**按玩家单独调，能不动的一律不动**（用户 2026-08-16 提议）=====
++# [MP8] ===== Camera — **tune per player, and leave alone everything that can be left alone** (proposed by the user on 2026-08-16) =====
 +#
-+# 能这么做的前提（逆向确认）：**相机是每台机器一份的**，不是全场共享一个。
-+# 原版自己就在按玩家发相机指令（`rotate_camera_rpc.rpc_id(network_id, ...)`），
-+# 所以给不同的人不同的相机完全走得通。
++# The premise that makes this possible (confirmed by reverse-engineering) is that **each machine has its own camera**, not one shared across the arena.
++# Vanilla itself already sends camera commands per player (`rotate_camera_rpc.rpc_id(network_id, ...)`),
++# so giving different players different cameras works fine.
 +#
-+# ⚠️ **唯一锁死的是朝向：只能 0° 或 180°。**
-+# 因为转的是 `camera_base` + `visuals_base` 两个一起转，而平台视觉件是**对角两两共用**的
-+# （`platform_visuals` / `platform_visuals_flipped`），只有这两种状态。
-+# **位置和 fov 则完全自由**，可以逐人不同。
++# ⚠️ **The only locked thing is orientation, which can only be 0° or 180°.**
++# That's because `camera_base` + `visuals_base` rotate together, and platform visuals are **shared in diagonal pairs**
++# (`platform_visuals` / `platform_visuals_flipped`), so there are only these two states.
++# **Position and fov are completely free** and can differ per player.
 +#
-+# 实测（原版相机、八边形半径 22.5、平台半径 5）：8 个平台里只有**正对相机中轴**的
-+# 那两个 (0,0,±R) 顶到画面边缘（纵向余量 +1.0 / +2.7 < 半径 5），
-+# 其余 6 个原版构图绰绰有余（余量 7~13）。
-+# 所以**只给这两个平台的主人补一点后拉+下移+广角，另外 6 个人的画面和原版一模一样**。
-+# 改动面越小越不容易把本来对的地方改坏（坑第 21 条：原版是对的就别动它）。
++# Tested (vanilla camera, octagon radius 22.5, platform radius 5). Of the 8 platforms only the two **directly on the camera's center axis**
++# at (0,0,±R) push against the edge of the frame (vertical margin +1.0 / +2.7 < radius 5),
++# while vanilla framing has plenty of room for the other 6 (margin 7~13).
++# So **only the owners of those two platforms get a bit of pull-back + lowering + wider FOV, and the other 6 players see exactly what vanilla shows**.
++# The smaller the change surface, the less likely it breaks something that was already right (pitfall #21, if vanilla is right, don't touch it).
 +#
-+# ⚠️⚠️ **必须挪相机在 camera_base 局部空间里的位置，绝对不能挪 camera_base 本身。**
-+# camera_base 绕**自己的原点**转（实测它就在世界原点）。
-+# 上一版写的是 `camera_base.global_position += back`，后果是：
-+# 朝向 0° 那半人的相机确实往后退了，但 camera_base 一转 180°，
-+# 同一个世界偏移就指向反方向 —— **另一半人的相机反而往前挪**。
-+# 两边构图不一致，而且这种不对称在 8 个小窗口里肉眼极难发现。
-+# 挪局部坐标就没这个问题：偏移跟着 camera_base 一起转，两边严格对称。
++# ⚠️⚠️ **Move the camera's position within camera_base's local space, and never move camera_base itself.**
++# camera_base rotates around **its own origin** (tested, it sits right at the world origin).
++# The previous version did `camera_base.global_position += back`, and the result was that
++# the half of the players at orientation 0° did get their camera pulled back, but once camera_base rotated 180°
++# the same world offset pointed the opposite way — **the other half's cameras moved forward instead**.
++# Framing differed between the two sides, and that kind of asymmetry is nearly impossible to spot by eye across 8 small windows.
++# Moving local coordinates avoids this. The offset rotates with camera_base, so both sides are strictly symmetric.
 +#
-+# 三个量用命令行 `mp8junkcam=<后拉>,<下移>,<广角增量>` 临时覆盖，不用重新编译，
-+# 配合日志里的 [MP8-CAM] 体检行调。
-+# 【2026-08-16 用户定案】用户实际选定的是**全场统一**的这一套：
-+#   后拉 6 / 下移 2 / 广角 +10（原版 50.3 → 60.3），相机 (0,27.1,30.7) -> (0,25.1,36.7)。
-+# 对应画面 `notes\shots\oct_cam_b6d2f10_t3_P1.png`。
-+# 逐人模式（只调正对中轴那两个人、其余保持原版）仍然可用，传 `mp8junkcamper` 打开。
-+const MP8_CAM_BACK: float = 6.0      # 沿视线**水平**后退（不抬高：抬高会越过压缩机顶端 y≈26.8，顶盖糊画面）
-+const MP8_CAM_DOWN: float = 2.0      # 相机下移
-+const MP8_CAM_FOV_ADD: float = 10.0  # 视场角增量（原版 50.3 → 60.3）
++# The three values can be overridden temporarily with the command-line arg `mp8junkcam=<pull back>,<lower>,<FOV increase>`, no recompile needed,
++# and tuned alongside the [MP8-CAM] health-check lines in the log.
++# [Settled by the user on 2026-08-16] What the user actually picked is this **arena-wide uniform** set.
++#   pull back 6 / lower 2 / FOV +10 (vanilla 50.3 → 60.3), camera (0,27.1,30.7) -> (0,25.1,36.7).
++# The matching screenshot is `notes\shots\oct_cam_b6d2f10_t3_P1.png`.
++# Per-player mode (only adjusts the two players on the center axis, the rest stay vanilla) is still available, enable it by passing `mp8junkcamper`.
++const MP8_CAM_BACK: float = 6.0      # back off **horizontally** along the line of sight (no raising, since raising would pass the compactor tops at y≈26.8 and their lids would smear the picture)
++const MP8_CAM_DOWN: float = 2.0      # lower the camera
++const MP8_CAM_FOV_ADD: float = 10.0  # FOV increase (vanilla 50.3 → 60.3)
 +
-+var _mp8_cam_xf0: Transform3D        # 原版相机变换（_ready 里 camera_base 还没转，是干净基准）
++var _mp8_cam_xf0: Transform3D        # vanilla camera transform (camera_base hasn't rotated yet in _ready, so it's a clean baseline)
 +var _mp8_cam_fov0: float = 0.0
 +
 +
-+# [MP8] 这个玩家的相机要不要动？返回 (后拉, 下移, 广角增量)，全 0 = 保持原版。
++# [MP8] Should this player's camera move? Returns (pull back, lower, FOV increase), all 0 = keep vanilla.
 +#
-+# 判据：**他自己的平台**在他那台机器的画面里是不是完整的。
-+# 只看平台上表面（人站的那一面），不管平台柱子的下半截——原版近侧那两个平台的
-+# 柱子本来就被下边缘切掉一截，那是原版长相，不是毛病。
++# The test is whether **their own platform** is fully visible on their machine's screen.
++# Only the platform's top surface (where people stand) counts, not the lower part of the platform pillar — on vanilla's two near platforms
++# the pillars are already partly cut off by the bottom edge, which is just how vanilla looks, not a defect.
 +func _mp8_camera_adjust_for(pos: Vector3, rot: float) -> Vector3:
 +
 +	if _mp8_cam_fov0 <= 0.0:
 +		return Vector3.ZERO
 +
-+	# 默认走**全场统一**（已在 _ready 里调过了），这里就不再逐人加，免得叠两次
-+	if not Array(OS.get_cmdline_args()).has("mp8junkcamper"):
++	# By default the **arena-wide uniform** adjustment is used (already applied in _ready), so don't add a per-player one here and apply it twice
++	if not NetworkManager.mp8_args().has("mp8junkcamper"):
 +		return Vector3.ZERO
 +
 +	var radius: float = 6.0
 +	if junk_handler != null and "platform_radius" in junk_handler:
 +		radius = junk_handler.platform_radius
 +
-+	# 他那台机器的相机只会转 0° 或 180°。转 180° 等价于把平台位置绕 Y 转 180°
-+	# （(x,z) -> (-x,-z)）之后用**原版朝向**的相机去看，所以直接换算位置即可。
++	# Their machine's camera only rotates 0° or 180°. Rotating 180° is equivalent to rotating the platform position 180° around Y
++	# ((x,z) -> (-x,-z)) and viewing it with the **vanilla-orientation** camera, so converting the position directly is enough.
 +	var p: Vector3 = Vector3(pos.x, 0.0, pos.z)
 +	if absf(rot) > 90.0:
 +		p = Vector3( - p.x, 0.0, - p.z)
@@ -1119,12 +1124,12 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	var m: Vector3 = _mp8_frame_margin(_mp8_cam_xf0, half_v, half_h, p)
 +
 +	if minf(m.y, m.z) >= radius:
-+		return Vector3.ZERO   # 原版构图就够，一个字不改
++		return Vector3.ZERO   # vanilla framing is enough, change nothing
 +
 +	return _mp8_cam_values()
 +
 +
-+# [MP8] 相机微调量 (后拉, 下移, 广角增量)，命令行 mp8junkcam=<后拉>,<下移>,<广角增量> 可覆盖
++# [MP8] Camera tweak amounts (pull back, lower, FOV increase), overridable with the command-line arg mp8junkcam=<pull back>,<lower>,<FOV increase>
 +func _mp8_cam_values() -> Vector3:
 +
 +	var back: float = MP8_CAM_BACK
@@ -1142,9 +1147,11 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	return Vector3(back, down, fov_add)
 +
 +
-+# [MP8] 服务器按玩家单独下发。call_local 不用——服务器自己那份在 spawn_players 里直接调。
++# [MP8] The server sends this per player. No call_local — the server's own copy is called directly in spawn_players.
 +@rpc("authority", "call_remote", "reliable")
 +func mp8_adjust_camera_rpc(back: float, down: float, fov_add: float) -> void :
++	if not (NetworkManager.mp8_finite(back, 100.0) and NetworkManager.mp8_finite(down, 100.0) and NetworkManager.mp8_finite(fov_add, 60.0)):
++		return
 +	_mp8_apply_camera(back, down, fov_add)
 +
 +
@@ -1156,15 +1163,15 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	var before: Vector3 = camera.global_position
 +	var before_fov: float = camera.fov
 +
-+	# camera_base 局部空间里，+Z 就是"背对视线"的方向（相机看向 -Z），
-+	# 所以后拉 = +Z，下移 = -Y。偏移跟着 camera_base 的 180° 一起转，两边对称。
++	# In camera_base's local space, +Z is the direction "facing away from the line of sight" (the camera looks toward -Z),
++	# so pull back = +Z and lower = -Y. The offset rotates with camera_base's 180°, so both sides are symmetric.
 +	var t: Transform3D = camera_base.global_transform.affine_inverse() * camera.global_transform
 +	t.origin += Vector3(0.0, - down, back)
 +	camera.global_transform = camera_base.global_transform * t
 +
 +	camera.fov = before_fov + fov_add
 +
-+	print("[MP8] 本机相机微调：后拉 %.1f、下移 %.1f、广角 %.1f -> %.1f；位置 (%.1f, %.1f, %.1f) -> (%.1f, %.1f, %.1f)" % [
++	print("[MP8] Local camera tweak: pull back %.1f, lower %.1f, FOV %.1f -> %.1f; position (%.1f, %.1f, %.1f) -> (%.1f, %.1f, %.1f)" % [
 +		back, down, before_fov, camera.fov,
 +		before.x, before.y, before.z,
 +		camera.global_position.x, camera.global_position.y, camera.global_position.z
@@ -1178,18 +1185,18 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	return 16.0 / 9.0
 +
 +
-+# [MP8] 相机构图体检：把"哪个平台在画面里、哪个掉出去了"直接打成日志。
++# [MP8] Camera framing health check, which logs "which platforms are in frame and which dropped out" directly.
 +#
-+# 相机不动之后，构图余量完全由原版决定，靠人盯 8 个小窗口画面判断既慢又容易看漏
-+# （尤其"掉出画面"和"被别的东西挡住"肉眼看起来很像）。所以这里算清楚再打出来。
++# Once the camera doesn't move, framing headroom is set entirely by vanilla, and judging it by staring at 8 small windows is slow and easy to miss things
++# (especially since "out of frame" and "blocked by something else" look very similar by eye). So this computes it properly and prints it.
 +#
-+# **两种朝向都要算**：对面那半玩家把 camera_base 绕 Y 转了 180°，
-+# 等价于把平台位置绕 Y 转 180° 之后用同一个相机看，所以第二种朝向直接用 (-x, y, -z)。
++# **Both orientations must be computed**. The far-side half of the players have camera_base rotated 180° around Y,
++# which is equivalent to rotating platform positions 180° around Y and viewing with the same camera, so the second orientation just uses (-x, y, -z).
 +#
-+# 余量的含义：视锥边界到该点的世界单位距离。
-+#   余量 < 0        → 平台**中心**都在画面外，这个平台的主人根本看不见自己的平台
-+#   0 ≤ 余量 < 半径 → 中心在画面里，但平台边缘被切掉一部分（原版近侧那排本来就是这样）
-+#   余量 ≥ 半径     → 整块平台都在画面里
++# What margin means is the world-unit distance from the view frustum boundary to the point.
++#   margin < 0          → even the platform's **center** is off screen, and its owner can't see their own platform at all
++#   0 ≤ margin < radius → the center is on screen, but part of the platform's edge is cut off (vanilla's near row is already like this)
++#   margin ≥ radius     → the whole platform is on screen
 +func _mp8_report_camera(groups: Array, slots: Array[Vector3]) -> void :
 +
 +	if camera == null:
@@ -1207,7 +1214,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	if junk_handler != null and "platform_radius" in junk_handler:
 +		radius = junk_handler.platform_radius
 +
-+	print("[MP8-CAM] 相机 pos=(%.1f, %.1f, %.1f) 俯角=%.1f° fov=%.1f 半视角 V=%.1f° H=%.1f° 平台半径=%.1f camera_base=(%.1f, %.1f, %.1f)" % [
++	print("[MP8-CAM] camera pos=(%.1f, %.1f, %.1f) pitch=%.1f° fov=%.1f half-angle V=%.1f° H=%.1f° platform radius=%.1f camera_base=(%.1f, %.1f, %.1f)" % [
 +		xf.origin.x, xf.origin.y, xf.origin.z,
 +		- rad_to_deg(xf.basis.get_euler().x), camera.fov,
 +		rad_to_deg(half_v), rad_to_deg(half_h), radius,
@@ -1218,14 +1225,14 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		var s: Vector3 = slots[i]
 +		var a: Vector3 = _mp8_frame_margin(xf, half_v, half_h, s)
 +		var b: Vector3 = _mp8_frame_margin(xf, half_v, half_h, Vector3( - s.x, s.y, - s.z))
-+		print("[MP8-CAM] 平台%d (x=%6.1f z=%6.1f)  朝向0°: 深度%5.1f 纵%+6.1f 横%+6.1f %s   朝向180°: 深度%5.1f 纵%+6.1f 横%+6.1f %s" % [
++		print("[MP8-CAM] platform%d (x=%6.1f z=%6.1f)  facing 0°: depth%5.1f vert%+6.1f horiz%+6.1f %s   facing 180°: depth%5.1f vert%+6.1f horiz%+6.1f %s" % [
 +			i + 1, s.x, s.z,
 +			a.x, a.y, a.z, _mp8_verdict(a, radius),
 +			b.x, b.y, b.z, _mp8_verdict(b, radius)
 +		])
 +
-+	# 压缩机是场地上最高的东西（静止位实测 y≈26.8，和相机的 y≈27 几乎齐平）。
-+	# 离镜头太近的那台会直接糊在画面上——上一版"上方的黑块"很可能就是它。
++	# The compactors are the tallest things in the arena (resting position measured at y≈26.8, nearly level with the camera at y≈27).
++	# One that's too close to the lens smears right across the picture — the previous version's "black block at the top" was most likely that.
 +	for i in groups.size():
 +		var c = _mp8_pick(groups[i], "compactor")
 +		if c == null:
@@ -1235,18 +1242,18 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		var d1: float = _mp8_frame_margin(xf, half_v, half_h, Vector3( - cp.x, cp.y, - cp.z)).x
 +		var near: float = minf(d0, d1)
 +		if near < 12.0:
-+			print("[MP8-CAM] ⚠️ 平台%d 的压缩机 (y=%.1f) 离镜头只有 %.1f，会糊在画面上挡视野" % [
++			print("[MP8-CAM] ⚠️ platform%d compactor (y=%.1f) is only %.1f from the lens and will smear across the picture, blocking the view" % [
 +				i + 1, cp.y, near
 +			])
 +
 +
-+# [MP8] 返回 (深度, 纵向余量, 横向余量)。余量 = 视锥边界到该点的世界单位距离，负数 = 已在画面外。
++# [MP8] Returns (depth, vertical margin, horizontal margin). Margin = world-unit distance from the frustum boundary to the point, negative = already off screen.
 +func _mp8_frame_margin(xf: Transform3D, half_v: float, half_h: float, p: Vector3) -> Vector3:
 +
 +	var local: Vector3 = xf.affine_inverse() * p
-+	var depth: float = - local.z          # 相机看向 -Z
++	var depth: float = - local.z          # camera looks toward -Z
 +	if depth <= 0.01:
-+		return Vector3(depth, -999.0, -999.0)   # 在相机背后
++		return Vector3(depth, -999.0, -999.0)   # behind the camera
 +	return Vector3(
 +		depth,
 +		depth * tan(half_v) - absf(local.y),
@@ -1257,35 +1264,35 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +func _mp8_verdict(m: Vector3, radius: float) -> String:
 +	var worst: float = minf(m.y, m.z)
 +	if worst < 0.0:
-+		return "✗中心已出画面"
++		return "✗center already off screen"
 +	if worst < radius:
-+		return "△边缘被切"
-+	return "✓完整"
++		return "△edge cut off"
++	return "✓fully visible"
 +
 +
  func spawn_players():
  
  	player_count = PlayerManager.player_presences.size()
-@@ -95,8 +1331,9 @@ func spawn_players():
+@@ -95,8 +1338,9 @@ func spawn_players():
  
  		player_character.network_id = network_id
  
 -		if position.z < 0:
 -			camera_rotation = 180.0
-+		# [MP8] 朝向统一走 _mp8_facing_for()：不传模式时步长 180，与原版那句
-+		# `if position.z < 0: camera_rotation = 180.0` **逐例等价**（判据见该函数注释）。
++		# [MP8] Orientation always goes through _mp8_facing_for(). With no mode passed the step is 180, which is **equivalent case by case** to vanilla's
++		# `if position.z < 0: camera_rotation = 180.0` (see that function's comments for the reasoning).
 +		camera_rotation = _mp8_facing_for(position)
  
  		if GameManager.local_game:
  			camera_rotation = rad_to_deg(spawn_positions[i].basis.get_euler().y)
-@@ -106,26 +1343,77 @@ func spawn_players():
+@@ -106,26 +1350,77 @@ func spawn_players():
  			position, camera_rotation
  		)
  
 -		if not GameManager.local_game and camera_rotation > 0.0:
-+		# [MP8] B/C 模式：**朝向 0 也要发**——客机要靠这一趟把 HUD 的朝向刷出来，
-+		# 而且 0° 的重新指认是恒等变换，白发一趟没有副作用。
-+		# 不传模式时条件与原版一模一样（`> 0.0`），走原版那条两态路。
++		# [MP8] B/C modes — **send it even for orientation 0**. Clients rely on this trip to refresh the orientation on their HUD,
++		# and re-identifying at 0° is an identity transform, so the extra trip has no side effects.
++		# With no mode passed the condition is exactly the same as vanilla (`> 0.0`) and it takes vanilla's two-state path.
 +		if not GameManager.local_game and (_mp8_view_mode != MP8_VIEW_VANILLA or camera_rotation > 0.0):
  
  			if network_id == 1:
@@ -1309,13 +1316,13 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
  			else:
  				rotate_camera_rpc.rpc_id(network_id, camera_rotation)
  
-+		# [MP8] 相机**按玩家**决定动不动：只有自己的平台顶到画面边缘的人才收到微调，
-+		# 其余人一个字不改，画面和原版逐像素一致。
-+		# （偏移是在 camera_base 局部空间里加的，和上面那个 0°/180° 翻转互不干扰，先后无所谓。）
++		# [MP8] Whether the camera moves is decided **per player**. Only players whose own platform pushes against the edge of the frame get a tweak,
++		# and everyone else is left completely unchanged, pixel-identical to vanilla.
++		# (The offset is added in camera_base's local space, so it doesn't interfere with the 0°/180° flip above, and order doesn't matter.)
 +		if not GameManager.local_game:
 +			var adj: Vector3 = _mp8_camera_adjust_for(position, camera_rotation)
 +			if adj != Vector3.ZERO:
-+				print("[MP8] 玩家 %s 在正对相机中轴的平台上，给他单独调相机" % [
++				print("[MP8] Player %s is on a platform on the camera's center axis, adjusting their camera individually" % [
 +					PlayerManager.player_presences[network_id].network_name
 +				])
 +				if network_id == 1:
@@ -1326,7 +1333,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
  		player_character.emit_died.connect(_on_player_died)
  		player_character.event_fallen.connect(_on_player_fallen)
  
-+		# [MP8-DIAG] 额外接一份，只记录不改行为（bind 的参数追加在信号自带参数**后面**）
++		# [MP8-DIAG] Connect an extra listener that only logs and doesn't change behavior (bind arguments are appended **after** the signal's own arguments)
 +		player_character.event_fallen.connect(_mp8_diag_fallen.bind(network_id, player_character))
 +		player_character.emit_died.connect(_mp8_diag_died)
 +
@@ -1334,21 +1341,21 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
  		active_players[network_id] = player_character
  		player_scores[network_id] = 0
  
-+		# [MP8] 记下这个玩家落在哪个平台上（**按出生点就近匹配**，不靠数组下标对齐——
-+		# 万一以后出生点顺序或平台顺序变了，名牌也不会认错人）
-+		# ⚠️ 上界必须校验：传 `mp8noexpand` 时 `_mp8_expand_platforms()` 整个不跑，
-+		# `_mp8_label_names` 会是**空数组**，而这里是按下标写的 —— 不校验就是越界写。
-+		# （坑第 13 条：定长结构改动前先 grep 所有按下标访问的点。这处正是漏网的那个。）
++		# [MP8] Record which platform this player is on (**matched to the nearest spawn point**, not by aligned array indices —
++		# so if spawn point or platform order ever changes, the nameplates still won't point at the wrong person)
++		# ⚠️ The upper bound must be checked. When `mp8noexpand` is passed, `_mp8_expand_platforms()` doesn't run at all,
++		# so `_mp8_label_names` is an **empty array**, and this writes by index — without the check it's an out-of-bounds write.
++		# (Pitfall #13, before changing a fixed-size structure, grep every indexed access. This spot is exactly the one that slipped through.)
 +		var nearest: int = _mp8_nearest_platform(position)
 +		if nearest >= 0 and nearest < _mp8_label_names.size():
 +			_mp8_label_names[nearest] = PlayerManager.player_presences[network_id].network_name
 +
-+	# [MP8] 名牌文字广播给所有人（名牌本身在每台机器的 _ready 里已经建好）
++	# [MP8] Broadcast the nameplate text to everyone (the nameplates themselves are already built in each machine's _ready)
 +	if not _mp8_label_names.is_empty():
 +		mp8_set_platform_labels_rpc.rpc(_mp8_label_names)
 +
 +
-+# [MP8] 离给定位置最近的平台下标（只看水平距离）
++# [MP8] Index of the platform nearest to the given position (horizontal distance only)
 +func _mp8_nearest_platform(pos: Vector3) -> int:
 +
 +	var best: int = -1
@@ -1364,51 +1371,51 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
  
  func cleanup():
  
-@@ -141,6 +1429,15 @@ func player_disconnected(_network_id: int):
+@@ -141,6 +1436,15 @@ func player_disconnected(_network_id: int):
  	remove_player_rpc.rpc(_network_id)
  	await get_tree().create_timer(1.0).timeout
  
-+	# [MP8] T44 守卫：本局还没正式开始（有人卡在加载里，闸门未放行）。
-+	# 此时 `spawn_players()` 还没跑过（它由 `initialize()` 触发），场上一个人都没有，
-+	# 下面那句会把一局**尚未开始**的游戏当成打完了收尾。
-+	# 另一处 check_game_end() 在玩家真死时调，那条不受影响，只挡掉线这条。
-+	# 清理照做，只不做收尾。完整分析见 T44。
++	# [MP8] T44 guard. This match hasn't properly started yet (someone is stuck loading and the gate hasn't opened).
++	# At this point `spawn_players()` hasn't run yet (it's triggered by `initialize()`), and nobody is in the arena,
++	# so the line below would wrap up a match that **hasn't started yet** as if it had finished.
++	# The other check_game_end() call happens when a player actually dies and is unaffected. This only blocks the disconnect path.
++	# Cleanup still runs, only the wrap-up is skipped. Full analysis in T44.
 +	if not is_all_player_loaded:
-+		print("[MP8] 残骸平台：%d 掉线时本局还没开始，跳过收尾检查" % _network_id)
++		print("[MP8] Junk Platform: %d disconnected before this match started, skipping the end-of-match check" % _network_id)
 +		return
 +
  	check_game_end()
  
  
-@@ -150,21 +1447,60 @@ func check_game_end():
+@@ -150,21 +1454,60 @@ func check_game_end():
  		return
  
  	if active_players.size() > 1:
-+		_mp8_diag("check_game_end 被挡：还有 %d 人没死" % active_players.size())
++		_mp8_diag("check_game_end blocked: %d players still alive" % active_players.size())
  		return
  
-+	_mp8_diag("★★ check_game_end 放行，开始结算 ★★")
++	_mp8_diag("★★ check_game_end passed, starting results ★★")
  	finished = true
  
  	for i in dead_players.size():
  		player_scores[dead_players[i]] = i
  
-+	# [MP8] 压平冠亚断层（用户 2026-08-16 定，**本次只改这一条**）。
++	# [MP8] Flatten the gap between first and second place (decided by the user on 2026-08-16, **this is the only change made here**).
 +	#
-+	# 原版给幸存者 `player_count`，而最后一个死的拿 `dead_players.size() - 1`，
-+	# 于是冠亚之间**恒跳 2 分**，其余名次步长都是 1：
-+	#   8 人原版 → 0 1 2 3 4 5 6 然后直接跳到 8
-+	#   8 人现在 → 0 1 2 3 4 5 6 7   （4 人：0 1 2 4 → 0 1 2 3）
++	# Vanilla gives survivors `player_count`, while the last to die gets `dead_players.size() - 1`,
++	# so there's **always a 2-point jump** between first and second, while every other placement step is 1.
++	#   8 players vanilla → 0 1 2 3 4 5 6 then jumps straight to 8
++	#   8 players now     → 0 1 2 3 4 5 6 7   (4 players, 0 1 2 4 → 0 1 2 3)
 +	#
-+	# ⚠️ 用 `dead_players.size()` 而不是 `player_count - 1`：
-+	# 中途掉线的人会从 `active_players` 里被移除，但**不会进 `dead_players`**
-+	# （见 `remove_player_rpc`）。那时 `player_count` 比实际参与结算的人数大，
-+	# 冠军会凭空多拿几分。用死亡人数推就是"比最后一个死的多 1 分"，掉线多少人都对。
-+	# 无人掉线时两种写法结果完全一样。
++	# ⚠️ Uses `dead_players.size()` rather than `player_count - 1`.
++	# Players who disconnect mid-match are removed from `active_players` but **don't go into `dead_players`**
++	# (see `remove_player_rpc`). Then `player_count` is larger than the number of players actually being scored,
++	# and the winner would get extra points out of nowhere. Deriving it from the death count gives "1 more than the last to die", which is correct however many disconnect.
++	# With no disconnects both versions give exactly the same result.
 +	#
-+	# 本次**没有**动的（用户明确只选了压断层这一条）：
-+	#   - 8 人下分差翻倍（单轮上限 340 → 680）不做归一化；
-+	#   - 同帧双亡时"后被处理的那个白拿冠军"是原版行为，保留。
++	# What this **doesn't** change (the user explicitly chose only the gap flattening)
++	#   - The score spread doubling with 8 players (per-round cap 340 → 680) isn't normalized.
++	#   - With a double death in the same frame, "whoever is processed later gets first place for free" is vanilla behavior and is kept.
  	for network_id in active_players.keys():
 -		player_scores[network_id] = player_count
 -
@@ -1421,9 +1428,9 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
  	player_scores_finalized.emit(player_scores)
  
 +
-+# [MP8] 结算明细进日志：名次 / 玩家名 / 得分。
-+# 不改任何分数，纯粹是为了事后能核对——挂机测试时 agent 自己读日志就够，
-+# 不需要用户去描述"谁拿了多少"。只有服务器会走到这里（check_game_end 是服务器侧）。
++# [MP8] Log the results breakdown, placement / player name / score.
++# Doesn't change any score, it's purely so results can be checked afterward — during unattended testing the agent just reads the log itself,
++# without the user having to describe "who got how much". Only the server gets here (check_game_end is server-side).
 +func _mp8_log_scores() -> void :
 +
 +	var ranked: Array = player_scores.keys()
@@ -1435,23 +1442,28 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		var nm: String = "id%d" % nid
 +		if PlayerManager.player_presences.has(nid):
 +			nm = String(PlayerManager.player_presences[nid].network_name)
-+		parts.append("第%d名 %s %d分" % [i + 1, nm, player_scores[nid]])
++		parts.append("place %d %s %dpts" % [i + 1, nm, player_scores[nid]])
 +
-+	print("[MP8] 残骸平台结算（%d 人在场 / %d 人阵亡）：%s" % [
++	print("[MP8] Junk Platform results (%d present / %d dead): %s" % [
 +		player_count, dead_players.size(), " / ".join(parts)
 +	])
 +
  	await get_tree().create_timer(2.0).timeout
  	set_minigame_sfx_linear_volume_rpc.rpc(0.0)
  
-@@ -175,6 +1511,14 @@ func check_game_end():
+@@ -175,6 +1518,19 @@ func check_game_end():
  
  @rpc("any_peer", "call_remote", "reliable")
  func rotate_camera_rpc(_rotation: float):
 +
-+	# [MP8] B/C 模式：任意角度 + 按几何重新指认美术。
-+	# **必须在下面那条两态路之前 return** —— 那句 `= platform_visuals_flipped`
-+	# 是个两态开关，而 _mp8_apply_view 已经把正确的一套直接指认好了，再翻一次就翻错。
++	# [MP8] Vanilla lets any peer call this. Only the host sends it, and this mod made it rewire platform indicators too,
++	# so other senders and non-finite angles are ignored.
++	if not NetworkManager.mp8_sender_is_host(multiplayer) or not NetworkManager.mp8_finite(_rotation, 3600.0):
++		return
++
++	# [MP8] B/C modes — any angle + geometric re-identification of visuals.
++	# **Must return before the two-state path below** — that `= platform_visuals_flipped` line
++	# is a two-state toggle, and _mp8_apply_view has already assigned the correct set directly, so flipping again would flip it wrong.
 +	if _mp8_view_mode != MP8_VIEW_VANILLA:
 +		_mp8_apply_view(_rotation)
 +		return
@@ -1459,17 +1471,17 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
  	camera_base.rotation_degrees.y = _rotation
  	visuals_base.rotation_degrees.y = _rotation
  	for i in platforms:
-@@ -211,6 +1555,44 @@ func _on_countdown_expired():
+@@ -211,6 +1567,44 @@ func _on_countdown_expired():
  
  	state_machine.transition_to_rpc.rpc(&"Play")
  
-+	# [MP8] mp8shot：开局连拍三张。3 秒看初始站位和相机构图，
-+	# 12/25 秒看垃圾堆积、指示圈、压缩机、塌陷——那几条都要靠画面才判得出来。
++	# [MP8] mp8shot takes three shots at match start. At 3 seconds for the initial positions and camera framing,
++	# at 12/25 seconds for junk pile-up, indicator rings, compactors and collapses — all of which can only be judged from the picture.
 +	#
-+	# ⚠️ 必须走 RPC 广播：`countdown_state.expired` **只在服务器上连过**
-+	# （见 _ready 里的 `if multiplayer.is_server()`），直接在这里调只有房主会存图。
-+	# 而"按玩家单独调相机"这件事恰恰只能在**当事人那台机器**上看出来，
-+	# 只有房主的图等于没验。文件名带玩家名，各存各的不打架。
++	# ⚠️ Must go through an RPC broadcast. `countdown_state.expired` **is only connected on the server**
++	# (see `if multiplayer.is_server()` in _ready), so calling it directly here would only save images on the host.
++	# And "per-player camera tweaks" can only be seen on **the affected player's own machine**,
++	# so host-only images verify nothing. File names include the player name so each machine saves its own without clashing.
 +	mp8_shot_rpc.rpc()
 +
 +
@@ -1480,11 +1492,11 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	_mp8_shot(25.0)
 +
 +
-+# [MP8] 自截图，和猎鸭那套一样：游戏自己存 PNG，不需要任何屏幕录制权限。
-+# 文件名带玩家名，好对上"哪个平台是谁的"。
++# [MP8] Self-screenshot, same as the Duck Hunt setup. The game saves the PNG itself, no screen-recording permission needed.
++# File names include the player name, to match up "whose platform is which".
 +func _mp8_shot(delay: float) -> void :
 +
-+	if not Array(OS.get_cmdline_args()).has("mp8shot"):
++	if not NetworkManager.mp8_args().has("mp8shot"):
 +		return
 +
 +	await get_tree().create_timer(delay, false).timeout
@@ -1499,25 +1511,25 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +
 +	var img: Image = get_viewport().get_texture().get_image()
 +	if img != null:
-+		img.save_png("user://mp8_junk_t%d_%s.png" % [int(delay), who])
++		img.save_png("user://mp8_junk_t%d_%s.png" % [int(delay), NetworkManager.mp8_file_text(who)])
 +
  func _on_player_died(_network_id: int):
  
  	if active_players.has(_network_id):
-@@ -235,3 +1617,168 @@ func _on_player_fallen(last_hit_by_network_id: int):
+@@ -235,3 +1629,168 @@ func _on_player_fallen(last_hit_by_network_id: int):
  			players[last_hit_by_network_id].trigger_achievement_rpc.rpc()
  
  	pass
 +
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8-DIAG] 临时诊断实现（定位完整段删除）
++# [MP8-DIAG] Temporary diagnostic implementation (delete this whole section once the issue is pinned down)
 +# ═══════════════════════════════════════════════════════════════════════════
 +
 +func _mp8_diag_start() -> void :
 +
-+	var args := Array(OS.get_cmdline_args())
-+	# opt-in：跟侦察日志同一个规矩，发布版双击启动什么都不传 → 天然不写
++	var args := NetworkManager.mp8_args()
++	# Opt-in, same rule as the diagnostic log. A release build launched by double-click passes nothing → naturally writes nothing
 +	_mp8_diag_on = OS.has_feature("editor") or args.has("-debug-tools") or args.has("mp8diag")
 +	if not _mp8_diag_on:
 +		return
@@ -1526,12 +1538,12 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	var path: String = "user://mp8_diag_%d.log" % peer
 +	_mp8_diag_f = FileAccess.open(path, FileAccess.WRITE)
 +
-+	_mp8_diag("═══ 残骸平台诊断 peer=%d 服务器=%s ═══" % [peer, str(multiplayer.is_server())])
-+	_mp8_diag("虚空平面 y=-2.00；probe72 量到 45/135/225/315° 方位 r=14~24.5 有一层 y=-0.06")
++	_mp8_diag("═══ Junk Platform diagnostics peer=%d server=%s ═══" % [peer, str(multiplayer.is_server())])
++	_mp8_diag("void plane y=-2.00; probe72 measured a surface at y=-0.06 at bearings 45/135/225/315°, r=14~24.5")
 +
-+	# 2 秒一拍的存活快照。用运行时 Timer 而不是 _process：
-+	# 本脚本没有 _process，加一个会盖掉基类的（基类 Minigame 有没有得单独查），
-+	# Timer 没这个风险。
++	# Survival snapshot every 2 seconds. Uses a runtime Timer rather than _process.
++	# This script has no _process, and adding one would override the base class's (whether base class Minigame has one needs checking separately),
++	# while a Timer carries no such risk.
 +	_mp8_diag_timer = Timer.new()
 +	_mp8_diag_timer.wait_time = 2.0
 +	_mp8_diag_timer.autostart = true
@@ -1547,7 +1559,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	print("[MP8-DIAG] " + line)
 +	if _mp8_diag_f != null:
 +		_mp8_diag_f.store_line(line)
-+		_mp8_diag_f.flush()          # 卡死的局是被强杀的，不 flush 就什么都不剩
++		_mp8_diag_f.flush()          # a hung match gets force-killed, and without flushing nothing is left
 +
 +
 +func _mp8_diag_name(nid: int) -> String :
@@ -1556,7 +1568,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	return "id%d" % nid
 +
 +
-+# 每 2 秒一张存活快照。**y 值是关键**：站在 -0.06 那层上 = 坠落判定永远不触发。
++# A survival snapshot every 2 seconds. **The y value is the key**. Standing on the -0.06 surface = the fall check never triggers.
 +func _mp8_diag_tick() -> void :
 +
 +	if not _mp8_diag_on or finished:
@@ -1566,14 +1578,14 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	for nid in active_players.keys():
 +		var pl = active_players[nid]
 +		if not is_instance_valid(pl):
-+			parts.append("%s:引用失效" % _mp8_diag_name(nid))
++			parts.append("%s:stale reference" % _mp8_diag_name(nid))
 +			continue
 +		var gp: Vector3 = pl.global_position
 +		var r: float = Vector2(gp.x, gp.z).length()
 +		var ang: float = rad_to_deg(atan2(gp.x, gp.z))
 +		if ang < 0.0:
 +			ang += 360.0
-+		parts.append("%s y=%.2f r=%.1f 方位%.0f° active=%s onfloor=%s" % [
++		parts.append("%s y=%.2f r=%.1f bearing%.0f° active=%s onfloor=%s" % [
 +			_mp8_diag_name(nid), gp.y, r, ang, str(pl.active), str(pl.is_on_floor())
 +		])
 +
@@ -1581,34 +1593,34 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	if junk_handler != null:
 +		np = junk_handler.spawn_points.size()
 +
-+	_mp8_diag("存活 %d 人｜落点 %d 个｜%s" % [
++	_mp8_diag("alive %d | drop points %d | %s" % [
 +		active_players.size(), np, "  ||  ".join(parts)])
 +
 +
-+# 坠落触发了（fall_rpc 第一句就发这个信号）。它打了但后面没有「判死」= 判死链断在 tween。
++# The fall triggered (fall_rpc emits this signal on its first line). If this prints but no "judged dead" follows = the death chain broke in the tween.
 +func _mp8_diag_fallen(_last_hit_by: int, nid: int, who) -> void :
 +
 +	var pos: String = "?"
 +	if is_instance_valid(who):
 +		var gp: Vector3 = who.global_position
 +		pos = "(%.1f, %.2f, %.1f) r=%.1f" % [gp.x, gp.y, gp.z, Vector2(gp.x, gp.z).length()]
-+	_mp8_diag("★ 开始坠落 %s 位置=%s" % [_mp8_diag_name(nid), pos])
++	_mp8_diag("★ fall started %s position=%s" % [_mp8_diag_name(nid), pos])
 +
 +
-+# 真正判死（fall_rpc 那条 1.5 秒 tween 跑完 → kill_rpc + emit_died）
++# Actually judged dead (fall_rpc's 1.5-second tween finishes → kill_rpc + emit_died)
 +func _mp8_diag_died(nid: int) -> void :
 +
-+	_mp8_diag("☠ 判死 %s（此刻 active_players=%d）" % [
++	_mp8_diag("☠ judged dead %s (active_players=%d at this moment)" % [
 +		_mp8_diag_name(nid), active_players.size()])
 +
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] T49 兜底闸实现 —— 完整理由见上面 MP8_SWEEP_GRACE 那段
++# [MP8] T49 safety gate implementation — see the MP8_SWEEP_GRACE block above for the full reasoning
 +# ═══════════════════════════════════════════════════════════════════════════
 +
 +func _mp8_sweep_start() -> void :
 +
-+	# 销账是服务器的事（`active_players` 只有服务器填），客机不用起这个定时器
++	# Taking players off the books is the server's job (only the server fills `active_players`), so clients don't need this timer
 +	if not multiplayer.is_server():
 +		return
 +
@@ -1624,7 +1636,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +	if finished or not multiplayer.is_server():
 +		return
 +
-+	# 没在游玩中就别扫，并且把计时清干净 —— 开局前全场 active 都是 false
++	# Don't sweep when not in play, and clear the timers — before the match starts everyone's active is false
 +	if junk_handler == null or not junk_handler.active:
 +		_mp8_dead_since.clear()
 +		return
@@ -1636,7 +1648,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		var pl = active_players[nid]
 +
 +		if not is_instance_valid(pl):
-+			stale.append(nid)          # 引用都没了，不用等宽限期
++			stale.append(nid)          # the reference itself is gone, no need to wait out the grace period
 +			continue
 +
 +		if pl.active:
@@ -1658,8 +1670,8 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +			continue
 +
 +		active_players.erase(nid)
-+		# 名次按 dead_players 的先后算，销账的人也得进去，否则他不参与名次、
-+		# 而幸存者的分数是拿 dead_players.size() 推的，会一起算错
++		# Placement is computed from the order of dead_players, so players taken off the books must go in too. Otherwise they'd be left out of placement,
++		# and since survivors' scores are derived from dead_players.size(), those would be wrong too
 +		if not dead_players.has(nid):
 +			dead_players.append(nid)
 +		if junk_handler != null:
@@ -1668,7 +1680,7 @@ diff --git a/minigames/junk_platform/scripts/junk_platform.gd b/minigames/junk_p
 +		var nm: String = "id%d" % nid
 +		if PlayerManager.player_presences.has(nid):
 +			nm = String(PlayerManager.player_presences[nid].network_name)
-+		print("[MP8] 残骸平台：⚠️ 兜底销账 —— %s 已被杀但 emit_died 没到服务器，剩 %d 人" % [
++		print("[MP8] Junk Platform: ⚠️ fallback bookkeeping — %s was killed but emit_died never reached the server, %d players left" % [
 +			nm, active_players.size()
 +		])
 +

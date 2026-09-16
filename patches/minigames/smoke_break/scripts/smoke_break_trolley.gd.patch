@@ -5,31 +5,31 @@ diff --git a/minigames/smoke_break/scripts/smoke_break_trolley.gd b/minigames/sm
  
  var smoke_particle_active_index = -1
  
-+# [MP8] 哪些座位死的时候要点亮"风扇血迹"。原版是硬编码 `if seat in [1, 2]`，
-+# 新座位得按它继承到的死亡动画来判（继承 death_fan 的就算）。
++# [MP8] Which seats light up the "fan blood decals" when they die. Vanilla hardcodes `if seat in [1, 2]`,
++# while new seats are judged by the death animation they inherited (inheriting death_fan counts).
 +var _mp8_fan_seats: Array[int] = [1, 2]
 +
 +
-+# [MP8] 由小游戏在 _ready() 里调，把扩好的座位表交过来。
++# [MP8] Called by the minigame in _ready() to hand over the expanded seat tables.
 +#
-+# 为什么不让推车自己扩：它是小游戏根节点的**子节点**，`_ready()` 比根节点**先**跑
-+# （Godot 是子孙先 ready），那时候小游戏还没算出新座位。所以顺序做成显式调用，不靠猜。
++# Why the trolley doesn't expand them itself — it's a **child** of the minigame root node, so its `_ready()` runs **before** the root's
++# (Godot readies descendants first), when the minigame hasn't worked out the new seats yet. So the order is an explicit call rather than guesswork.
 +func mp8_extend_seat_arrays(new_rots: Array, seats: Array) -> void :
 +
-+	# ---- ① 左轮转角：整表换成扩好的（前 4 项与原版逐值相同）----
++	# ---- ① Revolver angles. Replace the whole table with the expanded one (the first 4 entries match vanilla value for value) ----
 +	var typed: Array[Vector3] = []
 +	for r in new_rots:
 +		typed.append(r as Vector3)
 +	rot_by_seat_index_array = typed
 +
-+	# ---- ② 血迹：给新座位各复制一组，整组平移到新座位 ----
++	# ---- ② Blood decals. Duplicate a set for each new seat and shift the whole set over to the new seat ----
 +	var made := PackedStringArray()
 +	while blood_decals_by_seat_index_array.size() < seats.size():
 +
 +		var idx: int = blood_decals_by_seat_index_array.size()
 +		var seat_pos: Vector3 = (seats[idx] as Node3D).global_position
 +
-+		# 挑空间上最近的原版座位那一组当模子
++		# Use the set of the spatially nearest vanilla seat as the template
 +		var src_i: int = 0
 +		var bd: float = INF
 +		for i in mini(4, seats.size()):
@@ -46,23 +46,23 @@ diff --git a/minigames/smoke_break/scripts/smoke_break_trolley.gd b/minigames/sm
 +		var dup: Node3D = src.duplicate()
 +		dup.name = "MP8BloodSeat%d" % idx
 +		src.get_parent().add_child(dup)
-+		# 整组平移：血迹是这组节点的**子节点**（各自有世界位置），
-+		# 挪父节点就整组跟着走，不用知道每块的偏移 —— 大厅排布那条教训。
++		# Shift the whole set. The blood decals are **children** of this set node (each with its own world position),
++		# so moving the parent moves the whole set without needing each piece's offset — the lesson from the lobby layout.
 +		dup.global_position = src.global_position + (
 +			seat_pos - (seats[src_i] as Node3D).global_position
 +		)
 +		dup.visible = false
 +		blood_decals_by_seat_index_array.append(dup)
 +
-+		# 风扇血迹跟着模子走：模子是 1/2 号座位的，新座位也算"朝风扇"
++		# The fan blood follows the template. If the template belongs to seat 1/2, the new seat also counts as "facing the fan"
 +		if src_i in [1, 2]:
 +			_mp8_fan_seats.append(idx)
 +
-+		made.append("座位%d←抄座位%d" % [idx, src_i])
++		made.append("seat %d←copied seat %d" % [idx, src_i])
 +
-+	print("[MP8] 吸烟小憩·推车：转角表 %d 项 / 血迹 %d 组（新建 %s）/ 烟雾粒子 %d 个（取模复用）/ 风扇座位 %s" % [
++	print("[MP8] Smoke Break·trolley: angle table %d entries / blood decals %d sets (new %s) / smoke particles %d (reused via modulo) / fan seats %s" % [
 +		rot_by_seat_index_array.size(), blood_decals_by_seat_index_array.size(),
-+		(" ".join(made) if made.size() > 0 else "无"),
++		(" ".join(made) if made.size() > 0 else "none"),
 +		particles_smoke.size(), str(_mp8_fan_seats)
 +	])
 +
@@ -75,9 +75,9 @@ diff --git a/minigames/smoke_break/scripts/smoke_break_trolley.gd b/minigames/sm
  
  	smoke_particle_active_index += 1
 +
-+	# [MP8] 上界校验：转角表就算没扩成，也不能让整条枪毙流程崩掉
++	# [MP8] Upper bound check. Even if the angle table didn't get expanded, the whole execution sequence must not crash
 +	if seat < 0 or seat >= rot_by_seat_index_array.size():
-+		push_warning("[MP8] 吸烟小憩：座位 %d 没有转角（表只有 %d 项），这一枪不转向" % [
++		push_warning("[MP8] Smoke Break: seat %d has no angle (the table only has %d entries), not turning for this shot" % [
 +			seat, rot_by_seat_index_array.size()
 +		])
 +		return
@@ -90,9 +90,9 @@ diff --git a/minigames/smoke_break/scripts/smoke_break_trolley.gd b/minigames/sm
  	fire_audio_player.stop()
  	fire_audio_player.play(0.0)
 -	particles_smoke[smoke_particle_active_index].emitting = true
-+	# [MP8] ⚠️ **必崩项**：原版 `particles_smoke` 只有 4 个，而 index 每开一枪 +1。
-+	# 每轮前 3 名得分、其余**全部**枪毙 → 4 人最多 4 发（正好用满，原版卡在边界上），
-+	# **8 人最多 8 发，第 5 发就越界**。取模复用 —— 粒子只是枪口烟，重复用看不出来。
++	# [MP8] ⚠️ **Guaranteed crash**. Vanilla `particles_smoke` only has 4 entries, and the index goes up by 1 per shot.
++	# Each round the top 3 score and **everyone else** gets shot → at most 4 shots with 4 players (used up exactly, vanilla sits right on the boundary),
++	# **with 8 players it's up to 8 shots, and the 5th goes out of bounds**. Reuse via modulo — the particles are just muzzle smoke, so reuse isn't noticeable.
 +	if particles_smoke.size() > 0:
 +		particles_smoke[smoke_particle_active_index % particles_smoke.size()].emitting = true
  	shaker_trolley.force_stop_shake()
@@ -105,14 +105,14 @@ diff --git a/minigames/smoke_break/scripts/smoke_break_trolley.gd b/minigames/sm
 -	blood_decals_by_seat_index_array[player_to_shoot.active_player_seat_index].visible = true
 -	if player_to_shoot.active_player_seat_index in [1, 2]:
 +
-+	# [MP8] 血迹同样做上界校验（新座位那几组是运行时复制的，万一没复制成别崩）
++	# [MP8] Upper bound check for blood decals too (the new seats' sets are duplicated at runtime, so don't crash if that failed)
 +	var si: int = player_to_shoot.active_player_seat_index
 +	if si >= 0 and si < blood_decals_by_seat_index_array.size():
 +		var bd: Node3D = blood_decals_by_seat_index_array[si]
 +		if bd != null and is_instance_valid(bd):
 +			bd.visible = true
 +
-+	# [MP8] 原版是硬编码 `if seat in [1, 2]` —— 那是"朝着风扇坐"的两个座位。
-+	# 新座位按它继承到的死亡动画归类，表在 _mp8_fan_seats 里（≤4 人时就是 [1,2]，逐值一致）。
++	# [MP8] Vanilla hardcodes `if seat in [1, 2]` — those are the two seats that "sit facing the fan".
++	# New seats are classified by the death animation they inherited, and the table is _mp8_fan_seats (with ≤4 players it's just [1,2], identical value for value).
 +	if si in _mp8_fan_seats:
  		blood_decal_fan.visible = true

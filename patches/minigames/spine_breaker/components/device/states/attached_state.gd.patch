@@ -20,14 +20,14 @@ diff --git a/minigames/spine_breaker/components/device/states/attached_state.gd 
  
  		owner.attached_to = target
  
-+		# [MP8] 让被扑的人记住"现在背着的是这一台"。
-+		# 玩家脚本里的 spine_breaker_device 是 setup_rpc 时写死的第一台，
-+		# 两台机器一上场就会错位：背着第二台的人按扔，扔的是第一台。
++		# [MP8] Make the latched player remember "this is the device I'm carrying now".
++		# spine_breaker_device in the player script is hard-set to the first device during setup_rpc,
++		# so once two devices are in play they get mixed up — whoever carries the second one presses throw and the first one gets thrown.
 +		owner.mp8_bind_rpc.rpc(target.get_path())
 +		if multiplayer.is_server():
-+			print("[MP8] 碎骨者：%d 号机扑上了 %s（引信 %s）" % [
++			print("[MP8] Spine Breaker: device %d latched onto %s (fuse %s)" % [
 +				owner.mp8_index, String(target.name),
-+				("已停，立即处决" if timed_out else "%.1f 秒" % owner.activation_timer.time_left)
++				("stopped, executing now" if timed_out else "%.1f sec" % owner.activation_timer.time_left)
 +			])
 +
  		owner.set_is_attached_rpc.rpc(true)

@@ -5,9 +5,9 @@ diff --git a/minigames/spine_breaker/components/device/states/thrown_state.gd b/
  			if not player.active:
  				continue
  
-+			# [MP8] 落地找目标时跳过"已经背着机器的人"。
-+			# 不加这条不会直接出 bug（follow_state 的 _mp8_can_take 会挡住粘附），
-+			# 但会让机器朝一个它永远粘不上的人跑过去，看起来像卡住了。
++			# [MP8] When looking for a target after landing, skip "players already carrying a device".
++			# Leaving this out doesn't cause an outright bug (follow_state's _mp8_can_take blocks the attach),
++			# but the device would run toward someone it can never stick to, which looks like it's stuck.
 +			if player.has_spine_breaker:
 +				continue
 +
@@ -29,47 +29,47 @@ diff --git a/minigames/spine_breaker/components/device/states/thrown_state.gd b/
  
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 🩸 一个人身上只能有一台机器 —— 这里是那条漏掉的守卫
++# [MP8] 🩸 Only one device per person — this is the guard that was missing
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# **2026-08-18 用户 6 人真人局报的 bug**：
-+# 「两个人同时往一个人身上丢装置会导致两个装置同时在一个人身上，
-+#   而且会触发异常的退休机制导致两个碎骨者都不动了」
++# **Bug the user reported from a 6-player match with real players on 2026-08-18**
++# "When two people throw devices at one person at the same time, both devices end up on that person at once,
++#   and it triggers the abnormal retirement logic so both Spine Breakers stop moving"
 +#
-+# ### 为什么 follow_state 那套守卫拦不住
++# ### Why the follow_state guards don't catch it
 +#
-+# T24 加互斥时只改了 `follow_state`（`_mp8_can_take` / `_mp8_can_target`）——
-+# 那条路是"机器自己追上来"。而**玩家主动扔**走的是本文件这条路，
-+# 原版这个回调**一个判断都没有**：撞上的是 SpineBreakerPlayer 就直接 Attached。
-+# 于是两个人同时把各自背上的机器扔向同一个第三人，两台都粘上去。
++# When T24 added mutual exclusion it only changed `follow_state` (`_mp8_can_take` / `_mp8_can_target`) —
++# that path is "the device chases someone down by itself". But **a player actively throwing** goes through this file's path,
++# and the vanilla callback here has **no checks at all**. If it hits a SpineBreakerPlayer it goes straight to Attached.
++# So when two people throw the devices on their backs at the same third person at once, both devices stick.
 +#
-+# ### 粘上之后为什么两台都会停
++# ### Why both devices stop once they're stuck
 +#
-+# 三级串联，缺一不可：
-+#   1. `mp8_bind_rpc` 里 `p.mp8_current_device = self` —— 后粘的那台**覆盖**前一台，
-+#      受害者身上有两台却只记得一台；
-+#   2. 两台的 activation_timer 各自到点，**对同一个人各发一次 BreakSpine**，
-+#      于是 `mp8_claim_retire()` 被同一条命调用两次 → `_mp8_kills_started` 虚增 →
-+#      退休名额**提前**发出（6 人局本该第 4 刀，可能第 3 刀就发了）；
-+#   3. 后一台进 BreakSpine 时去 `connect(target.spine_broken)`，
-+#      而前一台那次的 `break_spine_rpc` 正在跑（里面是 await 0.5 + await 0.5）——
-+#      连晚一步，信号已经发过，`_on_spine_broken` 永远不来，
-+#      这台就**卡死在 BreakSpine**（该状态的 update/update_physics 都是空的）。
-+#   结果：一台正常退休停着 + 一台卡死 = 用户看到的"两个碎骨者都不动了"。
++# It takes three chained steps, and every one of them is required.
++#   1. In `mp8_bind_rpc`, `p.mp8_current_device = self` — the later device **overwrites** the earlier one,
++#      so the victim has two devices on them but only remembers one.
++#   2. Each device's activation_timer runs out on its own, **each sending a BreakSpine at the same person**,
++#      so `mp8_claim_retire()` is called twice for the same life → `_mp8_kills_started` is inflated →
++#      the retirement slot is handed out **early** (in a 6-player match it should be the 4th kill, but it may go out on the 3rd).
++#   3. When the later device enters BreakSpine it does `connect(target.spine_broken)`,
++#      while the earlier device's `break_spine_rpc` is still running (it does await 0.5 + await 0.5) —
++#      connecting a step too late means the signal has already fired, `_on_spine_broken` never arrives,
++#      and this device **hangs in BreakSpine** (that state's update/update_physics are both empty).
++#   End result — one device retired and parked normally + one device hung = what the user saw as "both Spine Breakers stopped moving".
 +#
-+# ### 判据
++# ### Criteria
 +#
-+# 与 `follow_state._mp8_can_take` **保持同一套**（那边是接触判定，这边是投掷命中，
-+# 语义相同就该用同一条判据）：不是玩家 / 引用失效 / 已经死了 / 已经背着机器 —— 都不粘。
++# Uses **the same rule** as `follow_state._mp8_can_take` (that one is a contact check and this one is a throw hit,
++# and the same meaning should use the same rule). Not a player / stale reference / already dead / already carrying a device — none of these stick.
 +#
-+# ⚠️ 粘不上时**不要**让它停在空中：直接 return 会让扔出去的机器僵在原地，比原 bug 更难看。所以仍然转 Follow。
++# ⚠️ When it can't stick, **don't** leave it hanging in the air. A plain return would freeze the thrown device in place, which looks worse than the original bug. So it still switches to Follow.
 +#
-+# 🩸 **2026-08-24 更正：这里原本写着「他背上的机器迟早会被扔掉或杀完复位」，那句是错的。**
-+# Follow 进去之后根本没有出口：这个人 `_mp8_can_take()` 恒为 false，
-+# 既扑不上也选不中，而换目标只在「附近还有别人」时才发生 ——
-+# 旁边没人就永久绕着他转（用户 2026-08-24 实机报的）。
-+# 现在由 `follow_state._mp8_check_dead_end()` 兽尾：进去第一帧就会发现
-+# 目标不可扑，向宿主要新目标。**完整分析写在那个常量上面。**
++# 🩸 **2026-08-24 correction — this used to say "the device on his back will sooner or later be thrown off or reset after its kill", and that was wrong.**
++# Once in Follow there is no way out at all. For this person `_mp8_can_take()` is always false,
++# so the device can neither latch onto nor select them, and switching targets only happens when "someone else is nearby" —
++# with nobody around it circles him forever (reported by the user from real gameplay on 2026-08-24).
++# This is now handled by `follow_state._mp8_check_dead_end()`. On the very first frame it notices
++# the target can't be latched onto and asks the host for a new target. **The full analysis is written above that constant.**
 +func _mp8_can_attach(p) -> bool :
 +
 +	if p == null or not is_instance_valid(p):
@@ -90,14 +90,14 @@ diff --git a/minigames/spine_breaker/components/device/states/thrown_state.gd b/
  	if owner.thrown_collision_exceptions.has(body):
  		return
  
-+	# [MP8] 见上面那一大段：原版这里直接 Attached，没有任何判断。
++	# [MP8] See the big block above. Vanilla goes straight to Attached here with no checks at all.
 +	if not _mp8_can_attach(body):
 +		if multiplayer.is_server():
-+			var why: String = "已死" if not body.active else "已经背着机器"
-+			print("[MP8] 碎骨者：%d 号机撞到 %s 但不粘 —— %s（改为追击）" % [
++			var why: String = "dead" if not body.active else "already carrying a device"
++			print("[MP8] Spine Breaker: device %d hit %s but won't stick — %s (chasing instead)" % [
 +				owner.mp8_index, String(body.name), why
 +			])
-+		# 不粘，但也不能僵在空中 —— 改成追他
++		# Won't stick, but it can't freeze in the air either — chase him instead
 +		state_machine.transition_to(&"Follow", {
 +			"target": body,
 +		})

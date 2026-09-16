@@ -6,7 +6,7 @@ diff --git a/scenes/lobby/scripts/lobby_scene.gd b/scenes/lobby/scripts/lobby_sc
  
  var player_order_by_seat: Dictionary[int, int] = {
 -	0: -1, 1: -1, 2: -1, 3: -1
-+	0: -1, 1: -1, 2: -1, 3: -1, 4: -1, 5: -1, 6: -1, 7: -1  # [MP8] 原为 4 席
++	0: -1, 1: -1, 2: -1, 3: -1, 4: -1, 5: -1, 6: -1, 7: -1  # [MP8] Originally 4 seats
  }
  
  var loading: bool = true
@@ -23,8 +23,8 @@ diff --git a/scenes/lobby/scripts/lobby_scene.gd b/scenes/lobby/scripts/lobby_sc
  	NetworkManager.lobby_joined.connect(_on_lobby_joined)
  	NetworkManager.join_allowed.connect(_on_join_allowed)
  	NetworkManager.join_refused.connect(_on_join_refused)
-+	# [MP8] T53：④「对方没装 mod」那一种，客机跑的是原版代码、我们改不到，
-+	# 只能由房主这边说出来。发到原版自带的大厅消息条上。
++	# [MP8] T53 - case ④, "the other side doesn't have the mod". That client runs vanilla code we can't change,
++	# so only the host side can say it. It gets posted to the vanilla lobby message bar.
 +	NetworkManager.mp8_join_blocked.connect(_mp8_on_join_blocked)
  
  func update_player_list():
@@ -33,7 +33,7 @@ diff --git a/scenes/lobby/scripts/lobby_scene.gd b/scenes/lobby/scripts/lobby_sc
  			if GameManager.is_using_controller():
  				reconnect_handler.cancel_button.grab_focus()
  
-+# [MP8] T53：有人被版本挡在门外，告诉房主是为什么、该让对方做什么。
++# [MP8] T53 - someone was kept out by the version check. Tell the host why and what the other player should do.
 +func _mp8_on_join_blocked(text: String) -> void :
 +	if lobby_handler != null:
 +		lobby_handler.send_lobby_message(text)
@@ -48,8 +48,8 @@ diff --git a/scenes/lobby/scripts/lobby_scene.gd b/scenes/lobby/scripts/lobby_sc
  			message = tr("LOC_ROOM_UNKNOWN")
  		NetworkManager.RefuseReason.VersionMismatch:
 -			message = tr("LOC_TAG_VERSION_MISMATCH")
-+			# [MP8] T53：原版这句对四种情形一视同仁（「版本与该房间不符」），
-+			# 玩家看完不知道该更新、该让房主更新、还是该卸载。换成分情形的说法。
++			# [MP8] T53 - vanilla uses the same line for all four cases ("version does not match this lobby"),
++			# so players can't tell whether to update, get the host to update, or uninstall. Swap in a per-case message.
 +			message = NetworkManager.mp8_mismatch_text()
  		NetworkManager.RefuseReason.SessionEnded:
  			message = tr("LOC_ROOM_DISBANDED")

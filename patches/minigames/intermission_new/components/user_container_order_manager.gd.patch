@@ -5,24 +5,24 @@ diff --git a/minigames/intermission_new/components/user_container_order_manager.
  @export var intermission_score: Intermission_ScoreScreen
  @export var user_container_order_worker_instance: PackedScene
  
-+# [MP8] 原版这里藏着一个 bug，一列的时候看不出来，分成两列立刻显形：
++# [MP8] Vanilla hides a bug here. It can't be seen with one column, but it shows up right away once split into two columns.
 +#
-+#   pos1 = Vector3(container2.transform.origin.x,                       ← 对方**当前**的实际坐标
-+#                  rank_y_positions[container2.user_rank_value - 1],    ← 名次表推出来的
++#   pos1 = Vector3(container2.transform.origin.x,                       ← the other row's **current** actual position
++#                  rank_y_positions[container2.user_rank_value - 1],    ← derived from the placement table
 +#                  container2.transform.origin.z)
 +#
-+# y 是从名次表推的，x 却是读对方的实时位置。而
-+# `check_to_switch_places_with_upstairs_container()` 每帧每条都在判，
-+# 完全可能在**上一个 tween 还在飞**的时候再触发一次换位——
-+# 这时读到的 x 是个中间值，算出来的目标位置就是错的。
++# y is derived from the placement table, but x reads the other row's live position. And
++# `check_to_switch_places_with_upstairs_container()` checks every row every frame,
++# so a swap can easily trigger again **while the previous tween is still in flight** —
++# at that point the x it reads is an in-between value, and the computed target position is wrong.
 +#
-+# 一列时所有条的 x 恒定，读到中间值也还是那个值，所以永远不出错；
-+# 分成两列之后 x 变成有意义的量，实测：左列少了两条、名次 3 跑到右列去了。
++# With one column every row's x is constant, so even a mid-tween read gives the same value and it never goes wrong.
++# With two columns x becomes meaningful. In practice the left column ended up two rows short and placement 3 ran off into the right column.
 +#
-+# 改法：x 和 y 一样**全部从名次表推**，不读对方的实时坐标。
-+# 表由 Intermission_ScoreScreen 维护（`rank_y_positions` 原版就有，
-+# `mp8_rank_x_positions` 是 8 人分列时新加的）。一列时 x 表里全是同一个值，
-+# 行为与原版完全一致。
++# The fix is to derive x **entirely from the placement table** as well, just like y, instead of reading the other row's live position.
++# The tables are maintained by Intermission_ScoreScreen (`rank_y_positions` exists in vanilla,
++# `mp8_rank_x_positions` was added for the 8-player column split). With one column the x table holds the same value throughout,
++# so behavior is exactly the same as vanilla.
  func switch_places(container1: Intermission_UserContainer, container2: Intermission_UserContainer):
 -	var pos_to_move_container1_to = Vector3(
 -		container2.transform.origin.x, 
@@ -38,7 +38,7 @@ diff --git a/minigames/intermission_new/components/user_container_order_manager.
 +	var rank_container1 = container1.user_rank_value
 +	var rank_container2 = container2.user_rank_value
 +
-+	# 两条互换名次，各自搬到"新名次对应的槽位"
++	# The two rows swap placements, and each moves to "the slot for its new placement"
 +	var pos_to_move_container1_to = _mp8_slot_position(container1, rank_container2)
 +	var pos_to_move_container2_to = _mp8_slot_position(container2, rank_container1)
 +
@@ -51,8 +51,8 @@ diff --git a/minigames/intermission_new/components/user_container_order_manager.
  	container2.set_user_rank_label(rank_container1)
 +
 +
-+# [MP8] 名次（1 起）对应的槽位坐标。表里查不到就退回这条当前的坐标（等于不动）。
-+# x 表用 Object.get() 取：万一哪天计分板脚本没打补丁，也只退化成原版行为，不会报错。
++# [MP8] Slot position for a placement (1-based). If the table has no entry, fall back to this row's current position (i.e. no move).
++# The x table is read with Object.get(), so if the scoreboard script is ever left unpatched this only degrades to vanilla behavior instead of erroring.
 +func _mp8_slot_position(container: Intermission_UserContainer, rank: int) -> Vector3:
 +
 +	var pos: Vector3 = container.transform.origin

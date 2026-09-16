@@ -8,23 +8,23 @@ diff --git a/minigames/intermission_new/components/intermission_user_container_2
 +	_mp8_apply_bold()
 +
 +
-+# [MP8] 名字上限与字重。
++# [MP8] Name length limit and font weight.
 +#
-+# 原版把名字砍到 8 个字符再补 "-"（9 个字符以上就砍），Steam 名字基本要被砍掉大半。
-+# 加粗用 FontVariation.variation_embolden：不需要另配一套粗体字库文件，
-+# 对任何字体都能合成加粗；Terminal F4 这种细笔画字体缩小之后尤其需要。
++# Vanilla cuts names to 8 characters and appends "-" (anything over 9 characters gets cut), so most Steam names lose more than half.
++# Bolding uses FontVariation.variation_embolden. It needs no separate bold font file
++# and can synthesize bold for any font. Thin-stroke fonts like Terminal F4 especially need it once scaled down.
 +#
-+# ⚠️ 加粗会让字变宽，和"名字更长"抢的是同一份横向空间，一起调必须看图确认。
++# ⚠️ Bolding makes text wider and competes for the same horizontal space as "longer names", so when tuning both, check the result visually.
 +#
-+# 这段在 3D 那个 intermission_user_container.gd 里有一份**一模一样的**。
-+# 不抽公共文件是因为：新加 .gd 就要新注册 class_name，而 class_name 表在
-+# project.binary 里，得连项目设置一起打补丁，风险远大于抄这二十行。
-+const MP8_NAME_MAX: int = 7   # 用户定案 2026-08-15（原版 9，试过 20）
-+const MP8_BOLD: float = 0.12  # 0.3 实测太肥，数字的内孔糊死（见 HANDOFF T16）
++# There is an **identical** copy of this block in the 3D intermission_user_container.gd.
++# It isn't pulled into a shared file because a new .gd means registering a new class_name, and the class_name table lives in
++# project.binary, so the project settings would need patching too. That is far riskier than copying these twenty lines.
++const MP8_NAME_MAX: int = 7   # User's final call 2026-08-15 (vanilla 9, tried 20)
++const MP8_BOLD: float = 0.12  # 0.3 was too heavy in testing and the holes inside the digits filled in (see HANDOFF T16)
 +
 +
 +static func _mp8_arg_int(prefix: String, fallback: int) -> int:
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var t: String = String(a)
 +		if t.begins_with(prefix):
 +			return int(t.substr(prefix.length()))
@@ -32,7 +32,7 @@ diff --git a/minigames/intermission_new/components/intermission_user_container_2
 +
 +
 +static func _mp8_arg_float(prefix: String, fallback: float) -> float:
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var t: String = String(a)
 +		if t.begins_with(prefix):
 +			return float(t.substr(prefix.length()))
@@ -73,7 +73,7 @@ diff --git a/minigames/intermission_new/components/intermission_user_container_2
 -	if _name.length() > 9:
 -		formatted_name = _name.left(8)
 -		formatted_name += "-"
-+	var formatted_name = _mp8_format_name(_name)  # [MP8] 原版砍到 8 字符
++	var formatted_name = _mp8_format_name(_name)  # [MP8] Vanilla cut names to 8 characters
  
  	label_score.text = "%04d" % _score
  	label_name.text = formatted_name

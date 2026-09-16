@@ -43,7 +43,7 @@ tools\gdre\gdre_tools.exe --headless --recover="<游戏目录>\Machine Party.pck
 powershell -ExecutionPolicy Bypass -File tools\apply_patches.ps1
 ```
 
-51 个全部成功才算过。有失败的话脚本会告诉你是「游戏版本不对」还是「gdre 版本不对」。
+54 个全部成功才算过。有失败的话脚本会告诉你是「游戏版本不对」还是「gdre 版本不对」。
 
 ### 3. 编译成字节码
 
@@ -138,7 +138,7 @@ powershell -ExecutionPolicy Bypass -File tools\build.ps1
 
 **`build.ps1` 说「patch\ 下有同名脚本」**
 gdre 的 `--output` 只认目录、不保留层级，两个不同目录下的同名 `.gd` 会互相覆盖。
-正常情况下不会遇到（现有 51 个文件基名互不冲突）；你自己加文件时才可能撞上。
+正常情况下不会遇到（现有 54 个文件基名互不冲突）；你自己加文件时才可能撞上。
 
 **`build_mpml_mod.ps1` 说「缺少：…godot…exe」**
 找不到 Godot。用 `-Godot "<你的 godot.exe>"` 指过去，或先设 `$env:GODOT`。

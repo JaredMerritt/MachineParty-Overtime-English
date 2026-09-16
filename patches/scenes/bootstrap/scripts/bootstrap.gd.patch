@@ -6,62 +6,63 @@ diff --git a/scenes/bootstrap/scripts/bootstrap.gd b/scenes/bootstrap/scripts/bo
  		return
  
 -	if OS.has_feature("editor") and Globals.debug:
-+	# [MP8] 去掉 editor 限制，使 -debug-tools 在零售版也能进调试大厅
-+	if Globals.debug:
++	# [MP8] The debug lobby stays editor-only, as in vanilla, except in dev builds of this mod (MP8_DEV_TOOLS)
++	if (OS.has_feature("editor") or NetworkManager.MP8_DEV_TOOLS) and Globals.debug:
  
-+		print("[MP8] bootstrap -> 调试大厅 ", development_scene)
++		print("[MP8] bootstrap -> debug lobby ", development_scene)
  		get_tree().call_deferred("change_scene_to_file", development_scene)
  	else:
-+		print("[MP8] bootstrap -> 正常主菜单 ", release_scene)
++		print("[MP8] bootstrap -> normal main menu ", release_scene)
  		get_tree().call_deferred("change_scene_to_file", release_scene)
  
  func check_debug_tools_launch(command_line_arguments):
-@@ -36,8 +39,49 @@ func check_debug_tools_launch(command_line_arguments):
+@@ -36,8 +39,50 @@ func check_debug_tools_launch(command_line_arguments):
  	for arg in command_line_arguments:
  		if arg == "-debug-tools":
  			Globals.allow_singleplayer = true
-+			Globals.debug = true  # [MP8] 新增：触发上面的调试大厅路由
++			if NetworkManager.MP8_DEV_TOOLS:
++				Globals.debug = true  # [MP8] Dev builds only. Triggers the debug lobby routing above
  			Globals.enable_debug_tools()
  
-+		# [MP8] 自动化测试快进开关。
++		# [MP8] Fast-forward switches for automated testing.
 +		#
-+		# 铁律：**只允许跳小游戏之外的过场，绝不碰小游戏内部的时序。**
-+		# 下面两项都发生在小游戏开始之前，安全：
-+		#   skipping_intro_cutscene → 整局开场动画
-+		#   debug_instant_start     → 抽签环节的过场动画（intermission_cutscene_intro）
++		# Iron rule - **only skip cutscenes outside minigames, never touch the timing inside a minigame.**
++		# Both items below happen before the minigame starts, so they are safe.
++		#   skipping_intro_cutscene → the opening animation of the match
++		#   debug_instant_start     → the cutscene of the minigame draw (intermission_cutscene_intro)
 +		#
-+		# ⚠️ 以下两项都试过、都翻车了（2026-08-14），别再加回来：
++		# ⚠️ The two items below were both tried and both backfired (2026-08-14). Don't add them back.
 +		#
-+		# ① debug_skip_intermission —— 服务器跳过抽签直接 load_minigame()，
-+		#    客户端还没建好节点，RPC 先到被整条丢弃。
-+		#    实测 recv_nodes 未授权报错 352 条（关掉后 0 条）。
++		# ① debug_skip_intermission — the server skips the draw and goes straight to load_minigame()
++		#    before clients have built their nodes, so RPCs that arrive first are dropped entirely.
++		#    Tested in practice it caused 352 recv_nodes unauthorized errors (0 with it off).
 +		#
-+		# ② debug_skip_brief —— 跳掉赛前说明和倒计时，把 start_pattern() 提前。
-+		#    disco_dodge 的每块砖在 set_data_rpc() 里有个"7 秒后随机换显示符号
-+		#    但不更新 symbol_index"的定时器（原版自带的显示/索引双状态隐患）。
-+		#    正常流程里说明+倒计时远超 7 秒，这批定时器早就跑完；跳掉之后
-+		#    start_pattern() 先把符号设对，7 秒定时器随后才炸、把显示改成随机符号，
-+		#    于是显示与判定脱钩：**该塌的不塌，不该塌的反而塌**。
-+		#    这个症状极像"8 人把小游戏玩坏了"，实际跟人数毫无关系。
-+		if arg == "mp8fast":
++		# ② debug_skip_brief — skips the pre-game briefing and countdown, moving start_pattern() earlier.
++		#    Every disco_dodge tile has a timer in set_data_rpc() that "after 7 seconds swaps the displayed symbol at random
++		#    without updating symbol_index" (a display/index dual-state hazard that ships with vanilla).
++		#    In the normal flow the briefing + countdown lasts far longer than 7 seconds, so those timers are long done. With it skipped,
++		#    start_pattern() sets the symbols correctly first, then the 7-second timers fire and change the display to random symbols,
++		#    so the display and the actual logic come apart - **tiles that should collapse don't, and tiles that shouldn't collapse do**.
++		#    This symptom looks a lot like "8 players broke the minigame", but it has nothing to do with player count.
++		if NetworkManager.MP8_DEV_TOOLS and arg == "mp8fast":
 +			Globals.debug_instant_start = true
 +			Globals.skipping_intro_cutscene = true
-+			print("[MP8] mp8fast：只跳小游戏之外的过场（不碰局内时序）")
++			print("[MP8] mp8fast: only skipping cutscenes outside minigames (in-match timing untouched)")
 +
-+		# [MP8] 只跳开场动画，**一点时序都不碰**（`play.ps1 -Clean` 用这个）。
++		# [MP8] Skip only the opening animation and **touch no timing at all** (`play.ps1 -Clean` uses this).
 +		#
-+		# `mp8fast` 其实绑了两样东西，可以拆开：
-+		#   `skipping_intro_cutscene` → 跳整局开场动画。这是**游戏自带的正常选项**，
-+		#       大厅里就有"跳过开场"的按钮（`lobby_scene.gd:331`），不是调试 hack，真人也常关掉。
-+		#   `debug_instant_start` → 还会跳抽签过场里的 `set_intermission_viewport_screen(true)`
-+		#       和 1 秒等待，**压缩了局内前置时序**（坑第 20 条：实测一局多出
-+		#       320 条 recv_nodes 未授权报错）。
++		# `mp8fast` actually bundles two things, and they can be split apart.
++		#   `skipping_intro_cutscene` → skips the opening animation of the match. This is a **normal option built into the game**,
++		#       the lobby has a "skip intro" button for it (`lobby_scene.gd:331`). It is not a debug hack, and real players often turn it off too.
++		#   `debug_instant_start` → also skips `set_intermission_viewport_screen(true)` in the draw cutscene
++		#       and a 1-second wait, **compressing the in-match lead-up timing** (pitfall #20 - tested in practice, one match produced
++		#       320 extra recv_nodes unauthorized errors).
 +		#
-+		# 判断"好不好玩 / 正不正常"时只想要前者：既不用每局看一遍开场动画，
-+		# 又不至于让快进开关造出假 bug。
-+		if arg == "mp8skipintro":
++		# When judging "is it fun / is it behaving normally" we only want the former. We skip watching the opening animation every match,
++		# without the fast-forward switch creating fake bugs.
++		if NetworkManager.MP8_DEV_TOOLS and arg == "mp8skipintro":
 +			Globals.skipping_intro_cutscene = true
-+			print("[MP8] mp8skipintro：跳开场动画，局内时序与真人一致")
++			print("[MP8] mp8skipintro: skipping opening animation, in-match timing same as real players")
 +
  func check_game_invite_launch(command_line_arguments):
  	var join_lobby = false

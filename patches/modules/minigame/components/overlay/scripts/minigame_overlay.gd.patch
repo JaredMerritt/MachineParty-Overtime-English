@@ -5,21 +5,21 @@ diff --git a/modules/minigame/components/overlay/scripts/minigame_overlay.gd b/m
  
  	round_label.text = tr("LOC_IM_ROUND") % [_round, _total]
  
-+# [MP8] ===== 倒计时的自定义（默认全空，不影响其它 14 个小游戏）=====
++# [MP8] ===== Countdown customization (all empty by default, no effect on the other 14 minigames) =====
 +#
-+# 这个 overlay 是**所有小游戏共用**的，所以这里只加"字段为空就什么都不做"的开关，
-+# 由小游戏自己填。目前只有猎鸭在用（见 duck_hunt.gd 的 _mp8_setup_countdown）。
++# This overlay is **shared by all minigames**, so it only adds switches that "do nothing when the field is empty",
++# and each minigame fills them in itself. Only Duck Hunt uses them right now (see _mp8_setup_countdown in duck_hunt.gd).
 +#
-+# 关键前提：倒计时文字是**每台机器各自渲染**的——服务器只广播 "3"/"2"/"1"/"GO!"
-+# 这几个 token（见 Minigame._on_countdown_tick），所以同一时刻可以让鸭子看到一句话、
-+# 猎人看到另一句话，不需要额外的 RPC。
-+var mp8_go_text: String = ""        # 非空则替换 "GO!" 的文字（红色、大一号、剧烈抖动）
-+var mp8_one_text: String = ""       # 非空则**整个替换掉倒计时的"1"**（红色），如"猎人已大幅增强"
-+var mp8_shake_on_go: bool = false   # GO 那一下抖动
++# Key premise - the countdown text is **rendered separately on each machine**. The server only broadcasts the "3"/"2"/"1"/"GO!"
++# tokens (see Minigame._on_countdown_tick), so at the same moment the ducks can see one line and
++# the hunters another, with no extra RPC needed.
++var mp8_go_text: String = ""        # If non-empty, replaces the "GO!" text (red, one size larger, violent shake)
++var mp8_one_text: String = ""       # If non-empty, **fully replaces the countdown "1"** (red), e.g. "Hunters heavily buffed"
++var mp8_shake_on_go: bool = false   # Shake on the GO beat
 +
 +const MP8_RED: Color = Color(1.0, 0.18, 0.18)
-+const MP8_GO_FONT_SCALE: float = 1.18   # "大一号"（用户 2026-08-15 从大两号改回大一号）
-+const MP8_SHAKE_AMPLITUDE: float = 34.0 # 抖动幅度（像素），越大越剧烈
++const MP8_GO_FONT_SCALE: float = 1.18   # "One size larger" (user changed it back from two sizes larger on 2026-08-15)
++const MP8_SHAKE_AMPLITUDE: float = 34.0 # Shake amplitude in pixels. Bigger means more violent
 +const MP8_SHAKE_STEPS: int = 16
 +
 +var _mp8_label_base_color: Color = Color.WHITE
@@ -31,7 +31,7 @@ diff --git a/modules/minigame/components/overlay/scripts/minigame_overlay.gd b/m
 +
  func set_countdown(text: String, _with_fade: bool = true, _fade_time: float = 0.5):
  	var is_valid_string = false
-+	var mp8_token: String = text  # [MP8] 记下原始 token，替换文字之后就认不出来了
++	var mp8_token: String = text  # [MP8] Remember the original token, since it can't be recognized once the text is replaced
  	match text:
  		"3":
  			is_valid_string = true
@@ -40,7 +40,7 @@ diff --git a/modules/minigame/components/overlay/scripts/minigame_overlay.gd b/m
  			pass
  	if is_valid_string:
 -		countdown_label.text = tr(text)
-+		# [MP8] "GO!" 换成小游戏指定的口号；"1" 整个换成提示语（如"猎人已大幅增强"）
++		# [MP8] Swap "GO!" for the slogan the minigame chose, and replace "1" entirely with a hint (e.g. "Hunters heavily buffed")
 +		if mp8_token == "GO!" and mp8_go_text != "":
 +			countdown_label.text = mp8_go_text
 +		elif mp8_token == "1" and mp8_one_text != "":
@@ -60,16 +60,16 @@ diff --git a/modules/minigame/components/overlay/scripts/minigame_overlay.gd b/m
 +		_mp8_shake_countdown()
 +
 +
-+# [MP8] 倒计时的配色与字号。
-+#   token "1"   ：只有 mp8_one_text 非空（=独狼回合）才变成红色大字的那句话，
-+#                 否则保持原版的白色 "1"。
-+#   token "GO!" ：口号一律红色 + 大一号。
-+#   其余（3/2）：恢复原版颜色和字号。
++# [MP8] Countdown colors and font size.
++#   token "1"   → only when mp8_one_text is non-empty (= lone hunter round) does it become that line in big red text,
++#                 otherwise it stays the vanilla white "1".
++#   token "GO!" → the slogan is always red + one size larger.
++#   Everything else (3/2) → restore the vanilla color and font size.
 +func _mp8_apply_countdown_style(token: String) -> void :
 +
-+	# ⚠️ 总开关：**只有主动填过 MP8 字段的小游戏才走下面的代码**（目前只有猎鸭）。
-+	# 其余 14 个小游戏在这里直接返回，连一次 add_theme_color_override 都不会执行，
-+	# 行为和原版逐字节一致。（用户 2026-08-15：只改猎鸭，其余不动）
++	# ⚠️ Master switch - **only minigames that actively filled in the MP8 fields run the code below** (currently only Duck Hunt).
++	# The other 14 minigames return right here without running a single add_theme_color_override,
++	# so they behave byte-for-byte like vanilla. (User, 2026-08-15 - change only Duck Hunt, leave the rest alone)
 +	if not (mp8_shake_on_go or mp8_go_text != "" or mp8_one_text != ""):
 +		return
 +
@@ -89,15 +89,15 @@ diff --git a/modules/minigame/components/overlay/scripts/minigame_overlay.gd b/m
 +		"font_color", MP8_RED if red else _mp8_label_base_color
 +	)
 +
-+	# 只有 GO 的口号放大；被替换掉的 "1"（那句提示）保持原字号，否则一行塞不下
++	# Only the GO slogan gets enlarged. The replaced "1" (that hint) keeps its original size, otherwise it won't fit on one line
 +	var size: int = _mp8_label_base_size
 +	if token == "GO!" and mp8_go_text != "":
 +		size = int(_mp8_label_base_size * MP8_GO_FONT_SCALE)
 +	countdown_label.add_theme_font_size_override("font_size", size)
 +
 +
-+# [MP8] GO 的时候抖两下。抖的是 position，收尾一定要摆回原位，
-+# 否则下一轮倒计时会从歪掉的位置开始。
++# [MP8] Shake a couple of times on GO. It shakes the position, so it must always snap back to where it was at the end,
++# otherwise the next countdown starts from the knocked-askew position.
 +func _mp8_shake_countdown() -> void :
 +
 +	if countdown_label == null:

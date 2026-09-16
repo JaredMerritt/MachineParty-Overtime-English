@@ -5,7 +5,7 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
  
  func _ready() -> void :
  
-+	# [MP8] 往 ESC 菜单里插「重开本轮」按钮（见文件末尾那一节）
++	# [MP8] Insert a "Restart this round" button into the ESC menu (see the section at the end of the file)
 +	_mp8_vote_button_attach.call_deferred()
 +
  	Globals.all_minigames_finished = false
@@ -15,7 +15,7 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
  
  func _process(delta: float) -> void :
  
-+	_mp8_vote_tick(delta)   # [MP8] 重开投票的自动确认倒计时
++	_mp8_vote_tick(delta)   # [MP8] Auto-confirm countdown for the restart vote
 +
  
  	if trailer_tools_enabled:
@@ -24,8 +24,8 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
  
  func _exit_tree() -> void :
  
-+	# [MP8] PauseMenu 是 autoload、跨场景常驻 —— 不摘掉的话回主菜单后
-+	# ESC 里会残留一颗指向已销毁 Game 的死按钮。
++	# [MP8] PauseMenu is an autoload that persists across scenes — if it isn't removed, after returning to the main menu
++	# a dead button pointing at the destroyed Game would linger in the ESC menu.
 +	_mp8_vote_button_detach()
 +
  	GameManager.game_finished.emit()
@@ -35,16 +35,16 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
  
  	session_minigame_list = minigames_shuffled
  
-+	# [MP8] 自动化测试开关：命令行 mp8game=<编号> 时，把整张歌单全填成同一个小游戏。
-+	# 之所以是"填满"而不是"只留一个"，是为了完全不碰抽签器的逻辑——
-+	# 它爱抽哪个下标就抽哪个，抽到的都是指定的这个，行为可复现。
-+	# 编号 = Globals.MinigameIdentifier 的顺序：0=ChiselGauntlet 1=ExplodingCollarRace
++	# [MP8] Automated test switch. With mp8game=<number> on the command line, fill the entire playlist with the same minigame.
++	# The reason it "fills it up" instead of "keeping only one" is to leave the picker's logic completely untouched —
++	# whichever index it picks, it gets the specified minigame, so the behavior is reproducible.
++	# Numbers follow the order of Globals.MinigameIdentifier - 0=ChiselGauntlet 1=ExplodingCollarRace
 +	# 2=EscalatorPit 3=ManufactureGun 4=SmokeBreak 5=DiscoDodge 6=ShapeCutter
 +	# 7=KnifeAtTheOffice 8=ScavangerChairs 9=TrainRace 10=DuckHunt 11=GreenPea
 +	# 12=DvdRoomba 13=JunkPlatform 14=SpineBreaker 15=MemorizePath 16=ForkliftCertified
 +	# 17=BurnRecycle 18=CutsceneTest 19=CutsceneGame02
 +	var mp8_forced: int = -1
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var s: String = String(a)
 +		if s.begins_with("mp8game="):
 +			mp8_forced = int(s.substr(8))
@@ -56,91 +56,92 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +
 +		session_minigame_rounds[mp8_forced] = max(session_minigame_rounds.get(mp8_forced, 1), 1)
 +
-+		print("[MP8] 强制小游戏 = %s（歌单 %d 项全填同一个）" % [
++		print("[MP8] Forced minigame = %s (all %d playlist entries filled with it)" % [
 +			Globals.MinigameIdentifier.keys()[mp8_forced], session_minigame_list.size()
 +		])
 +
  
  func check_player_game_state():
  
-@@ -448,6 +482,12 @@ func load_minigame(minigame_identifier: Globals.MinigameIdentifier, _is_round: b
+@@ -448,6 +482,13 @@ func load_minigame(minigame_identifier: Globals.MinigameIdentifier, _is_round: b
  		DecalManager.clear_rpc.rpc()
  		PropManager.clear_rpc.rpc()
  
-+		# [MP8] 重开投票用：本轮开始的分数快照 + 清掉上一轮的票。见文件末尾那一段。
-+		# 拍在这里正好是「本轮开始」—— 上一轮的分数在 update_scores() 里已经入账，
-+		# 之后才轮到 load_minigame（见 minigame_playing_state.gd 的 _on_minigame_finished）。
++		# [MP8] For the restart vote - snapshot the scores at round start + clear the previous round's votes. See the section at the end of the file.
++		# Taking it here is exactly "round start" — the previous round's scores were already booked in update_scores(),
++		# and only after that does load_minigame run (see _on_minigame_finished in minigame_playing_state.gd).
 +		_mp8_round_score_snapshot = round_score_by_network_id.duplicate(true)
 +		_mp8_vote_clear()
++		_mp8_vote_round_open = true
 +
  	if minigame != null:
  
  		minigame.minigame_loaded.disconnect(_on_minigame_loaded)
-@@ -456,8 +496,20 @@ func load_minigame(minigame_identifier: Globals.MinigameIdentifier, _is_round: b
+@@ -456,8 +497,20 @@ func load_minigame(minigame_identifier: Globals.MinigameIdentifier, _is_round: b
  		minigame.cleanup_rpc.rpc()
  		await get_tree().create_timer(1.0).timeout
  
-+	# [MP8] 崩溃面包屑。硬崩（0xc0000005）会丢掉缓冲区里没刷出去的 stdout，
-+	# 所以 print() 的日志不可信——必须每写一条就关文件，强制落盘。
-+	# 落点：user://mp8_trace.txt，即
++	# [MP8] Crash breadcrumbs. A hard crash (0xc0000005) loses any stdout still sitting in the buffer,
++	# so print() logs can't be trusted — the file must be closed after every write to force it to disk.
++	# Output goes to user://mp8_trace.txt, which is
 +	# %APPDATA%\Godot\app_userdata\Machine Party\mp8_trace.txt
-+	_mp8_trace("load_minigame 开始 id=%d 路径=%s" % [
-+		minigame_identifier, str(Globals.MinigamePaths.get(minigame_identifier, "<无此键>"))
++	_mp8_trace("load_minigame start id=%d path=%s" % [
++		minigame_identifier, str(Globals.MinigamePaths.get(minigame_identifier, "<no such key>"))
 +	])
 +
  	var minigame_scene: PackedScene = load(Globals.MinigamePaths[minigame_identifier])
-+	_mp8_trace("场景 load 完成 null=%s" % str(minigame_scene == null))
++	_mp8_trace("scene load done null=%s" % str(minigame_scene == null))
 +
  	var minigame_instance = minigame_scene.instantiate()
-+	_mp8_trace("instantiate 完成")
++	_mp8_trace("instantiate done")
 +
  	minigame = minigame_instance
  
  	minigame.host_loaded.connect(_on_host_minigame_loaded)
-@@ -479,7 +531,154 @@ func load_minigame(minigame_identifier: Globals.MinigameIdentifier, _is_round: b
+@@ -479,7 +532,158 @@ func load_minigame(minigame_identifier: Globals.MinigameIdentifier, _is_round: b
  
  	GameManager.minigame_loaded.emit(minigame_identifier)
  	GameManager.current_minigame_identifier = minigame_identifier
 +
-+	_mp8_trace("准备 add_child")
++	_mp8_trace("about to add_child")
  	minigame_parent.add_child(minigame_instance, true)
-+	_mp8_trace("add_child 完成 —— 小游戏已进树")
++	_mp8_trace("add_child done — minigame is in the tree")
 +
-+	# [MP8] 宣传截图：不 await，让它自己在后台等时点。
++	# [MP8] Promo screenshots. Not awaited, so it waits for its time points in the background by itself.
 +	_mp8_promo_shot(minigame_identifier)
 +
-+	# [MP8] 重开投票的 UI 跟着小游戏走 —— 这一句**所有端都要执行**。
-+	# 上面清票那句在 is_server() 块里，客机走不到；不在这里补一次的话，
-+	# 客机的 ESC 按钮显隐不会跟着 minigame 变。
++	# [MP8] The restart vote UI follows the minigame — this line **must run on every peer**.
++	# The vote-clearing line above is inside the is_server() block, so clients never reach it. Without repeating it here,
++	# the client's ESC button visibility wouldn't follow minigame changes.
 +	_mp8_vote_refresh_ui()
 +
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 宣传截图（mp8promo）—— 通用局内自截图，与具体小游戏无关
++# [MP8] Promo screenshots (mp8promo) — generic in-match self-screenshots, independent of any specific minigame
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 起因：15 个小游戏里只有 5 个自带 `_mp8_shot()`（残骸/凿刻/猎鸭/逆向/人工筛选），
-+# 另外 10 个一张画面都截不出来。逐个去加等于改 10 个脚本、10 份回归风险，
-+# 而**抓视口这件事跟小游戏是什么毫无关系** —— 所以挂在这里，一处覆盖全部 15 个。
++# Background. Of the 15 minigames only 5 have their own `_mp8_shot()` (Junk Platform/Chisel Gauntlet/Duck Hunt/Escalator Pit/Burn Recycle),
++# and the other 10 can't capture a single frame. Adding it one by one means changing 10 scripts, with 10 regression risks,
++# while **grabbing the viewport has nothing to do with which minigame it is** — so it hangs here, with one place covering all 15.
 +#
-+# 与 `_mp8_shot()` 的分工：那些是**验收**用的（定点、定时、配合各自的调试开关）；
-+# 这个是**出宣传图**用的，只关心画面干不干净。两者互不干扰，可以并存。
++# Division of labor with `_mp8_shot()`. Those are for **acceptance checks** (fixed spots, fixed timing, tied to their own debug switches).
++# This one is for **making promo images** and only cares whether the frame is clean. The two don't interfere and can coexist.
 +#
-+# ⚠️ 为什么挂在 load_minigame() 末尾而不是某个 Play 状态：
-+# `game.gd` 看不见各小游戏内部的状态机（那是 15 套各不相同的东西）。
-+# 从"小游戏进树"这一刻起算秒数是唯一对 15 个都成立的参照系。
-+# 代价是时点不精确（各小游戏的开场长度不同），所以默认一次截三个时点，挑着用。
++# ⚠️ Why hang this off the end of load_minigame() instead of some Play state?
++# `game.gd` can't see each minigame's internal state machine (those are 15 different things).
++# Counting seconds from the moment "the minigame enters the tree" is the only reference point that holds for all 15.
++# The cost is imprecise timing (each minigame's intro has a different length), so by default it captures three time points to pick from.
 +#
-+# 开关（都只在带 mp8promo 时有意义）：
-+#   mp8promo          总开关，不传则整个函数第一行就 return
-+#   mp8promoat=10,16  进小游戏后第几秒截，逗号分隔，可给任意多个（默认 10,16,22）
-+#   mp8promoui        **保留**调试 UI（默认是截图瞬间藏掉的）
++# Switches (all only meaningful together with mp8promo)
++#   mp8promo          master switch. If it isn't passed, the function returns on its first line
++#   mp8promoat=10,16  which seconds after entering the minigame to capture at, comma-separated, as many as you like (default 10,16,22)
++#   mp8promoui        **keep** the debug UI (by default it's hidden at the moment of capture)
 +#
-+# 落点：user://mp8_promo_<小游戏id>_t<秒>_<peer>.png
-+#   即 %APPDATA%\Godot\app_userdata\Machine Party\
++# Output goes to user://mp8_promo_<minigame_id>_t<seconds>_<peer>.png
++#   i.e. %APPDATA%\Godot\app_userdata\Machine Party\
 +func _mp8_promo_shot(minigame_identifier: int) -> void :
 +
-+	if not Array(OS.get_cmdline_args()).has("mp8promo"):
++	if not NetworkManager.mp8_args().has("mp8promo"):
 +		return
 +
 +	var times: Array = []
@@ -160,26 +161,26 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	var waited: float = 0.0
 +
 +	for t in times:
-+		# 逐段等待：时点是相对"进树"的绝对秒数，不是彼此的间隔
++		# Wait segment by segment. Time points are absolute seconds counted from "entering the tree", not intervals between each other
 +		var gap: float = float(t) - waited
 +		if gap > 0.0:
 +			await get_tree().create_timer(gap, false).timeout
 +			waited = float(t)
 +
-+		# 小游戏中途被换掉（局数走完 / 掉线重来）就别再截了，
-+		# 否则会把下一个小游戏的画面按上一个的 id 存盘。
++		# If the minigame gets swapped out midway (rounds finished / restarted after a disconnect), stop capturing,
++		# otherwise the next minigame's frame would be saved under the previous one's id.
 +		if not is_inside_tree():
 +			return
 +		if Globals.current_minigame_identifier != minigame_identifier:
 +			return
 +
-+		# 截图瞬间藏掉调试 UI，截完立刻还原。
-+		# 这样不管命令行开了多少调试开关，出来的图都是干净的。
-+		# ⚠️ 只藏 help_label（调试帮助文字），**不动头顶名牌** ——
-+		# 名牌和 help_label 同在 Globals.GROUP_UI 里，但名牌是原版的东西，
-+		# 而且"8 个名字同时挂在头上"正是这张图要说明的事，藏了反而没说服力。
++		# Hide the debug UI at the moment of capture, and restore it right after.
++		# That way the image comes out clean no matter how many debug switches are on the command line.
++		# ⚠️ Only hide help_label (debug help text), and **leave the overhead nametags alone** —
++		# nametags and help_label are both in Globals.GROUP_UI, but the nametags are a vanilla feature,
++		# and "8 names over heads at once" is exactly what this image is meant to show. Hiding them would make it less convincing.
 +		var hidden: Array = []
-+		if not Array(OS.get_cmdline_args()).has("mp8promoui"):
++		if not NetworkManager.mp8_args().has("mp8promoui"):
 +			if debug_player_handler != null and debug_player_handler.help_label != null:
 +				if debug_player_handler.help_label.visible:
 +					hidden.append(debug_player_handler.help_label)
@@ -192,22 +193,22 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +		if img != null:
 +			var path: String = "user://mp8_promo_%d_t%d_%d.png" % [minigame_identifier, int(t), peer]
 +			img.save_png(path)
-+			print("[MP8] mp8promo：已存 %s" % path)
++			print("[MP8] mp8promo: saved %s" % path)
 +
 +		for node in hidden:
 +			if is_instance_valid(node):
 +				node.visible = true
 +
 +
-+# [MP8] 递归藏掉本 mod 自己加的调试浮层，收进 out 供截图后还原。
++# [MP8] Recursively hide the debug overlays this mod added, collecting them into out so they can be restored after the capture.
 +#
-+# ⚠️ 判据是**三条同时成立**，缺一条都会误伤：
-+#   ① 是 CanvasLayer 或 Control —— 挡住 MP8Press / MP8Belt / MP8Spawn 那些
-+#      同样以 MP8 开头、但**是玩法实体**的 Node3D，藏了它们就把场地拆了；
-+#   ② 名字以 MP8 开头 —— 只认本 mod 加的，原版 UI 一律不碰；
-+#   ③ 名字里带 Panel / Debug / Info —— 只认**调试浮层**。
-+#      这条把 MP8BurnScoreBoard（8 人结算榜）和 MP8RoleRich（角色揭示）留了下来，
-+#      它们是玩家该看到的东西，恰恰是宣传图想要的内容。
++# ⚠️ The criterion is **all three conditions at once**. Missing any one of them causes collateral damage.
++#   ① Is a CanvasLayer or Control — this excludes MP8Press / MP8Belt / MP8Spawn and the like,
++#      Node3Ds that also start with MP8 but **are gameplay entities**. Hiding those would take the arena apart.
++#   ② Name starts with MP8 — only things this mod added. Vanilla UI is never touched.
++#   ③ Name contains Panel / Debug / Info — only **debug overlays**.
++#      This keeps MP8BurnScoreBoard (the 8-player results board) and MP8RoleRich (the role reveal) visible,
++#      which players are meant to see and which are exactly what the promo images want to show.
 +func _mp8_hide_debug_overlays(node: Node, out: Array) -> void :
 +
 +	var n: String = node.name
@@ -222,22 +223,22 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +		_mp8_hide_debug_overlays(child, out)
 +
 +
-+# [MP8] 取 mp8xxx=<值> 形式的命令行参数，取不到返回空串
++# [MP8] Read a command-line argument of the form mp8xxx=<value>, returning an empty string if it isn't found
 +func _mp8_arg(prefix: String) -> String:
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var s: String = str(a)
 +		if s.begins_with(prefix):
 +			return s.substr(prefix.length())
 +	return ""
 +
 +
-+# [MP8] 崩溃面包屑：每条都开-写-关，保证落盘。只在传 mp8trace 时启用。
++# [MP8] Crash breadcrumbs. Each entry is open-write-close to guarantee it reaches the disk. Only enabled when mp8trace is passed.
 +var _mp8_trace_on: int = -1
 +
 +func _mp8_trace(msg: String) -> void :
 +
 +	if _mp8_trace_on == -1:
-+		_mp8_trace_on = 1 if Array(OS.get_cmdline_args()).has("mp8trace") else 0
++		_mp8_trace_on = 1 if NetworkManager.mp8_args().has("mp8trace") else 0
 +
 +	if _mp8_trace_on == 0:
 +		return
@@ -252,40 +253,44 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
  
  func update_scores(more_rounds: bool):
  
-@@ -643,9 +842,62 @@ func _on_peer_disconnected(_network_id: int):
++	# [MP8] This round's scores are being booked, so the round is over and a pending restart vote can't apply to it anymore
++	_mp8_vote_round_open = false
++	_mp8_vote_clear()
++
+@@ -643,9 +847,62 @@ func _on_peer_disconnected(_network_id: int):
  		)
  		intermission_manager.screen_briefing.update_player_data_rpc.rpc(total_score_by_network_id)
  
-+	# [MP8] 🩸 T44 第 0 项（根因）：闸门必须在有人掉线时重新求值一次。
++	# [MP8] 🩸 T44 item 0 (root cause) - the gate must be re-evaluated when someone disconnects.
 +	#
-+	# 一句话：`minigame.gd:132` 那个
++	# In a nutshell, the check at `minigame.gd:132`
 +	# `players_loaded.size() == PlayerManager.player_presences.size()`
-+	# **只在有人上报的那一刻求值**，而掉线让分母变小、
-+	# 且从没人清理过分子 —— 于是加载途中掉一个人，
-+	# `all_players_loaded()` 就再也不会触发：这一局**全程静音**
-+	# （音效总线只有 `initialize()` 抬得回来）、**局末全员黑屏**
-+	# （会话状态机压根没进 `MinigameStart`）。完整分析见 T44。
++	# **is only evaluated at the moment someone reports in**, while a disconnect shrinks the denominator
++	# and nobody ever cleans up the numerator — so if one player drops during loading,
++	# `all_players_loaded()` never fires again. The match is **silent the whole way through**
++	# (only `initialize()` can bring the sound bus back up) and **everyone gets a black screen at the end**
++	# (the session state machine never even enters `MinigameStart`). See T44 for the full analysis.
 +	#
-+	# ⚠️ 必须放在 `minigame.player_disconnected()` **之前**：
-+	#    那些处理函数 `await 1 秒` 之后会去调 `check_game_end()`，
-+	#    闸门先放行的话这一局已经正常开起来了，那次检查才有意义。
-+	# ⚠️ 也必须放在上面 `PlayerManager.remove_player_rpc.rpc()` **之后**：
-+	#    那个 RPC 是 `call_local`，所以走到这里时 `player_presences` 已经是新分母了。
++	# ⚠️ This must come **before** `minigame.player_disconnected()`.
++	#    Those handlers call `check_game_end()` after `await 1 second`,
++	#    and that check only means something if the gate has already let the match start normally.
++	# ⚠️ It also must come **after** `PlayerManager.remove_player_rpc.rpc()` above.
++	#    That RPC is `call_local`, so by the time we get here `player_presences` is already the new denominator.
 +	_mp8_recheck_load_gate(_network_id)
 +
  	if minigame:
  		minigame.player_disconnected(_network_id)
  
-+# [MP8] T44 第 0 项：掉线之后重新求值一次加载闸门。
++# [MP8] T44 item 0 - re-evaluate the loading gate after a disconnect.
 +#
-+# 两种掉线时机的修法不一样，所以**剔除和重算两件都要做**：
-+#   · 上报**之前**掉 → 分母减 1 后其实正好相等，光重算就够；
-+#   · 上报**之后**掉 → `players_loaded` 比分母多一个，**不先剔除就永远相等不了**。
++# The fix differs for the two disconnect timings, so **both removal and recount are needed**.
++#   · Drops **before** reporting → once the denominator drops by 1 it's actually equal, so recounting alone is enough.
++#   · Drops **after** reporting → `players_loaded` has one more than the denominator, and **it can never be equal without removing that entry first**.
 +#
-+# ⚠️ `is_all_player_loaded` 当「已经放行过」的旗子用：15 个小游戏的
-+#    `all_players_loaded()` 覆写都在服务器侧把它置 true（逐个核对过），所以它可信。
-+#    没有这道判断的话，**开局之后**再有人掉线会把整局重新 initialize 一遍。
-+# ⚠️ 只在服务器跑：闸门本体也是 `if multiplayer.is_server()` 包着的。
++# ⚠️ `is_all_player_loaded` is used as the "already let through" flag. All 15 minigames'
++#    `all_players_loaded()` overrides set it to true on the server side (checked one by one), so it can be trusted.
++#    Without this check, a disconnect **after the match has started** would re-initialize the whole match.
++# ⚠️ Server only. The gate itself is also wrapped in `if multiplayer.is_server()`.
 +func _mp8_recheck_load_gate(_network_id: int) -> void :
 +
 +	if not multiplayer.is_server():
@@ -302,8 +307,8 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	var want: int = PlayerManager.player_presences.size()
 +	var pass_now: bool = want > 0 and have >= want
 +
-+	print("[MP8] 掉线闸门重算：%d 掉线 → 已上报 %d（剔除前 %d）/ 在场 %d —— %s" % [
-+		_network_id, have, before, want, "闸门放行" if pass_now else "还有人没上报，继续等"
++	print("[MP8] Gate recheck after disconnect: %d dropped → reported %d (before removal %d) / present %d — %s" % [
++		_network_id, have, before, want, "gate passed" if pass_now else "some players haven't reported yet, still waiting"
 +	])
 +
 +	if not pass_now:
@@ -315,35 +320,35 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
  func _on_minigame_pick_finished(minigame_index: int):
  	if debug_no_shuffle:
  		minigame_index = 0
-@@ -707,15 +959,62 @@ func _on_host_overlay_minigame_selected(minigame_identifier: Globals.MinigameIde
+@@ -707,15 +964,62 @@ func _on_host_overlay_minigame_selected(minigame_identifier: Globals.MinigameIde
  
  	load_minigame(minigame_identifier, false, 1)
  
-+# [MP8] 各小游戏的分值系数（默认 1.0，只列需要压/抬的那些）。
++# [MP8] Score multipliers per minigame (default 1.0, only the ones that need lowering/raising are listed).
 +#
-+# 猎鸭 0.5 的来由：它是"每人轮流当一次猎人"，8 人双猎 = **4 个小回合**，分数累加；
-+# 改成名次制 + 击伤给分之后单场能到 0~42，而名次型小游戏（立足之本那类）只有 0~16，
-+# 猎鸭会一家独大。
-+# 系数放在**汇总处**的好处：不动各小游戏自己那套名次规则，
-+# 以后要调平衡只改这一张表，不用回头再动玩法代码。
-+# （用户 2026-08-15 定：猎鸭 50%）
++# Duck Hunt is 0.5 because it's "everyone takes a turn as hunter". 8 players with two hunters = **4 sub-rounds**, and the scores add up.
++# After switching to placement scoring + points for hits, a single match can reach 0~42, while placement minigames (the Disco Dodge kind) only reach 0~16,
++# so Duck Hunt would dominate.
++# The upside of putting the multiplier **where scores are totaled** is that each minigame's own placement rules stay untouched,
++# and future balance tweaks only change this one table, without going back into gameplay code.
++# (Decided by the user 2026-08-15 - Duck Hunt 50%)
 +const MP8_MINIGAME_SCORE_SCALE: Dictionary = {
 +	Globals.MinigameIdentifier.DuckHunt: 0.5,
-+	# 雷区改名次制之后量级涨了（用户 2026-08-16 定案，推导见 exploding_collar_race.gd）：
-+	#   原版累加制 8 人 = 单轮上限 4 分 × 3 轮 = 0~12
-+	#   名次制     8 人 = 单轮上限 8 分（名次 0~7 + 满血 1）× 3 轮 = **0~24**
-+	# 而 A 名次族（立足之本）8 人打 2 轮是 0~16。雷区打 3 轮，理应比它重一点，
-+	# 但重一倍就过头 —— ×0.75 → **0~18**，比 A 族高约 12%，和"多打一轮"对得上。
++	# Exploding Collar Race's score scale grew after switching to placement scoring (user decision 2026-08-16, derivation in exploding_collar_race.gd).
++	#   Vanilla additive scoring, 8 players = per-round max 4 points × 3 rounds = 0~12
++	#   Placement scoring,        8 players = per-round max 8 points (placement 0~7 + full health 1) × 3 rounds = **0~24**
++	# Meanwhile placement family A (Disco Dodge) is 0~16 for 8 players over 2 rounds. Exploding Collar Race plays 3 rounds, so it should weigh a bit more,
++	# but double is too much — ×0.75 → **0~18**, about 12% above family A, which lines up with "one extra round".
 +	Globals.MinigameIdentifier.ExplodingCollarRace: 0.75,
 +}
 +
-+# 同一个小游戏在不同人数下场次不一样，分量也会差很多，所以再加一层"按人数覆盖"。
++# The same minigame plays a different number of rounds at different player counts, so its weight can vary a lot too. That's why there's another "per player count override" layer.
 +#
-+# 猎鸭 6 人 = 0.8 的来由：猎鸭的小回合数 = 人数 ÷ 每回合猎人数，
-+# 6 人双猎只有 **3 个小回合**（8 人是 4 个），而且每人只当 2 次鸭子，
-+# 算下来期望 5 分、区间 0~10，比同人数的名次型小游戏（约 0~12）还轻，
-+# 和它在 8 人局的定位正好相反。提到 0.8 把这一档拉回来。
-+# （用户 2026-08-15 定）
++# Duck Hunt at 6 players is 0.8 because Duck Hunt's sub-round count = players ÷ hunters per round,
++# and 6 players with two hunters is only **3 sub-rounds** (8 players is 4), with each player being a duck only 2 times.
++# That works out to an expected 5 points with a range of 0~10, lighter even than placement minigames at the same player count (about 0~12),
++# which is the exact opposite of its role in 8-player matches. Raising it to 0.8 brings this tier back in line.
++# (Decided by the user 2026-08-15)
 +const MP8_MINIGAME_SCORE_SCALE_BY_COUNT: Dictionary = {
 +	Globals.MinigameIdentifier.DuckHunt: {6: 0.8},
 +}
@@ -363,7 +368,7 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
  func _on_minigame_player_scored(_network_id: int, _score: int):
  
 -	round_score_by_network_id[_network_id] += (_score * score_multiplier)
-+	# [MP8] 先乘系数再取整，精度损失只发生在最后一步
++	# [MP8] Apply the multiplier first and round after, so precision is only lost in the last step
 +	round_score_by_network_id[_network_id] += int(
 +		_score * score_multiplier * _mp8_score_scale()
 +	)
@@ -380,79 +385,83 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
  
  func _on_score_screen_finished():
  
-@@ -774,3 +1073,560 @@ func _viewport_size_changed():
+@@ -774,3 +1078,587 @@ func _viewport_size_changed():
  	for cr in effect_rects:
  		cr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
  		cr.set_deferred("size", vp_size)
 +
-+# =============== [MP8] 重开本轮投票 ===============
++# =============== [MP8] Restart-this-round vote ===============
 +#
-+# 为什么有这个功能（用户 2026-09-03 提，本节是设计存档）：
-+# 本 mod 把 4 人扩到 8 人，15 个小游戏 x 5~8 人 = 60 种组合，作者一个人验不完
-+# —— 而且凑不齐 8 个真人。历史上「整局卡死」出现过多次：残骸平台 8 人局永不结束、
-+# 碎骨者装置粘上人却不咬、猎鸭有人按 wasd 无反应。
++# Why this feature exists (requested by the user 2026-09-03, this section is the design record).
++# This mod expands 4 players to 8. 15 minigames x 5~8 players = 60 combinations, more than the author can verify alone
++# — and 8 real people are hard to get together. "Whole match stuck" has happened many times, e.g. Junk Platform 8-player matches never ending,
++# Spine Breaker devices latching onto someone without biting, and someone in Duck Hunt getting no response from wasd.
 +#
-+# 这个功能**不修任何 bug**，它做两件事：
-+#   ① 止血：卡住时全房过半就能重开本轮，不用退房重来
-+#   ② **取证**：每次重开都强制打一行日志（哪个小游戏、几人、第几轮）。
-+#      这一条比重开本身值钱 —— 它把「作者测不动」变成「玩家在替你标记哪里坏了」。
-+#      收到「XX 卡住了」的报告时，先 grep `[MP8-重开]`。
++# This feature **fixes no bugs**. It does two things.
++#   ① Stop the bleeding: when stuck, a majority of the lobby can restart this round without leaving and starting over
++#   ② **Evidence**: every restart is forced to log one line (which minigame, how many players, which round).
++#      This is worth more than the restart itself — it turns "the author can't test it all" into "players flag what's broken for you".
++#      When a "XX got stuck" report comes in, grep `[MP8-RESTART]` first.
 +#
-+# 设计取舍（用户定）：
-+#   · 只回到**本轮开始**，不回到小游戏第 1 轮（后者还要回滚 game_score）
-+#   · **过半**即可，不用 n-1：卡住的人可能正好是按不了键的那个，
-+#     而一个挂机的人就能让 n-1 永远达不成
-+#   · 过半后不立刻执行，先走**自动确认倒计时**给所有人知情窗口；期间撤票会取消
-+#   · 入口两个：F5 与 ESC 菜单里的按钮。ESC 那个是主入口 ——
-+#     菜单开着时 UI 会吃掉按键，F5 未必收得到（这也是用户点名要按钮的原因）
++# Design trade-offs (decided by the user)
++#   · Only go back to **the start of this round**, not round 1 of the minigame (that would also need game_score rolled back)
++#   · A **majority** is enough, not n-1. The stuck player might be exactly the one who can't press keys,
++#     and a single AFK player would make n-1 impossible forever
++#   · Once a majority is reached it doesn't run immediately. An **auto-confirm countdown** runs first so everyone gets a heads-up. Withdrawing a vote during it cancels
++#   · Two entry points: F5 and the button in the ESC menu. The ESC one is the main entry —
++#     while the menu is open the UI eats key presses, so F5 might not get through (which is also why the user specifically asked for a button)
 +#
-+# 为什么时序是安全的：每一轮本来就走 load_minigame(id, true)
-+# （见 minigame_playing_state.gd 的 _on_minigame_finished），所以「重开本轮」
-+# 跟「进下一轮」是**同一条路**，不是新造的拆卸逻辑。客机也不用单独通知 ——
-+# host_loaded 会自己走 _host_minigame_loaded_rpc。
++# Why the timing is safe. Every round already goes through load_minigame(id, true)
++# (see _on_minigame_finished in minigame_playing_state.gd), so "restart this round"
++# and "go to the next round" are **the same path**, not newly invented teardown logic. Clients don't need a separate notification either —
++# host_loaded runs _host_minigame_loaded_rpc on its own.
 +#
-+# 分数为什么必须回滚：round_score_by_network_id 有**两个**累加点 ——
-+# _on_minigame_player_scored（局中每次得分就加）与 _on_minigame_player_score_finalized
-+# （轮末结算）。局中重开若不回滚，这半截分数会留着、重打一遍就是双重计分。
-+# 所以 load_minigame 开头拍快照，重开时还原。
++# Why scores must be rolled back. round_score_by_network_id is added to in **two** places —
++# _on_minigame_player_scored (adds on every score mid-round) and _on_minigame_player_score_finalized
++# (end-of-round settle). Restarting mid-round without rolling back would keep that partial score, and replaying would count it twice.
++# So load_minigame takes a snapshot at its start, and a restart restores it.
 +
-+const MP8_VOTE_KEY: int = KEY_F5              # F1/F2/F9 被原版调试占了，F5 空着
-+const MP8_VOTE_COUNTDOWN: float = 5.0         # 过半后的自动确认倒计时（秒）
++const MP8_VOTE_KEY: int = KEY_F5              # F1/F2/F9 are taken by vanilla debug keys, F5 is free
++const MP8_VOTE_COUNTDOWN: float = 5.0         # Auto-confirm countdown after a majority (seconds)
 +
-+# —— 服务器权威状态 ——
-+var _mp8_vote_yes: Dictionary = {}            # network_id -> true，只在服务器上有意义
-+var _mp8_vote_deadline: float = -1.0          # < 0 = 没在倒计时
-+var _mp8_vote_beat: float = 0.0               # 每秒广播一次的节拍器
++# — Server-authoritative state —
++var _mp8_vote_yes: Dictionary = {}            # network_id -> true, only meaningful on the server
++var _mp8_vote_deadline: float = -1.0          # < 0 = not counting down
++var _mp8_vote_beat: float = 0.0               # Metronome for broadcasting once per second
 +var _mp8_round_score_snapshot: Dictionary = {}
++var _mp8_vote_round_open: bool = false        # True from a round's load until its scores are booked. Votes only count in between
++var _mp8_vote_last_press: Dictionary = {}     # network_id -> msec of their last vote toggle, for rate limiting
++var _mp8_restarts_by_slot: Dictionary = {}    # session_minigame_index -> restarts already used on that playlist slot
++const MP8_VOTE_MAX_RESTARTS: int = 2          # Restarts allowed per playlist slot, so a majority can't wipe a round forever
 +
-+# —— 本端看到的状态（HUD 与 ESC 按钮共用）——
-+# 广播的是**投票者 id 数组**而不是票数：客户端要靠它算出「我投没投」和「谁投了」，
-+# 只传一个计数是做不到的。
++# — State as seen by this peer (shared by the HUD and the ESC button) —
++# What's broadcast is **the array of voter ids**, not the vote count. Clients need it to work out "did I vote" and "who voted",
++# which a bare count can't do.
 +var _mp8_vote_view: PackedInt32Array = PackedInt32Array()
 +var _mp8_vote_view_names: PackedStringArray = PackedStringArray()
 +var _mp8_vote_view_need: int = 0
 +var _mp8_vote_view_secs: float = -1.0
-+# 轮次也必须由服务器送过来：session_current_minigame_round / _max_rounds
-+# **只在服务器上被赋值**（客机走的是 load_minigame(id, false)，_total_rounds 是 -1），
-+# 客机自己读永远是 0 —— 面板上那个「第 0/0 轮」就是这么来的。
++# The round numbers must come from the server too. session_current_minigame_round / _max_rounds
++# **are only assigned on the server** (clients go through load_minigame(id, false), where _total_rounds is -1),
++# so a client reading them itself always gets 0 — that's where the "round 0/0" on the panel came from.
 +var _mp8_vote_view_round: int = 0
 +var _mp8_vote_view_round_max: int = 0
 +
-+# 名字长度上限。Steam 昵称最长 32 字符，8 个人能拼出 250+ 字符，
-+# 不截断会把面板撑爆。Godot 的 String 按字符算，中日韩名字不会被切成半个字。
++# Name length cap. Steam nicknames can be up to 32 characters, and 8 players can add up to 250+ characters,
++# which would blow up the panel without truncation. Godot's String counts by character, so CJK names won't be cut in half.
 +const MP8_VOTE_NAME_MAX: int = 10
 +const MP8_VOTE_NAMES_SHOWN: int = 6
-+const MP8_VOTE_PANEL_W: float = 420.0     # 原生渲染 960 宽，面板顶到这里就够
++const MP8_VOTE_PANEL_W: float = 420.0     # Native render is 960 wide, so a panel this wide is enough
 +
-+# 我们自己的字符串表。游戏有 17 种语言、走标准 tr()，但那是编译好的
-+# .translation 二进制，加不进我们的词条 —— 所以自带一张小表，
-+# 用 match TranslationServer.get_locale() 取（游戏自己在 lobby_handler.gd:80、
-+# credits.gd:38 就是这么写的，locale 码是 "ZHS"/"ZHT"/"JA" 这种短大写码）。
++# Our own string table. The game has 17 languages via the standard tr(), but those are compiled
++# .translation binaries we can't add entries to — so we bring a small table of our own,
++# looked up with match TranslationServer.get_locale() (the game itself does exactly this in lobby_handler.gd:80 and
++# credits.gd:38, and the locale codes are short uppercase codes like "ZHS"/"ZHT"/"JA").
 +#
-+# ⚠️ 游戏**不检测系统语言**：globals.gd 的 default_settings["language"] 硬编码 "EN"，
-+# 之后跟玩家在设置里选的走。所以这里回退 EN 与游戏本身的默认一致。
++# ⚠️ The game **doesn't detect the system language**. globals.gd's default_settings["language"] is hard-coded to "EN",
++# and after that it follows what the player picked in settings. So falling back to EN here matches the game's own default.
 +#
-+# 加一种语言 = 在下面加一段。欢迎 PR。
++# Adding a language = adding a block below. PRs welcome.
 +const MP8_VOTE_L10N: Dictionary = {
 +	"EN": {
 +		"title": "Restart this round?",
@@ -474,56 +483,56 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +		"btn_go": "Restarting · %d s",
 +	},
 +	"ZHS": {
-+		"title": "重开本轮投票",
-+		"title_go": "本轮即将重开",
-+		"ctx": "%s · 第 %d/%d 轮 · %d 人",
-+		"count": "同意 %d / 需要 %d",
-+		"who": "已同意：",
-+		"sep": "、",
-+		"none": "（还没有人）",
-+		"more": "%s 等 %d 人",
-+		"you_yes": "你：已同意   ——   F5 撤票",
-+		"you_no": "你：未投   ——   F5 同意，ESC 菜单里也有",
-+		"go": "%d 秒后自动执行   ——   %s",
-+		"go_yes": "F5 撤票",
-+		"go_no": "F5 同意",
-+		"btn": "重开本轮",
-+		"btn_vote": "重开本轮（%d/%d）",
-+		"btn_undo": "撤回投票（%d/%d）",
-+		"btn_go": "重开本轮 · %d 秒",
++		"title": "Vote to restart this round",
++		"title_go": "This round is about to restart",
++		"ctx": "%s · round %d/%d · %d players",
++		"count": "Agreed %d / needed %d",
++		"who": "Agreed: ",
++		"sep": ", ",
++		"none": "(nobody yet)",
++		"more": "%s and others, %d players",
++		"you_yes": "You: agreed   —   F5 to withdraw vote",
++		"you_no": "You: not voted   —   F5 to agree, also in the ESC menu",
++		"go": "Runs automatically in %d s   —   %s",
++		"go_yes": "F5 to withdraw vote",
++		"go_no": "F5 to agree",
++		"btn": "Restart This Round",
++		"btn_vote": "Restart This Round (%d/%d)",
++		"btn_undo": "Withdraw Vote (%d/%d)",
++		"btn_go": "Restart This Round · %d s",
 +	},
 +	"ZHT": {
-+		"title": "重開本輪投票",
-+		"title_go": "本輪即將重開",
-+		"ctx": "%s · 第 %d/%d 輪 · %d 人",
-+		"count": "同意 %d / 需要 %d",
-+		"who": "已同意：",
-+		"sep": "、",
-+		"none": "（還沒有人）",
-+		"more": "%s 等 %d 人",
-+		"you_yes": "你：已同意   ——   F5 撤票",
-+		"you_no": "你：未投   ——   F5 同意，ESC 選單裡也有",
-+		"go": "%d 秒後自動執行   ——   %s",
-+		"go_yes": "F5 撤票",
-+		"go_no": "F5 同意",
-+		"btn": "重開本輪",
-+		"btn_vote": "重開本輪（%d/%d）",
-+		"btn_undo": "撤回投票（%d/%d）",
-+		"btn_go": "重開本輪 · %d 秒",
++		"title": "Vote to restart this round",
++		"title_go": "This round is about to restart",
++		"ctx": "%s · round %d/%d · %d players",
++		"count": "Agreed %d / needed %d",
++		"who": "Agreed: ",
++		"sep": ", ",
++		"none": "(nobody yet)",
++		"more": "%s and others, %d players",
++		"you_yes": "You: agreed   —   F5 to withdraw vote",
++		"you_no": "You: not voted   —   F5 to agree, also in the ESC menu",
++		"go": "Runs automatically in %d s   —   %s",
++		"go_yes": "F5 to withdraw vote",
++		"go_no": "F5 to agree",
++		"btn": "Restart This Round",
++		"btn_vote": "Restart This Round (%d/%d)",
++		"btn_undo": "Withdraw Vote (%d/%d)",
++		"btn_go": "Restart This Round · %d s",
 +	},
 +}
 +
-+# —— UI 节点 ——
++# — UI nodes —
 +var _mp8_vote_hud: PanelContainer = null
 +var _mp8_vote_lbl_title: Label = null
 +var _mp8_vote_lbl_ctx: Label = null
 +var _mp8_vote_lbl_count: Label = null
 +var _mp8_vote_lbl_who: Label = null
 +var _mp8_vote_lbl_you: Label = null
-+var _mp8_vote_btn: Button = null              # 从 ESC 菜单的 Resume 复制出来的那颗
++var _mp8_vote_btn: Button = null              # The one duplicated from the ESC menu's Resume button
 +
 +
-+# --------------------- 输入 ---------------------
++# --------------------- Input ---------------------
 +
 +func _unhandled_key_input(event: InputEvent) -> void :
 +
@@ -537,17 +546,17 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	_mp8_vote_press()
 +
 +
-+# F5 与 ESC 按钮共用的入口。
++# Shared entry point for F5 and the ESC button.
 +func _mp8_vote_press() -> void :
 +
-+	# 没联机（本地/单人）时直接走本地路径 —— 没有 peer 时 rpc_id 会报错
++	# When not online (local/single player), take the local path directly — rpc_id errors out when there's no peer
 +	if not multiplayer.has_multiplayer_peer():
 +		_mp8_vote_rpc()
 +	else:
 +		_mp8_vote_rpc.rpc_id(1)
 +
 +
-+# --------------------- 服务器侧 ---------------------
++# --------------------- Server side ---------------------
 +
 +@rpc("any_peer", "call_local", "reliable")
 +func _mp8_vote_rpc() -> void :
@@ -557,28 +566,42 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +
 +	var who: int = multiplayer.get_remote_sender_id()
 +	if who == 0:
-+		who = 1                                    # 房主自己按的，本地调用没有 sender
++		who = 1                                    # Pressed by the host itself, and a local call has no sender
 +
-+	if minigame == null:
-+		print("[MP8-投票] %d 在幕间按了重开，忽略（现在没有进行中的小游戏）" % who)
++	# Online, only players actually in the lobby can vote, and each player can toggle at most twice a second.
++	# Without this a modified client could flood the host's log and every player's connection.
++	if multiplayer.has_multiplayer_peer():
++		if not PlayerManager.player_presences.has(who):
++			return
++		var now: int = Time.get_ticks_msec()
++		if now - int(_mp8_vote_last_press.get(who, -100000)) < 500:
++			return
++		_mp8_vote_last_press[who] = now
++
++	if minigame == null or not _mp8_vote_round_open:
++		print("[MP8-VOTE] %d pressed restart outside a running round, ignored" % who)
++		return
++
++	if int(_mp8_restarts_by_slot.get(session_minigame_index, 0)) >= MP8_VOTE_MAX_RESTARTS:
++		print("[MP8-VOTE] %d pressed restart, but this minigame was already restarted %d times, ignored" % [who, MP8_VOTE_MAX_RESTARTS])
 +		return
 +
 +	if PlayerManager.player_presences.size() < 2:
-+		print("[MP8-投票] 不足 2 人，重开没有意义，忽略")
++		print("[MP8-VOTE] Fewer than 2 players, restarting is pointless, ignored")
 +		return
 +
 +	if _mp8_vote_yes.has(who):
 +		_mp8_vote_yes.erase(who)
-+		print("[MP8-投票] %d 撤票" % who)
++		print("[MP8-VOTE] %d withdrew their vote" % who)
 +	else:
 +		_mp8_vote_yes[who] = true
-+		print("[MP8-投票] %d 投票重开本轮" % who)
++		print("[MP8-VOTE] %d voted to restart this round" % who)
 +
 +	_mp8_vote_recount()
 +
 +
-+# 重新点票。掉线的人不该继续占着票 —— 8 人局里一个人掉线就可能让票数当场过半，
-+# 那是「人少了」而不是「大家同意了」，必须先把他的票摘掉再算。
++# Recount the votes. Disconnected players shouldn't keep holding a vote — in an 8-player match one disconnect could push the votes past half on the spot,
++# which means "fewer people", not "everyone agreed", so their vote has to be removed before counting.
 +func _mp8_vote_recount() -> void :
 +
 +	if not multiplayer.is_server():
@@ -587,27 +610,27 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	for id in _mp8_vote_yes.keys():
 +		if not PlayerManager.player_presences.has(id):
 +			_mp8_vote_yes.erase(id)
-+			print("[MP8-投票] %d 已不在房里，撤掉他的票" % id)
++			print("[MP8-VOTE] %d is no longer in the lobby, removing their vote" % id)
 +
 +	var n: int = PlayerManager.player_presences.size()
 +	var yes: int = _mp8_vote_yes.size()
-+	var need: int = int(floor(float(n) / 2.0)) + 1      # 过半
++	var need: int = int(floor(float(n) / 2.0)) + 1      # Majority
 +
 +	if yes >= need:
 +		if _mp8_vote_deadline < 0.0:
 +			_mp8_vote_deadline = MP8_VOTE_COUNTDOWN
-+			print("[MP8-投票] 过半（%d/%d，需 %d）—— %.0f 秒后自动重开本轮" % [yes, n, need, MP8_VOTE_COUNTDOWN])
++			print("[MP8-VOTE] Majority reached (%d/%d, need %d) — auto-restarting this round in %.0f s" % [yes, n, need, MP8_VOTE_COUNTDOWN])
 +	else:
 +		if _mp8_vote_deadline >= 0.0:
 +			_mp8_vote_deadline = -1.0
-+			print("[MP8-投票] 票数跌回 %d/%d（需 %d），倒计时取消" % [yes, n, need])
++			print("[MP8-VOTE] Votes fell back to %d/%d (need %d), countdown cancelled" % [yes, n, need])
 +
 +	_mp8_vote_broadcast(need)
 +
 +
-+# 名字在**服务器上**解析好再广播。让客机自己拿 id 查 player_presences
-+# 会查不到（实测显示成 "P6"）—— 服务器这边数据全，还能退一步查
-+# connected_players，那是游戏自己在 propagate_player_rpc 里的写法。
++# Names are resolved **on the server** before broadcasting. Having clients look up player_presences by id themselves
++# fails (in testing it showed "P6") — the server has the full data and can also fall back to
++# connected_players, which is how the game itself does it in propagate_player_rpc.
 +func _mp8_vote_broadcast(need: int) -> void :
 +
 +	var voters := PackedInt32Array()
@@ -629,8 +652,8 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +		if nm != "":
 +			return nm
 +
-+	# 退一步：游戏自己在 propagate_player_rpc 里就是遍历 connected_players
-+	# 按 peer_id 配对的，照抄那条路。
++	# Fallback. The game itself iterates connected_players in propagate_player_rpc
++	# and matches by peer_id, so copy that path.
 +	if NetworkManager.active_backend != null:
 +		for info in NetworkManager.active_backend.connected_players.values():
 +			if typeof(info) == TYPE_DICTIONARY and int(info.get("peer_id", -1)) == id:
@@ -648,18 +671,23 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	if _mp8_vote_yes.is_empty() and _mp8_vote_deadline < 0.0:
 +		return
 +
-+	# 倒计时期间有人掉线 -> 人数变了、门槛也变了，必须重算
++	# Someone dropped during the countdown -> the player count and the threshold changed, so recount
 +	if _mp8_vote_yes.size() > PlayerManager.player_presences.size():
 +		_mp8_vote_recount()
 +
 +	if _mp8_vote_deadline >= 0.0:
 +		_mp8_vote_deadline -= delta
 +		if _mp8_vote_deadline <= 0.0:
++			# Check again at the moment of restarting. The round may have ended while the countdown was running.
++			if minigame == null or not is_instance_valid(minigame) or not _mp8_vote_round_open:
++				print("[MP8-VOTE] The round ended before the countdown finished, restart cancelled")
++				_mp8_vote_clear()
++				return
 +			_mp8_do_restart_round()
 +			return
 +
-+	# 每秒重播一次完整状态。除了刷倒计时，这也顺带解决「中途加入的人
-+	# 看不到进行中的投票」—— 他下一秒就会收到全量状态，不用另写补发逻辑。
++	# Rebroadcast the full state once per second. Besides refreshing the countdown, this also solves "someone joining midway
++	# can't see the vote in progress" — they get the full state the next second, with no separate resend logic needed.
 +	_mp8_vote_beat -= delta
 +	if _mp8_vote_beat <= 0.0:
 +		_mp8_vote_beat = 1.0
@@ -673,25 +701,29 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	var yes: int = _mp8_vote_yes.size()
 +	var mg: String = "?" if minigame == null else String(minigame.name)
 +
-+	# 强制日志 —— 整个功能里最值钱的一行，不受任何排查开关门控。
-+	# 玩家什么时候重开、在哪个小游戏、几个人、第几轮，全在这里。
-+	# 用 printerr 是为了它同时进 stderr，玩家发日志时不容易漏。
-+	printerr("[MP8-重开] 本轮被投票重开 —— 小游戏=%s id=%d 人数=%d 轮次=%d/%d 票数=%d" % [
++	# Forced log — the most valuable line in the whole feature, not gated by any debug switch.
++	# When players restarted, in which minigame, with how many players, in which round, it's all here.
++	# printerr is used so it also goes to stderr, making it harder to miss when players send in logs.
++	printerr("[MP8-RESTART] This round was restarted by vote — minigame=%s id=%d players=%d round=%d/%d votes=%d" % [
 +		mg, int(Globals.current_minigame_identifier), n,
 +		session_current_minigame_round, session_current_minigame_max_rounds, yes
 +	])
 +
-+	# 回滚本轮已经入账的分数（理由见本节开头）
++	# Count this restart against the playlist slot and close voting until load_minigame opens the new round
++	_mp8_restarts_by_slot[session_minigame_index] = int(_mp8_restarts_by_slot.get(session_minigame_index, 0)) + 1
++	_mp8_vote_round_open = false
++
++	# Roll back the scores already booked this round (the reason is at the start of this section)
 +	if not _mp8_round_score_snapshot.is_empty():
 +		round_score_by_network_id = _mp8_round_score_snapshot.duplicate(true)
 +
-+	_mp8_vote_clear()      # 它自己会把空状态播出去
++	_mp8_vote_clear()      # It broadcasts the empty state by itself
 +
 +	if session_minigame_index < 0 or session_minigame_index >= session_minigame_list.size():
-+		printerr("[MP8-重开] 歌单下标 %d 越界（共 %d 项），放弃重开" % [session_minigame_index, session_minigame_list.size()])
++		printerr("[MP8-RESTART] Playlist index %d out of range (%d entries), aborting restart" % [session_minigame_index, session_minigame_list.size()])
 +		return
 +
-+	# 跟「进下一轮」同一条路：_total_rounds 用默认 -1，轮次计数不重置
++	# Same path as "go to the next round". _total_rounds uses the default -1, and the round counter isn't reset
 +	load_minigame(session_minigame_list[session_minigame_index], true)
 +
 +
@@ -704,14 +736,14 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	_mp8_vote_view_secs = -1.0
 +	_mp8_vote_refresh_ui()
 +
-+	# 服务器清票时必须把空状态播出去，否则客机那块面板会残留：
-+	# 每秒心跳只在「有票」时才播，清空之后就没人再告诉客机了。
-+	# （正常推进下一轮也会走到这里 —— 那才是最容易出现残留的路径。）
++	# When the server clears votes it must broadcast the empty state, otherwise the client's panel would linger.
++	# The per-second heartbeat only broadcasts while "there are votes", so after clearing nobody would tell the clients anymore.
++	# (Moving on to the next round normally also comes through here — that's actually the path most likely to leave leftovers.)
 +	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
 +		_mp8_vote_state_rpc.rpc(PackedInt32Array(), PackedStringArray(), 0, -1.0, 0, 0)
 +
 +
-+# --------------------- 显示层（每端各自）---------------------
++# --------------------- Display layer (each peer on its own) ---------------------
 +
 +@rpc("authority", "call_local", "reliable")
 +func _mp8_vote_state_rpc(
@@ -733,7 +765,7 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	return 1 if not multiplayer.has_multiplayer_peer() else multiplayer.get_unique_id()
 +
 +
-+# 本 mod 自己的字符串取词。回退 EN —— 与游戏 default_settings 的默认一致。
++# String lookup for this mod's own strings. Falls back to EN — matching the default in the game's default_settings.
 +func _mp8_t(key: String) -> String :
 +
 +	var en: Dictionary = MP8_VOTE_L10N["EN"]
@@ -772,7 +804,7 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	var i_voted: bool = _mp8_vote_view.has(me)
 +	var counting: bool = _mp8_vote_view_secs >= 0.0
 +
-+	# —— ESC 菜单那颗按钮：局内一直在，文案跟着状态走 ——
++	# — The ESC menu button - always present during a match, with text that follows the state —
 +	if is_instance_valid(_mp8_vote_btn):
 +		_mp8_vote_btn.visible = (minigame != null)
 +		if counting:
@@ -784,7 +816,7 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +		else:
 +			_mp8_vote_btn.text = _mp8_t("btn_vote") % [yes, _mp8_vote_view_need]
 +
-+	# —— 屏幕上方的 HUD：没投票时整块收起来 ——
++	# — The HUD at the top of the screen - fully collapsed when there's no vote —
 +	if yes <= 0 and not counting:
 +		if is_instance_valid(_mp8_vote_hud):
 +			_mp8_vote_hud.visible = false
@@ -795,8 +827,8 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +
 +	_mp8_vote_hud.visible = true
 +
-+	# 小游戏名走游戏自己的本地化表 —— 抽签屏用的是同一条路
-+	# （intermission_game_picker.gd:345），17 种语言自动跟着走。
++	# Minigame names go through the game's own localization table — the same path the picker screen uses
++	# (intermission_game_picker.gd:345), so all 17 languages follow automatically.
 +	var mg_name: String = tr(String(
 +		Globals.MinigameReadableNames.get(Globals.current_minigame_identifier, "N/A")
 +	))
@@ -818,8 +850,8 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +		_mp8_vote_lbl_you.text = (_mp8_t("you_yes") if i_voted else _mp8_t("you_no"))
 +
 +
-+# 原生渲染只有 960x540，字号给小了看不清；亮场景里没有底色也看不清，
-+# 所以用 PanelContainer 加半透明深底 + 绿边（沿用本 mod 其它 HUD 的配色）。
++# Native rendering is only 960x540, so small font sizes are unreadable, and without a background it's unreadable in bright scenes too,
++# so it uses a PanelContainer with a semi-transparent dark background + green border (the same colors as this mod's other HUDs).
 +func _mp8_vote_hud_build() -> void :
 +
 +	var layer := CanvasLayer.new()
@@ -856,8 +888,8 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	_mp8_vote_lbl_who   = _mp8_vote_mk_label(box, 13, Color(0.85, 0.85, 0.85))
 +	_mp8_vote_lbl_you   = _mp8_vote_mk_label(box, 14, Color(1.0, 0.9, 0.4))
 +
-+	# 这两行是唯一会变长的：名字可能很长很多，英文提示也比中文长。
-+	# 限宽 + 自动换行，面板才不会被撑到屏幕外。
++	# These two lines are the only ones that can get long. Names can be long and numerous, and English hints are longer than Chinese.
++	# A width limit + autowrap keeps the panel from being pushed off screen.
 +	for l in [_mp8_vote_lbl_who, _mp8_vote_lbl_you]:
 +		l.custom_minimum_size.x = MP8_VOTE_PANEL_W
 +		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -865,9 +897,9 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	_mp8_vote_hud = panel
 +
 +
-+# 字体必须显式套游戏自带的那份。默认主题字体不含中文字形，
-+# 直接用会显示成方块 —— 枪械工厂那块「枪械已大幅削弱」的提示
-+# （manufacture_gun.gd）就是这么做的，那条路径已经在实机上验过。
++# The game's bundled font must be applied explicitly. The default theme font has no Chinese glyphs,
++# and using it directly shows boxes — Manufacture Gun's "guns heavily nerfed" notice
++# (manufacture_gun.gd) does it this way, and that path has already been verified in the real game.
 +func _mp8_vote_mk_label(parent: Node, size: int, col: Color) -> Label :
 +
 +	var l := Label.new()
@@ -885,18 +917,18 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	return l
 +
 +
-+# ----------- ESC 菜单里的按钮（运行时注入）-----------
++# ----------- Button in the ESC menu (injected at runtime) -----------
 +#
-+# 为什么是运行时注入而不是改场景：本项目的构建管线只编译 .gdc（54 个脚本），
-+# 改 .tscn 要产出二进制场景，是全新能力，成本和风险都不成比例。
++# Why inject at runtime instead of changing the scene? This project's build pipeline only compiles .gdc (54 scripts),
++# and changing a .tscn means producing binary scenes, a whole new capability, with cost and risk out of proportion.
 +#
-+# 为什么由 game.gd 注入、而不是新增 pause_menu.gd 补丁：那样补丁面会从 54 变 55，
-+# 刚验完的「覆盖包 vs 重打 PCK 逐字节等价」就得重做一遍。
-+# 而且投票逻辑本来就都在这个文件里。
++# Why does game.gd inject it instead of adding a pause_menu.gd patch? That would take the patch surface from 54 to 55,
++# and the just-verified "overlay pack vs PCK repack byte-for-byte equivalence" would have to be redone.
++# Also, the voting logic already all lives in this file.
 +#
-+# 外观靠 duplicate() 白嫖：复制现成的 Resume 按钮，主题、字体、
-+# 连同它下面那个 ButtonClass 子节点全部免费继承 ——
-+# 跟大厅那边复制椅子（_mp8_clone_chairs）是同一招。
++# The look comes for free via duplicate(). Copying the existing Resume button inherits the theme, font,
++# and even its ButtonClass child node at no cost —
++# the same trick as copying the chairs in the lobby (_mp8_clone_chairs).
 +
 +func _mp8_vote_button_attach() -> void :
 +
@@ -907,21 +939,21 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +
 +	var resume = PauseMenu.get("resume_button")
 +	if resume == null or not is_instance_valid(resume):
-+		print("[MP8-投票] ESC 菜单里没找到 Resume 按钮，跳过按钮注入（F5 仍然可用）")
++		print("[MP8-VOTE] Resume button not found in the ESC menu, skipping button injection (F5 still works)")
 +		return
 +
 +	var box: Node = (resume as Button).get_parent()
 +	if box == null:
 +		return
 +
-+	# 不复制信号 —— 带上的话点它会触发 Resume。
++	# Don't copy signals — if they came along, clicking it would trigger Resume.
 +	var btn: Button = (resume as Button).duplicate(
 +		Node.DUPLICATE_GROUPS | Node.DUPLICATE_SCRIPTS
 +	)
 +	btn.name = "MP8RestartVote"
 +	btn.visible = false
 +
-+	# 保险：万一 duplicate 还是带过来了连接，全断掉
++	# Safety net - in case duplicate still brought connections along, disconnect all of them
 +	for c in btn.pressed.get_connections():
 +		btn.pressed.disconnect(c["callable"])
 +	btn.pressed.connect(_mp8_vote_press)
@@ -931,7 +963,7 @@ diff --git a/scripts/scenes/game/game.gd b/scripts/scenes/game/game.gd
 +	box.move_child(btn, clampi(at, 0, box.get_child_count() - 1))
 +
 +	_mp8_vote_btn = btn
-+	print("[MP8-投票] ESC 菜单已插入「重开本轮」按钮")
++	print("[MP8-VOTE] Inserted the 'Restart this round' button into the ESC menu")
 +	_mp8_vote_refresh_ui()
 +
 +

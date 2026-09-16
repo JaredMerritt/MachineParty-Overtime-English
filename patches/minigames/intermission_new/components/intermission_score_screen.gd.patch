@@ -5,9 +5,9 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
  class_name Intermission_ScoreScreen extends Node
  
 -const rank_y_positions: Array[float] = [0.84, 0.325, -0.19, -0.705]
-+# [MP8] 原版是 const。Godot 4 的常量数组是**只读**的，运行时 append 会直接报错，
-+# 而 8 人要用 8 个位置，所以必须改成 var。
-+# 读它的地方（本文件 + user_container_order_manager.gd）都是当属性读，改 var 不影响。
++# [MP8] Vanilla has this as a const. Constant arrays in Godot 4 are **read-only**, so an append at runtime errors out straight away,
++# and 8 players need 8 positions, so it has to become a var.
++# Everywhere it's read (this file + user_container_order_manager.gd) reads it as a property, so switching to var has no effect there.
 +var rank_y_positions: Array[float] = [0.84, 0.325, -0.19, -0.705]
  
  @export_category("components")
@@ -16,27 +16,27 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
  	for child in binary_cells_parent.get_children():
  		binary_cells.append(child)
  
-+	_mp8_shot_armed = Array(OS.get_cmdline_args()).has("mp8shot")
++	_mp8_shot_armed = NetworkManager.mp8_args().has("mp8shot")
 +
-+	# [MP8] 计分板扩位。**必须 deferred**，理由见 _mp8_extend()。
-+	if not Array(OS.get_cmdline_args()).has("mp8noscore"):
++	# [MP8] Expand the scoreboard slots. **Must be deferred**, see _mp8_extend() for why.
++	if not NetworkManager.mp8_args().has("mp8noscore"):
 +		_mp8_extend.call_deferred()
 +
 +
-+# [MP8] 每局结算的 3D 计分板本来只有 4 条，8 人时后 4 名根本不显示。
++# [MP8] The 3D results scoreboard shown after each match only has 4 rows, so with 8 players the last 4 never show at all.
 +#
-+# 为什么必须 call_deferred：
-+#   Intermission_UserContainer._ready() 会做
++# Why it must be call_deferred
++#   Intermission_UserContainer._ready() does
 +#       for child in get_parent().get_children(): user_container_array.append(child)
-+#   （每条自己收集所有兄弟，用来做"和上一名换位"的动画）。
-+#   本脚本挂在 `intermission score screen` 上，是 `users list` 的**兄弟**且排在前面，
-+#   所以本脚本的 _ready() 比那 4 条的 _ready() **先**跑。
-+#   这时候复制节点，原件的收集还没发生，各条拿到的名单会残缺不全。
-+#   延后一帧，等 4 条都收集完再动手，最后再统一把 8 条的名单覆盖成完整的一份。
++#   (each row collects all of its siblings itself, for the "swap with the placement above" animation).
++#   This script sits on `intermission score screen`, which is a **sibling** of `users list` and comes before it,
++#   so this script's _ready() runs **before** the _ready() of those 4 rows.
++#   Duplicating nodes at that point happens before the originals have collected, so each row ends up with an incomplete list.
++#   So wait one frame until all 4 rows have collected before acting, then finally overwrite all 8 rows' lists with one complete list.
 +#
-+# 排版：和赛前说明屏同一套思路——**缩小塞进原来的地盘，不动周围任何元素**。
-+# 这块板上下都是满的（上面是 SIMULATION CONCLUDED 抬头，下面紧跟二进制面板），
-+# 原版 4 条占 y 0.84 ~ -0.705（间距 0.515）。
++# Layout follows the same idea as the pre-match briefing screen — **shrink to fit the original area and don't move anything around it**.
++# This board is full above and below (the SIMULATION CONCLUDED header above, the binary panel right underneath),
++# and the vanilla 4 rows span y 0.84 ~ -0.705 (spacing 0.515).
 +func _mp8_extend() -> void :
 +
 +	var target: int = NetworkManager.MAX_PLAYERS
@@ -53,7 +53,7 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
 +
 +	var s: float = MP8_ROW_SCALE
 +	var step: float = MP8_ROW_STEP
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var t: String = String(a)
 +		if t.begins_with("mp8srow="):
 +			var parts: PackedStringArray = t.substr(8).split(",")
@@ -62,10 +62,10 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
 +			if parts.size() >= 2 and parts[1] != "":
 +				step = float(parts[1])
 +
-+	# 分数滚动时长：原版 4 条是 2.0 / 2.5 / 3.0 / 3.5，逐条递增。
-+	# 8 条要是照着 +0.5 续下去会变成 5.5，而总时长 = 最长的 ×1.5×1.5，
-+	# 整块结算屏会拖长一倍。所以改成**把 8 条铺在原来的 [首,末] 区间里**，
-+	# 最长值不变 → 结算节奏和原版完全一致。
++	# Score roll duration. The vanilla 4 rows use 2.0 / 2.5 / 3.0 / 3.5, increasing row by row.
++	# Continuing that +0.5 pattern for 8 rows would reach 5.5, and total duration = the longest ×1.5×1.5,
++	# which would make the whole results screen take twice as long. So instead **the 8 rows are spread across the original [first,last] range**,
++	# the longest value stays the same → results pacing matches vanilla exactly.
 +	var lerp_first: float = src.lerp_duration_score
 +	var lerp_last: float = user_container_array[n - 1].lerp_duration_score
 +
@@ -78,11 +78,11 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
 +		parent.add_child(dup)
 +		user_container_array.append(dup)
 +
-+	# 排成几列（mp8scols=<列数>,<列间距>）。
-+	# 1 列 = 8 条竖着排；2 列 = 左边 1~4、右边 5~8。
++	# How many columns to lay out in (mp8scols=<columns>,<column gap>).
++	# 1 column = all 8 rows stacked vertically, 2 columns = 1~4 on the left and 5~8 on the right.
 +	var cols: int = MP8_COLS
 +	var col_gap: float = MP8_COL_GAP
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var t: String = String(a)
 +		if t.begins_with("mp8scols="):
 +			var cp: PackedStringArray = t.substr(9).split(",")
@@ -92,7 +92,7 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
 +				col_gap = float(cp[1])
 +	var per_col: int = int(ceil(float(target) / float(cols)))
 +
-+	# y 表：第一条位置不动，其余按新间距往下排；分列时每列都从头开始排
++	# y table - the first row stays put and the rest stack downward at the new spacing. With columns, each column starts again from the top
 +	var base_y: float = rank_y_positions[0] if rank_y_positions.size() > 0 else 0.84
 +	rank_y_positions.clear()
 +	_mp8_rank_x_offsets.clear()
@@ -100,10 +100,10 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
 +		rank_y_positions.append(base_y - float(i % per_col) * step)
 +		_mp8_rank_x_offsets.append(float(i / per_col) * col_gap)
 +
-+	# 等比缩放是**朝各自原点收**的，而一条的原点在分数和名字之间，
-+	# 左边那截（名次数字、两个方块接口）会整体往右缩，
-+	# 于是整块名单离开原位、和左边那个大号总分之间裂开一道空隙。
-+	# 把最左边那个子件缩掉的量补回去，让名单的左边缘保持在原来的位置。
++	# Uniform scaling **shrinks toward each node's own origin**, and a row's origin sits between the score and the name,
++	# so the left part (the placement number and the two square connectors) shrinks rightward as a whole,
++	# which pulls the whole list off its original spot and opens a gap between it and the large total score on the left.
++	# Add back the amount the leftmost child shrank by, so the list's left edge stays where it was.
 +	var left_x: float = 0.0
 +	for child in src.get_children():
 +		if child is Node3D:
@@ -112,7 +112,7 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
 +
 +	_mp8_base_x = src.position.x + x_shift
 +
-+	# 名次 → 槽位 x 的绝对表，换位动画要用（见 user_container_order_manager.gd）
++	# Absolute table of placement → slot x, used by the swap animation (see user_container_order_manager.gd)
 +	mp8_rank_x_positions.clear()
 +	for i in target:
 +		mp8_rank_x_positions.append(_mp8_base_x + _mp8_rank_x_offsets[i])
@@ -124,25 +124,25 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
 +		uc.position.y = rank_y_positions[i]
 +		uc.lerp_duration_score = lerpf(lerp_first, lerp_last, float(i) / float(target - 1))
 +
-+	# ⚠️ 按下标【写】的数组，不补就是越界写（上次会话的 0xc0000005 就是这么来的）：
++	# ⚠️ This array is **written** by index, so without padding it that's an out-of-bounds write (that is how last session's 0xc0000005 happened). The write is in
 +	#   sort_user_containers_by_score():  score_container_nodes[rank_position_counter] = uc
 +	score_container_nodes = user_container_array.duplicate()
 +
-+	# 每条自己那份"所有兄弟"的名单，统一覆盖成完整的 8 条。
-+	# 用 duplicate() 各给一份，避免 8 条共用同一个 Array 对象。
++	# Overwrite each row's own "all siblings" list with the complete set of 8.
++	# duplicate() gives each row its own copy, so the 8 rows don't share one Array object.
 +	for uc in user_container_array:
 +		uc.user_container_array = user_container_array.duplicate()
 +
-+	print("[MP8] 3D 计分板：玩家条 %d->%d, 缩放 %.2f, 间距 %.4f, %d 列(间距 %.2f)\n        y表 %s\n        x表 %s" % [
++	print("[MP8] 3D scoreboard: player rows %d->%d, scale %.2f, spacing %.4f, %d columns (gap %.2f)\n        y table %s\n        x table %s" % [
 +		n, user_container_array.size(), s, step, cols, col_gap,
 +		str(rank_y_positions), str(mp8_rank_x_positions)
 +	])
 +
 +
-+# [MP8] duplicate() **不会**重映射指向自己子节点的 @export 引用——
-+# 复制出来的那条会继续指着**原件**的 Label3D，于是 8 条全在往同一行写字。
-+# 解法照 network_manager.gd 的 _mp8_extend_lobby()：
-+# 先用 src.get_path_to() 取相对路径，再在副本上 get_node() 重新解析。
++# [MP8] duplicate() does **not** remap @export references that point at its own child nodes —
++# the copied row keeps pointing at the **original's** Label3D, so all 8 rows write text into the same row.
++# The fix follows _mp8_extend_lobby() in network_manager.gd.
++# First get the relative path with src.get_path_to(), then re-resolve it on the copy with get_node().
 +func _mp8_reresolve_children(src: Intermission_UserContainer, dup: Intermission_UserContainer) -> void :
 +
 +	if is_instance_valid(src.anim_connector):
@@ -164,44 +164,44 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
 +				ops.append(re)
 +	dup.opacity_visuals = ops
 +
-+	# score_screen / container_order_swapper 指向的是**外部**共享节点，
-+	# 复制过来的引用本来就对，不用重解析。
++	# score_screen / container_order_swapper point at **external** shared nodes,
++	# so the copied references are already correct and don't need re-resolving.
 +
 +
-+# [MP8] 自截图。和赛前说明屏那张的抓法不一样：
-+# 赛前说明屏是画进 SubViewport 的 2D UI，抓那个 SubViewport 就行；
-+# **这块计分板是摆在中场休息房间里的真 3D 物件**，只能抓整个游戏窗口。
++# [MP8] Self-screenshot. It is captured differently from the pre-match briefing screen one.
++# The briefing screen is 2D UI drawn into a SubViewport, so grabbing that SubViewport is enough.
++# **This scoreboard is a real 3D object placed in the intermission room**, so only the whole game window can be captured.
 +#
-+# 为什么是一串时间点而不是一张：第一版挂在 score_screen_finished 上，
-+# 结果那个信号一发，服务器立刻就去安排下一局、把计分板 hide 掉了，
-+# 截到的是一整屏绿色噪点（转场遮罩）。计分板的时间线是：
-+#   0.6s 行逐条出现 → 2.2s 二进制板 → 2.7s 分数开始滚 → 约 8s 滚完 → 约 10.6s 收屏
-+# 所以干脆按固定时间点连拍几张，事后挑一张对的，一次跑完就够看。
++# Why a series of time points instead of one shot? The first version hooked score_screen_finished,
++# but as soon as that signal fired the server immediately set up the next match and hid the scoreboard,
++# so the capture was a full screen of green noise (the transition mask). The scoreboard timeline goes like this.
++#   0.6s rows appear one by one → 2.2s binary board → 2.7s scores start rolling → ~8s rolling done → ~10.6s screen closes
++# So just take a burst at fixed time points and pick the right one afterward. One run is enough to check.
 +const MP8_SHOT_TIMES: Array[float] = [4.0, 7.0, 10.0]
 +
 +var _mp8_shot_armed: bool = false
 +
-+# [MP8] 玩家条排版参数。命令行 mp8srow=<缩放>,<间距> / mp8scols=<列数>,<列间距> 可临时覆盖。
-+# 原版 4 条：间距 0.515，占 y 0.84 ~ -0.705。
-+# 分两列之后每列只有 4 条，纵向不再挤，行距用回原版的 0.515。
-+# 横向是新的瓶颈：一条（名字 7 字符）在缩放 1.0 下约占 420px，板子可用宽约 490px，
-+# 所以两列 + 间隙要压在缩放 0.55 上下。
++# [MP8] Player row layout parameters. Command-line mp8srow=<scale>,<spacing> / mp8scols=<columns>,<column gap> can override them temporarily.
++# Vanilla 4 rows use spacing 0.515 and span y 0.84 ~ -0.705.
++# With two columns each column only has 4 rows, so it's no longer cramped vertically and row spacing goes back to vanilla's 0.515.
++# Width is the new bottleneck. One row (7-character name) takes about 420px at scale 1.0, and the board's usable width is about 490px,
++# so two columns + gap have to be squeezed to around scale 0.55.
 +const MP8_ROW_SCALE: float = 0.48
 +const MP8_ROW_STEP: float = 0.515
 +const MP8_COLS: int = 2
 +const MP8_COL_GAP: float = 3.5
 +
-+# 每个名次的槽位 x（**绝对值**，不是偏移）。
-+# user_container_order_manager.gd 换位时要读它，所以是公开的、名字带 mp8 前缀。
++# Slot x for each placement (an **absolute value**, not an offset).
++# user_container_order_manager.gd reads it when swapping, so it is public and its name has the mp8 prefix.
 +var mp8_rank_x_positions: Array[float] = []
 +
 +var _mp8_rank_x_offsets: Array[float] = []
 +var _mp8_base_x: float = 0.0
 +
 +
-+# [MP8] 按名次把一条摆到位。
-+# 原版只设 y（`user_container.position.y = rank_y_positions[i]`），因为一列时 x 永远不变；
-+# 分列之后 x 也成了名次的函数，必须一起设，否则换列的那几条会留在原来那一列的 x 上。
++# [MP8] Put a row in place according to its placement.
++# Vanilla only sets y (`user_container.position.y = rank_y_positions[i]`), because x never changes with one column.
++# With columns, x also depends on placement and must be set too, otherwise the rows that switch column stay at their old column's x.
 +func _mp8_place(uc: Node3D, i: int) -> void :
 +	if i < rank_y_positions.size():
 +		uc.position.y = rank_y_positions[i]
@@ -226,7 +226,7 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
 +		var img: Image = get_viewport().get_texture().get_image()
 +		if img != null:
 +			img.save_png("user://mp8_score_%d_t%d.png" % [tag, int(t)])
-+			print("[MP8] mp8shot：已存 user://mp8_score_%d_t%d.png" % [tag, int(t)])
++			print("[MP8] mp8shot: saved user://mp8_score_%d_t%d.png" % [tag, int(t)])
 +
  func _physics_process(delta: float) -> void :
  
@@ -236,7 +236,7 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
  		user_container.user_network_id = -2
  		user_container.user_rank_value = -1
 -		user_container.position.y = rank_y_positions[i]
-+		_mp8_place(user_container, i)  # [MP8] 原版是只设 y
++		_mp8_place(user_container, i)  # [MP8] Vanilla only set y
  		user_container.container_active = false
  
  	var player_by_score_array: Array
@@ -245,7 +245,7 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
  	for i in user_container_array.size():
  		var user_container = user_container_array[i]
 -		user_container.position.y = rank_y_positions[i]
-+		_mp8_place(user_container, i)  # [MP8] 原版是只设 y
++		_mp8_place(user_container, i)  # [MP8] Vanilla only set y
  		if i < player_by_score_array.size():
  			var user_score = player_by_score_array[i]["score"]
  			var user_name = intermission_manager.get_user_name_from_network_id(player_by_score_array[i]["network_id"])
@@ -253,7 +253,7 @@ diff --git a/minigames/intermission_new/components/intermission_score_screen.gd 
  	reset_user_containers(_total_score_by_network_id, _game_score_by_network_id)
  	stopping_music = _stopping_music
  
-+	_mp8_shot_timeline()  # [MP8] 从这里开始计时连拍
++	_mp8_shot_timeline()  # [MP8] Start the timed screenshot burst from here
 +
  	active_total_score_by_network_id = _total_score_by_network_id
  	active_game_score_by_network_id = _game_score_by_network_id

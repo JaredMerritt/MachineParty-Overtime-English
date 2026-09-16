@@ -1,22 +1,27 @@
-﻿# Machine Party 8 人 mod —— 把 patches\ 打到你自己解包出来的 src\ 上
+﻿# Machine Party 8-player mod — apply patches\ onto the src\ you unpacked yourself
 #
-# 本 mod 公开的是**差异补丁**，不是完整脚本 —— 因为完整脚本里绝大部分是游戏自己的
-# 反编译源码，我们不分发它。你需要用自己那份正版游戏解包出 src\，再跑本脚本，
-# 就能得到与作者本机**逐字节相同**的 patch\。
+# This mod publishes **diff patches**, not full scripts — most of a full script is the game's own
+# decompiled source, which we don't redistribute. Unpack src\ from your own legitimate copy, run this
+# script, and you get a patch\ that is **byte-for-byte identical** for anyone applying these same patches.
 #
-# 用法：
+# Before git sees a patch it is vetted by Confirm-SafePatch (tools\trust.psm1). Only plain text edits of
+# the one file each patch is named after are allowed. Afterwards patch\.overtime-stamp.json records the
+# hash of every patch, source and output, so later build steps can prove nothing changed in between.
+#
+# Usage
 #   powershell -ExecutionPolicy Bypass -File tools\apply_patches.ps1
 #   powershell -ExecutionPolicy Bypass -File tools\apply_patches.ps1 -Src D:\mp\src
 #
-# 前置：见 docs\BUILD.md（要 gdre_tools v2.6.4 + 游戏 v2.1.2 + git）
+# Prerequisites are in docs\BUILD.md (gdre_tools v2.6.4 + game v2.1.2 + git)
 
 param(
-    [string] $Src = "",       # 解包出来的原版脚本目录，默认 <仓库>\src
-    [string] $Out = "",       # 输出目录，默认 <仓库>\patch
-    [switch] $Force           # 输出目录已存在时先清空
+    [string] $Src = "",       # Folder of unpacked vanilla scripts, defaults to <repo>\src
+    [string] $Out = "",       # Output folder, defaults to <repo>\patch
+    [switch] $Force           # Clear the output folder first if it already exists
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "trust.psm1") -Force
 
 $root    = Split-Path -Parent $PSScriptRoot
 $patches = Join-Path $root "patches"
@@ -24,51 +29,61 @@ $patches = Join-Path $root "patches"
 if ($Src -eq "") { $Src = Join-Path $root "src" }
 if ($Out -eq "") { $Out = Join-Path $root "patch" }
 
-if (-not (Test-Path $patches)) { throw "找不到 $patches" }
+if (-not (Test-Path $patches)) { throw "Cannot find $patches" }
 if (-not (Test-Path $Src)) {
     throw @"
-找不到 $Src
+Cannot find $Src
 
-你需要先用 gdre_tools 把自己那份游戏的 PCK 解包成脚本。步骤见 docs\BUILD.md。
-一句话版：
-  gdre_tools.exe --headless --recover="<游戏目录>\Machine Party.pck" --output="$Src"
+First unpack your own copy of the game's PCK into scripts with gdre_tools. See docs\BUILD.md for the steps.
+The short version:
+  gdre_tools.exe --headless --recover="<game folder>\Machine Party.pck" --output="$Src"
 "@
 }
 
 $git = (Get-Command git -ErrorAction SilentlyContinue)
-if ($null -eq $git) { throw "需要 git（用 git apply 打补丁）" }
+if ($null -eq $git) { throw "git is required (patches are applied with git apply)" }
 
 $list = Get-ChildItem $patches -Recurse -Filter "*.patch" -File
-if ($list.Count -eq 0) { throw "patches\ 下没有 .patch 文件" }
+if ($list.Count -eq 0) { throw "patches\ contains no .patch files" }
+
+# Vet every patch before touching anything. One bad patch stops the whole run.
+foreach ($p in $list) {
+    $target = $p.FullName.Substring($patches.Length + 1)
+    $target = $target.Substring(0, $target.Length - 6).Replace('\', '/')
+    Confirm-SafePatch -PatchPath $p.FullName -Target $target
+}
+Write-Host "Vetted $($list.Count) patches: each is a plain text edit of its own target file"
 
 if (Test-Path $Out) {
     if ($Force) { Remove-Item $Out -Recurse -Force }
-    else { throw "$Out 已存在。确认可以覆盖后加 -Force 重跑。" }
+    else { throw "$Out already exists. Re-run with -Force once you are sure it can be overwritten." }
 }
 New-Item -ItemType Directory -Force $Out | Out-Null
 
-Write-Host "打补丁：$($list.Count) 个"
+Write-Host "Applying patches: $($list.Count)"
 
 $missing = @()
 $failed  = @()
 $ok      = 0
+$usedSrc = @{}
 
 foreach ($p in $list) {
     # patches\modules\multiplayer\network_manager.gd.patch
     #   -> modules\multiplayer\network_manager.gd
     $rel = $p.FullName.Substring($patches.Length + 1)
-    $rel = $rel.Substring(0, $rel.Length - 6)      # 去掉 .patch
+    $rel = $rel.Substring(0, $rel.Length - 6)      # strip .patch
 
     $from = Join-Path $Src $rel
     if (-not (Test-Path $from)) { $missing += $rel; continue }
+    $usedSrc[$rel.Replace('\', '/')] = Get-FileSha256 $from
 
     $dest = Join-Path $Out $rel
     New-Item -ItemType Directory -Force (Split-Path -Parent $dest) | Out-Null
     Copy-Item $from $dest -Force
 
-    # ⚠️ 这两个 -c 缺一不可。本机 git 若开着 core.autocrlf（Windows 默认装法常常是开的），
-    #    apply 会把 LF 全部写成 CRLF，于是每行多一个字节 —— 编译能过，但产物与作者那份
-    #    对不上，任何字节级校验都会挂。作者本机实测踩过这一条。
+    # ⚠️ Both -c flags are required. If local git has core.autocrlf on (common with a default Windows install),
+    #    apply writes every LF as CRLF, adding one byte per line. It still compiles, but the output no longer
+    #    matches the author's and any byte-level check fails. The author hit this exact problem locally.
     Push-Location $Out
     git -c core.autocrlf=false -c core.eol=lf apply --whitespace=nowarn "$($p.FullName)" 2>&1 | Out-Null
     $code = $LASTEXITCODE
@@ -79,24 +94,38 @@ foreach ($p in $list) {
 
 Write-Host ""
 if ($missing.Count -gt 0) {
-    Write-Host "以下文件在 src\ 里找不到（$($missing.Count) 个）：" -ForegroundColor Red
+    Write-Host "These files are missing from src\ ($($missing.Count)):" -ForegroundColor Red
     foreach ($x in $missing) { Write-Host "    $x" -ForegroundColor Red }
-    Write-Host "→ 十有八九是**游戏版本不对**。本 mod 针对 v2.1.2；" -ForegroundColor Yellow
-    Write-Host "  游戏更新过就会出现这个，要等 mod 出适配版，或按 docs\UPDATING.md 自己迁。" -ForegroundColor Yellow
+    Write-Host "→ Almost certainly the **wrong game version**. This mod targets v2.1.2." -ForegroundColor Yellow
+    Write-Host "  This shows up after a game update. Wait for an updated mod, or port it yourself with docs\UPDATING.md." -ForegroundColor Yellow
 }
 if ($failed.Count -gt 0) {
-    Write-Host "以下补丁打不上（$($failed.Count) 个）：" -ForegroundColor Red
+    Write-Host "These patches failed to apply ($($failed.Count)):" -ForegroundColor Red
     foreach ($x in $failed) { Write-Host "    $x" -ForegroundColor Red }
-    Write-Host "→ 两个常见原因：" -ForegroundColor Yellow
-    Write-Host "  ① 解包用的 gdre 版本不是 v2.6.4（反编译结果有出入，行号对不上）；" -ForegroundColor Yellow
-    Write-Host "  ② 游戏不是 v2.1.2。" -ForegroundColor Yellow
+    Write-Host "→ Two common causes:" -ForegroundColor Yellow
+    Write-Host "  ① The gdre used for unpacking is not v2.6.4 (decompiled output differs, so line numbers don't match)." -ForegroundColor Yellow
+    Write-Host "  ② The game is not v2.1.2." -ForegroundColor Yellow
 }
 if ($missing.Count -gt 0 -or $failed.Count -gt 0) {
-    throw "打补丁未全部成功：成功 $ok / 共 $($list.Count)"
+    throw "Not all patches applied: $ok succeeded out of $($list.Count)"
 }
 
-Write-Host "全部成功：$ok 个 → $Out" -ForegroundColor Green
+# Build stamp. build.ps1 refuses to compile a patch\ that no longer matches it.
+$srcKeys = [string[]]@($usedSrc.Keys)
+[Array]::Sort($srcKeys, [StringComparer]::Ordinal)
+$srcHashes = [ordered]@{}
+foreach ($k in $srcKeys) { $srcHashes[$k] = $usedSrc[$k] }
+Write-JsonFile -Path (Join-Path $Out ".overtime-stamp.json") -Data ([ordered]@{
+    stage   = "apply"
+    created = (Get-Date).ToUniversalTime().ToString("o")
+    git     = Get-GitProvenance -Root $root
+    patches = Get-TreeHashes -Root $patches -Extension ".patch"
+    src     = $srcHashes
+    output  = Get-TreeHashes -Root $Out -Extension ".gd"
+})
+
+Write-Host "All succeeded: $ok → $Out" -ForegroundColor Green
 Write-Host ""
-Write-Host "下一步：" -ForegroundColor Yellow
+Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host "  powershell -ExecutionPolicy Bypass -File tools\build.ps1 -CompileOnly" -ForegroundColor Yellow
 Write-Host "  powershell -ExecutionPolicy Bypass -File tools\build_installer.ps1" -ForegroundColor Yellow

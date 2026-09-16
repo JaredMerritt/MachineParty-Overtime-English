@@ -5,25 +5,25 @@ diff --git a/minigames/forklift_certified/scripts/crate_manager.gd b/minigames/f
  var instances: Dictionary[int, ForkliftCertifiedCrate]
  var remove_indicies_after_move: Array[int]
  
-+# ---------------------------------------------------------------- [MP8] 撒点参数
-+# 原版把撒点区半宽写死成 6.0、`while` 无上界、循环里还有个 `counter >= 10` 的硬上限。
-+# 三条在 4 人下都无害，8 人下第一条就把服务器冻住了：
++# ---------------------------------------------------------------- [MP8] Scatter parameters
++# Vanilla hardcodes the scatter area half-width to 6.0, the `while` has no upper bound, and the loop also has a hard cap of `counter >= 10`.
++# All three are harmless with 4 players, but with 8 players the first one freezes the server.
 +#
-+#   `spawn_radius` 是**点与点的最小距离**（见 poisson_disc_sampling._is_valid_sample
-+#   里的 `dist < poisson_radius`），场景把它设成 4.0。
-+#   12x12 的区里塞最小距离 4 米的点，probe59 实测 3000 次采样：
-+#   平均 7.44 个、最好 11 个，**一次都没到 16**（8 人 = 人数x2 = 16）。
-+#   → `while points.size() < 16` 永不退出，服务器卡死在 initialize() 里，全场干等。
++#   `spawn_radius` is the **minimum distance between points** (see `dist < poisson_radius` in poisson_disc_sampling._is_valid_sample),
++#   and the scene sets it to 4.0.
++#   Packing points at least 4 m apart into a 12x12 area, probe59 measured 3000 samples in practice.
++#   Average 7.44 points, best 11, and **not once did it reach 16** (8 players = player count x2 = 16).
++#   → `while points.size() < 16` never exits, the server hangs inside initialize(), and everyone just waits.
 +#
-+# 所以这里做两件事，都不改 4 人局的结果：
-+#   1. 撒点区半宽改成可配（`mp8_half_extent`，默认仍是原版的 6.0）；
-+#   2. `while` 改成**有上界、留最好的一次**。达标即退出 —— 与原版逐值等价；
-+#      只有在原版会死循环的那种情况下才有区别（拿最好的一次继续，而不是冻住）。
++# So this does two things, and neither changes the result of a 4-player match.
++#   1. The scatter area half-width is now configurable (`mp8_half_extent`, still defaults to vanilla's 6.0).
++#   2. The `while` is now **bounded and keeps the best attempt**. It exits as soon as the target is met — value-for-value identical to vanilla.
++#      It only differs in the case where vanilla would loop forever (it carries on with the best attempt instead of freezing).
 +#
-+# 参数由 forklift_certified.initialize() 按人数设，见那边的 `_mp8_apply_crate_profile()`。
++# The parameters are set by forklift_certified.initialize() based on player count. See `_mp8_apply_crate_profile()` there.
 +var mp8_half_extent: float = 6.0
 +var mp8_max_attempts: int = 200
-+const MP8_HARD_CEILING: int = 24     # 顶掉原版那个写死的 10；纯保险，正常够不着
++const MP8_HARD_CEILING: int = 24     # Replaces vanilla's hardcoded 10. Purely a safety net, normally never reached
 +
  func _physics_process(_delta: float) -> void :
  
@@ -50,9 +50,9 @@ diff --git a/minigames/forklift_certified/scripts/crate_manager.gd b/minigames/f
  
 -	while points.size() < target_size:
 -		points = PoissonDiscSampling.generate_points_for_polygon(
-+	# [MP8] 原版：`while points.size() < target_size:` —— 取不到就是死循环。
-+	# 改成有上界的重试，并**留住最好的一次**：够了立刻退出（和原版一样），
-+	# 实在凑不齐也只是少几个箱子，不会把服务器挂住。
++	# [MP8] Vanilla was `while points.size() < target_size:` — if it can't get enough points it loops forever.
++	# Now it's a bounded retry that **keeps the best attempt**. It exits as soon as there are enough (same as vanilla),
++	# and if it really can't reach the target it just spawns a few fewer crates instead of hanging the server.
 +	var attempts: int = 0
 +	while points.size() < target_size and attempts < mp8_max_attempts:
 +		attempts += 1
@@ -63,12 +63,12 @@ diff --git a/minigames/forklift_certified/scripts/crate_manager.gd b/minigames/f
 +			points = got
 +
 +	if points.size() < target_size:
-+		push_warning("[MP8] 叉车认证：撒了 %d 次也只凑到 %d 个点（要 %d 个），就按 %d 个箱子开局。区半宽 %.1f，最小间距 %.1f" % [
++		push_warning("[MP8] Forklift Certified: scattered %d times but only got %d points (needed %d), starting with %d crates. Area half-width %.1f, min spacing %.1f" % [
 +			attempts, points.size(), target_size, points.size(), mp8_half_extent, spawn_radius
 +		])
 +		target_size = points.size()
 +
-+	print("[MP8] 叉车认证：板条箱 %d 个（区 %.0fx%.0f，最小间距 %.1f，采样 %d 次）" % [
++	print("[MP8] Forklift Certified: %d crates (area %.0fx%.0f, min spacing %.1f, %d samples)" % [
 +		target_size, mp8_half_extent * 2.0, mp8_half_extent * 2.0, spawn_radius, attempts
 +	])
  
@@ -77,7 +77,7 @@ diff --git a/minigames/forklift_certified/scripts/crate_manager.gd b/minigames/f
  		spawn_crate(Vector3(points[i].x, 0.0, points[i].y))
  		counter += 1
 -		if counter >= 10:
-+		if counter >= MP8_HARD_CEILING:     # [MP8] 原版这里写死的是 10
++		if counter >= MP8_HARD_CEILING:     # [MP8] Vanilla hardcoded this as 10
  			return
  
  func spawn_crate(_position: Vector3):

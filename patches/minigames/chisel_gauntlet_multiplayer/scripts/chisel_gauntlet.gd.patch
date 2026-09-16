@@ -5,14 +5,14 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
  }
  
  @export_category("Shared Parameters")
-+# [MP8] 硬阻塞 ①：原版只有 4 项，spawn_players() 按 [counter] 索引 → 第 5 人越界。
-+# **前 4 项逐字节保持原样**（0/180/90/-90），后 4 项是它们之间的 45° 方位，
-+# 于是 4 人及以下的座位与原版完全一致。
-+# 座位不需要新几何体：玩家场景的 ./Visuals 局部偏移 (0, -0.037, -8.0) 决定了
-+# 所有人都站在半径 8 米的圆周上，只靠 yaw 区分方位；45° 间隔 = 弧间距 6.28 米。
-+# ⚠️ 这是 @export，真实值以场景为准（坑第 3 条）—— 已用 probe17 dump 过
-+# chisel_gauntlet.tscn，根节点**没有**覆盖本属性，所以脚本默认值就是运行时真值。
-+# 即便如此，_mp8_setup_seats() 仍会把运行时真值打进日志，不靠"我记得没覆盖"。
++# [MP8] Hard blocker ① - vanilla has only 4 entries, and spawn_players() indexes by [counter] → the 5th player goes out of bounds.
++# **The first 4 entries are kept byte for byte** (0/180/90/-90), and the last 4 are the 45° directions between them,
++# so with 4 players or fewer the seats are exactly the same as vanilla.
++# Seats need no new geometry. The ./Visuals local offset (0, -0.037, -8.0) in the player scene means
++# everyone stands on a circle of radius 8 m, told apart only by yaw. A 45° spacing = 6.28 m of arc between seats.
++# ⚠️ This is an @export, so the real value comes from the scene (pitfall #3) — probe17 has already dumped
++# chisel_gauntlet.tscn, and the root node does **not** override this property, so the script default is the real runtime value.
++# Even so, _mp8_setup_seats() still logs the real runtime value instead of relying on "I remember it isn't overridden".
  @export var player_rotations: Array[float] = [
 -	0.0, 180.0, 90.0, -90
 +	0.0, 180.0, 90.0, -90, 45.0, 225.0, 135.0, -45.0
@@ -23,110 +23,110 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
  var submitted_solutions: Dictionary[int, Array]
  
  
-+# [MP8] 硬阻塞 ②：这张表决定散弹枪转过去检查**哪些座位**（round_eliminate.gd:25
-+# `for i in owner.shotgun_check_order`）。原版只列了 0~3，座位 4~7 不在表里
-+# → **5~8 号玩家答错也永远不会被淘汰**，是功能坏，不是难看。
++# [MP8] Hard blocker ② - this table decides **which seats** the shotgun turns to check (round_eliminate.gd:25
++# `for i in owner.shotgun_check_order`). Vanilla only lists 0~3, so seats 4~7 aren't in the table
++# → **players 5~8 would never be eliminated even with wrong answers**. That's broken functionality, not just cosmetics.
 +#
-+# 原版的 [0, 2, 1, 3] 对应角度 0 / 90 / 180 / 270 —— 它本来就是**按角度升序**排的，
-+# 只是被写成了下标字面量。所以这里不手写下标，改成运行时**按角度排序**推出来
-+# （_mp8_setup_seats）：4 人时算出来的正是 [0, 2, 1, 3]，与原版逐值相同；
-+# 8 人时是 [0, 4, 2, 6, 1, 5, 3, 7]（0→45→90→…→315，枪一路顺时针扫过去不回头）。
++# Vanilla's [0, 2, 1, 3] maps to angles 0 / 90 / 180 / 270 — it was already **sorted by ascending angle**,
++# just written out as index literals. So instead of hand-writing indices, it's derived at runtime **by sorting on angle**
++# (_mp8_setup_seats). With 4 players the result is exactly [0, 2, 1, 3], identical to vanilla value for value.
++# With 8 players it's [0, 4, 2, 6, 1, 5, 3, 7] (0→45→90→…→315, the gun sweeps clockwise all the way round without doubling back).
 +#
-+# ⚠️ 表里只放**本局实际有人的座位**。多放的话 round_eliminate 会走 else 分支
-+# 把 sequential 置 false，转枪变成慢速+另一种音效 —— 4 人局的手感就跟原版不一样了。
++# ⚠️ The table only holds **seats actually occupied this match**. With extra entries round_eliminate takes the else branch
++# and sets sequential to false, so the gun turns slowly with a different sound effect — and 4-player matches would no longer feel like vanilla.
  var shotgun_check_order: Array[int] = [0, 2, 1, 3]
  
  var first_round: bool = true
-@@ -87,9 +106,419 @@ var round_time_remaining: int
+@@ -87,9 +106,420 @@ var round_time_remaining: int
  var spectate_positions: Array[Vector3]
  var can_submit: bool = false
  
 +
-+# [MP8] ================ 凿刻考验（ChiselGauntlet）8 人适配 ================
++# [MP8] ================ Chisel Gauntlet (ChiselGauntlet) 8-player adaptation ================
 +#
-+# 逆向出来的场景事实（probe17 dump 原装 PCK 量的，不是猜的）：
++# Scene facts from reverse engineering (measured by probe17 dumping the stock PCK, not guesses).
 +#
-+# 1. **所有玩家共用同一个出生点**：spawn_players() 里
-+#    `teleport_rpc(player_spawn_node.global_position, Vector3(0, player_rotations[counter], 0))`，
-+#    PlayerSpawnNode 在原点，**玩家只靠 yaw 区分**。玩家场景 ./Visuals 局部偏移
-+#    (0, -0.037, -8.0) 把人推到半径 8 米的圆周上 → 座位 = 一个角度，不是一个坐标。
-+#    **所以加座位不需要新的出生点几何体，扩 player_rotations 就够了。**
++# 1. **All players share the same spawn point**. In spawn_players(),
++#    `teleport_rpc(player_spawn_node.global_position, Vector3(0, player_rotations[counter], 0))`,
++#    PlayerSpawnNode is at the origin, and **players are told apart only by yaw**. The ./Visuals local offset in the player scene
++#    (0, -0.037, -8.0) pushes players out onto a circle of radius 8 m → a seat = an angle, not a coordinate.
++#    **So adding seats needs no new spawn point geometry, extending player_rotations is enough.**
 +#
-+# 2. **桌子碰撞体**：`Colliders/StaticBody3D{,2,3,4}`，四个全在原点、只有 yaw 不同，
-+#    子节点 `collision shape desk` 局部偏移 (0.037, 0.822, 4.613)。
-+#    → 复制一份、绕 Y 转过去就是新座位的桌子碰撞体。
++# 2. **Desk colliders** - `Colliders/StaticBody3D{,2,3,4}`, all four at the origin and differing only in yaw,
++#    with child `collision shape desk` at local offset (0.037, 0.822, 4.613).
++#    → clone one and rotate it around Y, and that's the desk collider for a new seat.
 +#
-+# 3. **可见桌子不是一整块**（这条和最初的侦察结论相反，必须记下来）：
-+#    `Geometry/environment` 那一整块是 **`visible = false` 的灰盒**，不是玩家看到的东西；
-+#    真正的美术在 `./chisel gauntlet art2`，其中
-+#    `walls/control panel alpha|bravo|charlie|delta` 是**四份独立的 MeshInstance3D**，
-+#    和碰撞体一样全在原点、只有 yaw 不同。→ 可见桌子也能整份复制+旋转。
-+#    **教训：判断"能不能拆"之前先确认你看的那块网格是不是真的在画面上。**
++# 3. **The visible desks are not one single piece** (this contradicts the initial diagnostic finding, so it must be written down).
++#    The single `Geometry/environment` piece is a **`visible = false` greybox**, not what players actually see.
++#    The real art is in `./chisel gauntlet art2`, where
++#    `walls/control panel alpha|bravo|charlie|delta` are **four separate MeshInstance3D nodes**,
++#    all at the origin like the colliders, differing only in yaw. → the visible desks can also be cloned whole + rotated.
++#    **Lesson - before judging "can it be split", first confirm the mesh you're looking at is actually on screen.**
 +#
-+# 一切配对（碰撞体 ↔ 座位、可见件 ↔ 座位）**一律按空间角度算，不用下标算术**
-+# —— 残骸平台翻转配对那个坑（HANDOFF 坑第 5 条/T18）就是栽在下标上。
++# All pairing (collider ↔ seat, visible piece ↔ seat) **is always done by spatial angle, never by index arithmetic**
++# — the Junk Platform flipped-pairing pitfall (HANDOFF pitfall #5 / T18) tripped over exactly that.
 +
 +const MP8_MAX_SEATS: int = 8
 +
-+## 随座位走的可见美术件（`chisel gauntlet art2/walls` 下）。
-+## 四份互为 90° 旋转的同一件东西，整份复制 + 绕 Y 转到新方位即可。
-+## ⚠️ `control panel hole mesh` / `control panel hole wires` 是场地中心的单件，
-+## 名字像但**不随座位走**，绝不能进这张表。
++## Visible art pieces that follow the seats (under `chisel gauntlet art2/walls`).
++## Four copies of the same thing, each rotated 90° from the others, so just clone them whole + rotate around Y to the new direction.
++## ⚠️ `control panel hole mesh` / `control panel hole wires` are single pieces at the center of the venue.
++## The names look similar but they **don't follow the seats**, so they must never go in this table.
 +const MP8_SEAT_ART_NODES: Array[String] = [
 +	"control panel alpha", "control panel bravo",
 +	"control panel charlie", "control panel delta",
 +]
 +
-+## 座位上方的招牌（alpha/bravo/charlie/delta 四块）。默认跟着桌子一起复制。
++## The signs above the seats (four of them, alpha/bravo/charlie/delta). Cloned along with the desks by default.
 +const MP8_SEAT_SIGN_NODES: Array[String] = [
 +	"sign_alpha", "sign_bravo", "sign_charlie", "sign_delta",
 +]
 +
 +var _mp8_seat_count: int = 0
-+## 给新座位复制**可见**桌子。用户 2026-08-16 定案：要可见桌子，所以默认开。
-+## `mp8chiselnodesk` 可关掉（退回只有碰撞体的样子，用来对照）。
++## Clone **visible** desks for the new seats. User decision 2026-08-16 - visible desks are wanted, so it's on by default.
++## `mp8chiselnodesk` turns it off (falls back to colliders only, for comparison).
 +var _mp8_clone_desk_art: bool = true
-+## mp8chiselnosign：复制可见桌子时不带招牌
++## mp8chiselnosign - clone the visible desks without the signs
 +var _mp8_clone_sign: bool = true
 +
 +
 +func _mp8_setup_seats() -> void :
 +
-+	var args := Array(OS.get_cmdline_args())
++	var args := NetworkManager.mp8_args()
 +
 +	_mp8_clone_desk_art = not args.has("mp8chiselnodesk")
 +	_mp8_clone_sign = not args.has("mp8chiselnosign")
 +
-+	# ⚠️ 先把**运行时真值**打出来再动它（坑第 3 条：@export 的真实值以场景为准，
-+	# 脚本里的默认值是骗人的。本项目已因此翻车两次）。
-+	print("[MP8] 凿刻考验：运行时 player_rotations（真值）= %s，共 %d 项" % [
++	# ⚠️ Log the **real runtime value** before touching it (pitfall #3 - an @export's real value comes from the scene,
++	# and the default in the script is misleading. This project has already been burned by this twice).
++	print("[MP8] Chisel Gauntlet: runtime player_rotations (real value) = %s, %d entries total" % [
 +		str(player_rotations), player_rotations.size()
 +	])
 +
 +	var want: int = clampi(PlayerManager.player_presences.size(), 0, MP8_MAX_SEATS)
 +	if want > player_rotations.size():
-+		push_warning("[MP8] 凿刻考验：%d 人但 player_rotations 只有 %d 项，座位不够" % [
++		push_warning("[MP8] Chisel Gauntlet: %d players but player_rotations only has %d entries, not enough seats" % [
 +			want, player_rotations.size()
 +		])
 +		want = player_rotations.size()
 +	_mp8_seat_count = want
 +
-+	# ---- 散弹枪扫描顺序：按角度升序排，不手写下标 ----
++	# ---- Shotgun scan order - sorted by ascending angle, no hand-written indices ----
 +	_mp8_rebuild_shotgun_order(want)
 +
 +	if args.has("mp8noexpand"):
-+		print("[MP8] 凿刻考验：mp8noexpand，不加任何座位家当（纯原版对照组）")
++		print("[MP8] Chisel Gauntlet: mp8noexpand, not adding any seat furniture (pure vanilla control group)")
 +		return
 +
 +	if want <= 4:
-+		print("[MP8] 凿刻考验：%d 人，用原版 4 套座位家当，不动" % want)
++		print("[MP8] Chisel Gauntlet: %d players, using the vanilla 4 sets of seat furniture, unchanged" % want)
 +		return
 +
 +	_mp8_expand_seats(want)
 +
 +
-+# 原版 [0, 2, 1, 3] 就是"按角度 0→90→180→270 升序"，只是写成了下标字面量。
-+# 这里把它还原成算法：4 人时结果与原版逐值相同，8 人时自动得到 [0,4,2,6,1,5,3,7]。
++# Vanilla's [0, 2, 1, 3] is just "ascending by angle 0→90→180→270", written out as index literals.
++# This turns it back into an algorithm. With 4 players the result matches vanilla value for value, and with 8 it automatically gives [0,4,2,6,1,5,3,7].
 +func _mp8_rebuild_shotgun_order(seat_count: int) -> void :
 +
 +	var vanilla := shotgun_check_order.duplicate()
@@ -142,25 +142,25 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +	var parts := PackedStringArray()
 +	for i in order:
 +		parts.append("%d(%.0f°)" % [i, _mp8_wrap360(player_rotations[i])])
-+	print("[MP8] 凿刻考验：散弹枪扫描顺序 %s → %s   %s" % [
++	print("[MP8] Chisel Gauntlet: shotgun scan order %s → %s   %s" % [
 +		str(vanilla), str(order), ", ".join(parts)
 +	])
 +
 +	if seat_count == 4 and order != vanilla:
-+		push_warning("[MP8] 凿刻考验：4 人时扫描顺序与原版不一致（%s vs %s），请检查" % [
++		push_warning("[MP8] Chisel Gauntlet: with 4 players the scan order differs from vanilla (%s vs %s), please check" % [
 +			str(order), str(vanilla)
 +		])
 +
 +
 +func _mp8_expand_seats(seat_count: int) -> void :
 +
-+	# ---- 1. 座位的方位角：拿玩家场景里 ./Visuals 的真实偏移算，不写死 8.0/180 ----
-+	# （偏移是从 PackedScene 里读的运行时真值，美术哪天改了这里自动跟着变。）
++	# ---- 1. Seat bearings - computed from the real ./Visuals offset in the player scene, not a hardcoded 8.0/180 ----
++	# (The offset is the real runtime value read from the PackedScene, so if the art ever changes, this follows automatically.)
 +	var visuals_offset: Vector3 = _mp8_player_visuals_offset()
 +	if is_zero_approx(Vector2(visuals_offset.x, visuals_offset.z).length()):
-+		push_warning("[MP8] 凿刻考验：量不出玩家 Visuals 的水平偏移，放弃加座位家当")
++		push_warning("[MP8] Chisel Gauntlet: couldn't measure the horizontal offset of the player's Visuals, giving up on adding seat furniture")
 +		return
-+	print("[MP8] 凿刻考验：玩家 Visuals 局部偏移 = %s（半径 %.2f 米）" % [
++	print("[MP8] Chisel Gauntlet: player Visuals local offset = %s (radius %.2f m)" % [
 +		str(visuals_offset), Vector2(visuals_offset.x, visuals_offset.z).length()
 +	])
 +
@@ -168,59 +168,59 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +	for i in seat_count:
 +		seat_dir.append(_mp8_seat_direction(visuals_offset, player_rotations[i]))
 +
-+	# ---- 2. 先验证"新座位 = 原版座位整体转 MP8_SEAT_STEP 度" ----
-+	# 整个复制策略的前提就是这一条。成立才敢整组转，不成立就只能退回逐件配对。
++	# ---- 2. First verify "new seats = vanilla seats rotated as a whole by MP8_SEAT_STEP degrees" ----
++	# The whole cloning strategy rests on this. Only if it holds is it safe to rotate whole groups, otherwise it has to fall back to pairing piece by piece.
 +	if not _mp8_verify_rotational_layout(seat_dir):
-+		push_warning("[MP8] 凿刻考验：座位不是「原版整体转 %.0f°」的关系，放弃加座位家当" % MP8_SEAT_STEP)
++		push_warning("[MP8] Chisel Gauntlet: seats aren't 'vanilla rotated as a whole by %.0f°', giving up on adding seat furniture" % MP8_SEAT_STEP)
 +		return
 +
-+	# ---- 3. 桌子碰撞体 ----
++	# ---- 3. Desk colliders ----
 +	var colliders: Node3D = get_node_or_null("Colliders") as Node3D
 +	if colliders != null:
 +		var desks: Array[Node3D] = []
 +		for c in colliders.get_children():
 +			if c is StaticBody3D and _mp8_find_child_named(c, "desk") != null:
 +				desks.append(c)
-+		_mp8_clone_group_rotated(colliders, desks, "桌子碰撞体")
++		_mp8_clone_group_rotated(colliders, desks, "desk colliders")
 +	else:
-+		push_warning("[MP8] 凿刻考验：找不到 Colliders 节点，桌子碰撞体没加")
++		push_warning("[MP8] Chisel Gauntlet: Colliders node not found, desk colliders not added")
 +
-+	# ---- 4. 可见桌子 + 招牌 ----
++	# ---- 4. Visible desks + signs ----
 +	var walls: Node3D = get_node_or_null("chisel gauntlet art2/walls") as Node3D
 +	if walls == null:
-+		push_warning("[MP8] 凿刻考验：找不到 'chisel gauntlet art2/walls'，可见件全部跳过")
++		push_warning("[MP8] Chisel Gauntlet: 'chisel gauntlet art2/walls' not found, skipping all visible pieces")
 +		return
 +
 +	if not _mp8_clone_desk_art:
-+		print("[MP8] 凿刻考验：新座位只有碰撞桌子、**没有可见桌子**（mp8chiselnodesk 生效中）")
++		print("[MP8] Chisel Gauntlet: new seats only have desk colliders, **no visible desks** (mp8chiselnodesk is active)")
 +		return
 +
 +	var groups: Array = [MP8_SEAT_ART_NODES]
-+	var labels: Array = ["可见桌子"]
++	var labels: Array = ["visible desks"]
 +	if _mp8_clone_sign:
 +		groups.append(MP8_SEAT_SIGN_NODES)
-+		labels.append("座位招牌")
++		labels.append("seat signs")
 +
 +	for g in groups.size():
 +		var srcs: Array[Node3D] = []
 +		for nm in groups[g]:
 +			var n: Node3D = walls.get_node_or_null(nm) as Node3D
 +			if n == null:
-+				push_warning("[MP8] 凿刻考验：可见件 '%s' 不在，跳过" % nm)
++				push_warning("[MP8] Chisel Gauntlet: visible piece '%s' is missing, skipping" % nm)
 +				continue
 +			srcs.append(n)
 +		_mp8_clone_group_rotated(walls, srcs, labels[g])
 +
 +
-+## 新座位相对原版座位的角度步长。八座位 = 四座位各补一个中间位。
++## Angle step of the new seats relative to the vanilla seats. Eight seats = the four seats, each with an extra seat in between.
 +const MP8_SEAT_STEP: float = 45.0
 +
 +
-+# 验证"新座位 = 原版四座位整体转 MP8_SEAT_STEP 度"。
++# Verifies "new seats = the four vanilla seats rotated as a whole by MP8_SEAT_STEP degrees".
 +#
-+# 这是整组旋转策略的**唯一前提**，所以显式验一遍而不是默认它成立：
-+# 每个新座位都必须能在原版座位里找到一个"正好差 MP8_SEAT_STEP 度"的对应者，
-+# 且对应关系是一一对应（不能两个新座位抢同一个原版座位）。
++# This is the **only premise** of the whole-group rotation strategy, so it's checked explicitly rather than assumed.
++# Every new seat must have a counterpart among the vanilla seats that is "exactly MP8_SEAT_STEP degrees apart",
++# and the mapping must be one to one (two new seats can't claim the same vanilla seat).
 +func _mp8_verify_rotational_layout(seat_dir: Array[float]) -> bool :
 +
 +	if seat_dir.size() <= 4:
@@ -239,20 +239,20 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +	return true
 +
 +
-+# 把一组"每座位一份"的节点整组复制一份、每份绕场地中心转 MP8_SEAT_STEP 度。
++# Clones a whole group of "one per seat" nodes, rotating each copy around the venue center by MP8_SEAT_STEP degrees.
 +#
-+# ⚠️ **不做"这一份服务哪个座位"的判断** —— 那正是上一版栽跟头的地方：
-+# 它用"网格 AABB 中心的方位角"认座位，而 `control panel *` 这四块网格是偏心的，
-+# 包围盒重心比真实座位轴**偏了 33.2°**（招牌和巨幕屏幕不偏，所以只有桌子会错）。
-+# 实测三种判据：AABB 中心角对招牌/屏幕准、对桌子错 33°；节点原点角全是同一个值
-+# （这些件全摆在原点，只有 yaw 不同）→ 两种都不可靠。
++# ⚠️ **It does not decide "which seat this copy serves"** — that's exactly where the previous version fell over.
++# It identified seats by "the bearing of the mesh AABB center", but the four `control panel *` meshes are off-center,
++# so their bounding box center is **off by 33.2°** from the real seat axis (the signs and jumbotron screens aren't off, so only the desks came out wrong).
++# Three tests tried in practice. The AABB center angle is accurate for signs/screens but 33° off for desks. The node origin angles are all the same value
++# (these pieces all sit at the origin, differing only in yaw) → neither is reliable.
 +#
-+# 正确做法是**绕开这个问题**：原版四份已经铺满原版四个座位，
-+# 把这四份**整组**转 45° 就正好铺满四个新座位 —— 谁对谁根本不用判，
-+# 这也是大厅排布那条教训（坑第 8 条：别自己算坐标，复制原件整体平移/旋转）。
++# The right approach is to **sidestep the problem**. The four vanilla copies already cover the four vanilla seats,
++# so rotating those four **as a group** by 45° covers the four new seats exactly — no need to work out which goes with which.
++# This is also the lobby layout lesson (pitfall #8 - don't compute coordinates yourself, clone the originals and translate/rotate them as a whole).
 +#
-+# 代价：新座位的桌子是**一次补满四个**的，5~7 人时会有没人坐的空桌子。
-+# 这在本游戏里不算穿帮 —— 人被淘汰后桌子本来就留在原地。
++# The cost is that new seat desks are **added all four at once**, so with 5~7 players there will be empty desks nobody sits at.
++# That doesn't break immersion in this game — desks already stay in place after players are eliminated.
 +func _mp8_clone_group_rotated(
 +	parent: Node3D,
 +	sources: Array[Node3D],
@@ -260,11 +260,11 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +) -> void :
 +
 +	if sources.is_empty():
-+		push_warning("[MP8] 凿刻考验：%s 一份都没找到，跳过" % label)
++		push_warning("[MP8] Chisel Gauntlet: no %s found at all, skipping" % label)
 +		return
 +
-+	# 自检：这四份必须是"同一件东西转 90°"的关系，整组旋转才说得通。
-+	# 判据用节点自己的 yaw（姿态），不用网格重心 —— 见上面那段。
++	# Self-check - these four must be "the same thing rotated 90°" for whole-group rotation to make sense.
++	# The test uses each node's own yaw (orientation), not the mesh center — see the section above.
 +	var yaws: Array[float] = []
 +	for s in sources:
 +		yaws.append(_mp8_wrap360(rad_to_deg(s.global_transform.basis.get_euler().y)))
@@ -280,12 +280,12 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +	var wire := PackedStringArray()
 +	for i in sources.size():
 +		wire.append("%s(yaw %.0f°)" % [String(sources[i].name), yaws[i]])
-+	print("[MP8-WIRE] 凿刻考验：%s 原版 %d 份 —— %s   %s" % [
++	print("[MP8-WIRE] Chisel Gauntlet: %s, %d in vanilla — %s   %s" % [
 +		label, sources.size(), ", ".join(wire),
-+		("✓四份互差90°" if even else "❌不是均匀四份，整组旋转可能不成立")
++		("✓four copies 90° apart" if even else "❌not four evenly spaced copies, whole-group rotation may not hold")
 +	])
 +	if not even:
-+		push_warning("[MP8] 凿刻考验：%s 不是「四份互差 90°」，仍按整组转 %.0f° 处理，请看画面核对" % [
++		push_warning("[MP8] Chisel Gauntlet: %s are not 'four copies 90° apart', still rotating the whole group by %.0f°, please check visually" % [
 +			label, MP8_SEAT_STEP
 +		])
 +
@@ -297,45 +297,45 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +		_mp8_rotate_about_center(dup, s, MP8_SEAT_STEP)
 +		added.append("%s→%s" % [String(s.name), String(dup.name)])
 +
-+	print("[MP8] 凿刻考验：%s 整组复制 %d 份、各转 %+.0f° —— %s" % [
++	print("[MP8] Chisel Gauntlet: %s cloned as a group, %d copies, each rotated %+.0f° — %s" % [
 +		label, added.size(), MP8_SEAT_STEP, ", ".join(added)
 +	])
 +
 +
-+# 场地中心的参考系。
++# Reference frame of the venue center.
 +#
-+# ⚠️⚠️ **`Minigame extends Node`，不是 Node3D** —— 本脚本的 `self` 上**没有**
-+# `global_transform`/`global_position`。第一版在这里和 _mp8_node_direction 里
-+# 直接写了 `global_transform`，`tools\build.ps1` **照样编译通过**
-+# （gdre 不做基类标识符解析），但游戏一加载就是
++# ⚠️⚠️ **`Minigame extends Node`, not Node3D** — this script's `self` has **no**
++# `global_transform`/`global_position`. The first version used them directly here and in _mp8_node_direction
++# (writing `global_transform`), and `tools\build.ps1` **still compiled fine**
++# (gdre doesn't resolve base class identifiers), but as soon as the game loaded it hit
 +#   `Parse Error: Identifier "global_transform" not declared in the current scope`
-+#   → 整个脚本 load 失败 → chisel_gauntlet 节点没有脚本 → 三个 Array[Node] 导出
-+#     接不上（`Failed to get property 'speakers_switches'`）→ 小游戏永远起不来，
-+#     表面症状是"卡在 SessionIntro"，跟 4→8 一点关系都没有。
-+# **教训：编译通过 ≠ 能跑。判据只有一条 —— 日志里没有 `Parse Error`。**
++#   → the whole script fails to load → the chisel_gauntlet node has no script → the three exported Array[Node]
++#     can't be hooked up (`Failed to get property 'speakers_switches'`) → the minigame never starts,
++#     and the surface symptom is "stuck in SessionIntro", which has nothing at all to do with 4→8.
++# **Lesson - compiling ≠ running. The only real test is that the log has no `Parse Error`.**
 +#
-+# 用 `PlayerSpawnNode` 当基准：它是 Node3D，而且**定义上就是座位圆的圆心**
-+# （spawn_players() 里所有人都被 teleport 到它的 global_position，靠 yaw 分方位）。
-+# 比"小游戏根节点"更贴题，也不用假设场地在世界原点。
++# Uses `PlayerSpawnNode` as the reference. It's a Node3D, and **by definition it's the center of the seat circle**
++# (spawn_players() teleports everyone to its global_position and separates them by yaw).
++# That's more fitting than "the minigame root node", and it doesn't assume the venue sits at the world origin.
 +func _mp8_field_transform() -> Transform3D :
 +	if player_spawn_node != null:
 +		return player_spawn_node.global_transform
 +	return Transform3D.IDENTITY
 +
 +
-+# 绕**场地中心**的 Y 轴把 dup 转 delta 度。
++# Rotates dup by delta degrees around the Y axis of the **venue center**.
 +#
-+# ⚠️ 不能直接写 `dup.rotate_y()`：那是绕节点**自己**的原点转。
-+# 所以统一在场地中心空间里左乘一个 Y 旋转。
++# ⚠️ You can't just call `dup.rotate_y()`, since that rotates around the node's **own** origin.
++# So a Y rotation is always left-multiplied in venue center space.
 +func _mp8_rotate_about_center(dup: Node3D, src: Node3D, delta_deg: float) -> void :
 +	var base: Transform3D = _mp8_field_transform()
 +	var rot := Transform3D(Basis(Vector3.UP, deg_to_rad(delta_deg)), Vector3.ZERO)
 +	dup.global_transform = base * rot * base.affine_inverse() * src.global_transform
 +
 +
-+# 一个节点在场地里的方位角（度，0 = 根节点的 +Z 方向）。
-+# 网格件用**网格 AABB 的中心**而不是节点原点 —— 这些美术件全都摆在原点、
-+# 只有 yaw 不同，节点原点算出来是 (0,0)，方位角毫无意义（美术把真实摆位烘进了网格）。
++# A node's bearing within the venue (degrees, 0 = the root node's +Z direction).
++# Mesh pieces use **the mesh AABB center** instead of the node origin — these art pieces all sit at the origin
++# differing only in yaw, so the node origin comes out as (0,0) and its bearing is meaningless (the art baked the real placement into the mesh).
 +func _mp8_node_direction(n: Node3D) -> float :
 +
 +	if n == null:
@@ -351,15 +351,15 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +	return _mp8_wrap360(rad_to_deg(atan2(local.x, local.z)))
 +
 +
-+# 座位（= 一个 yaw）在场地里的方位角。玩家根节点在原点、只转 yaw，
-+# 真正把人推出去的是 ./Visuals 的局部偏移，所以方位 = 偏移被 yaw 转过之后的朝向。
++# A seat's (= one yaw) bearing within the venue. The player root node sits at the origin and only rotates in yaw,
++# and what actually pushes the player outward is the ./Visuals local offset, so the bearing = the direction of that offset after rotating it by yaw.
 +func _mp8_seat_direction(visuals_offset: Vector3, yaw_deg: float) -> float :
 +	var v: Vector3 = Basis(Vector3.UP, deg_to_rad(yaw_deg)) * visuals_offset
 +	return _mp8_wrap360(rad_to_deg(atan2(v.x, v.z)))
 +
 +
-+# 从玩家场景（PackedScene，只读取，不实例化）里量 ./Visuals 的局部偏移。
-+# 不写死 8.0：这是"真实值只能从数据里读，别拿记忆当真值"那条规矩。
++# Measures the ./Visuals local offset from the player scene (PackedScene, read only, not instantiated).
++# 8.0 isn't hardcoded, per the rule "real values can only be read from data, don't treat memory as the truth".
 +func _mp8_player_visuals_offset() -> Vector3 :
 +
 +	var st: SceneState = player_scene.get_state()
@@ -387,24 +387,24 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +	return fposmod(a, 360.0)
 +
 +
-+## 两个方位角之间的最短夹角（绝对值，0~180）
++## Shortest angle between two bearings (absolute value, 0~180)
 +func _mp8_angle_gap(a: float, b: float) -> float :
 +	return absf(_mp8_angle_delta(a, b))
 +
 +
-+## 从 a 转到 b 要转多少度（带符号，-180~180）
++## How many degrees to turn from a to b (signed, -180~180)
 +func _mp8_angle_delta(a: float, b: float) -> float :
 +	return rad_to_deg(angle_difference(deg_to_rad(a), deg_to_rad(b)))
 +
 +
-+# [MP8] 自截图（照抄残骸平台/逆向行进那套）：游戏自己存 PNG，不需要任何屏幕权限。
-+# ⚠️ 必须走 RPC 广播：调用点（generate_random_cube_instructions / start_round_timer）
-+# 都在 `if not multiplayer.is_server(): return` 之后，直接调只有房主会存图，
-+# 而"新座位有没有桌子"恰恰要看新座位那个人自己的第一人称画面。
++# [MP8] Self-screenshots (copied from Junk Platform / Escalator Pit) - the game saves PNGs itself, no screen permissions needed.
++# ⚠️ Must go through an RPC broadcast. The call sites (generate_random_cube_instructions / start_round_timer)
++# both come after `if not multiplayer.is_server(): return`, so calling it directly means only the host saves screenshots,
++# and "does the new seat have a desk" is exactly what has to be seen from the new seat player's own first-person view.
 +@rpc("authority", "call_local", "reliable")
 +func mp8_shot_rpc(tag: String, delay: float) -> void :
 +
-+	if not Array(OS.get_cmdline_args()).has("mp8shot"):
++	if not NetworkManager.mp8_args().has("mp8shot"):
 +		return
 +
 +	await get_tree().create_timer(delay, false).timeout
@@ -419,12 +419,13 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +
 +	var img: Image = get_viewport().get_texture().get_image()
 +	if img != null:
-+		img.save_png("user://mp8_chisel_%s_%s.png" % [tag, who])
++		# Both parts of the name come from outside (the host's tag, the player's name), so strip path characters first
++		img.save_png("user://mp8_chisel_%s_%s.png" % [NetworkManager.mp8_file_text(tag), NetworkManager.mp8_file_text(who)])
 +
 +
-+# [MP8] 只读日志：结算时把名次/玩家名/得分打出来，**一分钱都不改**。
-+# 凿刻考验是全 15 个小游戏里唯一会算出负分的（算分族 C），8 人下的实际数值
-+# 必须有实测数据才能谈调整（按用户定的工作顺序，适配验收完才轮到得分）。
++# [MP8] Read-only log - at results time, logs placement / player name / score, **without changing a single point**.
++# Chisel Gauntlet is the only one of all 15 minigames that can produce negative scores (scoring family C), and the actual 8-player numbers
++# need real test data before any tuning is discussed (per the work order the user set, scoring only comes after the adaptation passes acceptance).
 +func _mp8_log_scores() -> void :
 +
 +	if not multiplayer.is_server():
@@ -440,8 +441,8 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +
 +	var parts := PackedStringArray()
 +	for i in rows.size():
-+		parts.append("第%d名 %s %d分" % [i + 1, rows[i]["name"], rows[i]["score"]])
-+	print("[MP8] 凿刻考验结算（%d 人在场 / 起手分 %d）：%s" % [
++		parts.append("#%d %s %d pts" % [i + 1, rows[i]["name"], rows[i]["score"]])
++	print("[MP8] Chisel Gauntlet results (%d players present / starting score %d): %s" % [
 +		player_count, player_count, " / ".join(parts)
 +	])
 +
@@ -449,30 +450,30 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
  func _ready() -> void :
  	super._ready()
  
-+	# [MP8] 座位扩建必须跑在 spawn_players() 之前，而且**每台机器都要跑**
-+	# （桌子是各机本地的场景节点，不走网络同步）。
-+	# initialize() 只在服务器上跑，所以这段绝不能放进去。
++	# [MP8] Seat expansion must run before spawn_players(), and **must run on every machine**
++	# (desks are local scene nodes on each machine and aren't network synced).
++	# initialize() only runs on the server, so this must never go in there.
 +	_mp8_setup_seats()
 +
  	if multiplayer.is_server():
  
  		multiplayer_synchronizer.set_multiplayer_authority(1)
-@@ -205,9 +634,21 @@ func spawn_players():
+@@ -205,9 +635,21 @@ func spawn_players():
  			player_spawn_node.global_position, 
  			Vector3(0.0, player_rotations[counter], 0.0)
  		)
 -		player_character.set_spectate_position_rpc.rpc(
 -			spectate_positions[counter]
 -		)
-+		# [MP8] spectate_positions 来自 DeadLobby/SpectatePositions 的 4 个 Marker3D，
-+		# 按 [counter] 索引。节点名 "SpectatePositions" 在 network_manager 的
-+		# MP8_SPAWN_CONTAINERS 白名单里，通用补位会补到 8 —— 但那是 call_deferred 的，
-+		# 万一时序没赶上就是一次越界读。这里兜一层并**把实情打进日志**，
-+		# 不靠"应该会被补上"（坑第 13 条：谁按这个长度索引，谁就得自己校验）。
++		# [MP8] spectate_positions comes from the 4 Marker3D nodes in DeadLobby/SpectatePositions,
++		# indexed by [counter]. The node name "SpectatePositions" is in network_manager's
++		# MP8_SPAWN_CONTAINERS allowlist, so the generic fill-in tops it up to 8 — but that's call_deferred,
++		# and if the timing doesn't line up it's an out-of-bounds read. So this adds a safety net and **logs what actually happened**,
++		# rather than relying on "it should get filled in" (pitfall #13 - whoever indexes by this length has to validate it themselves).
 +		var spectate_index: int = counter
 +		if spectate_index >= spectate_positions.size():
 +			spectate_index = maxi(spectate_positions.size() - 1, 0)
-+			push_warning("[MP8] 凿刻考验：观战点只有 %d 个，第 %d 人退回用最后一个" % [
++			push_warning("[MP8] Chisel Gauntlet: only %d spectate points, player %d falls back to the last one" % [
 +				spectate_positions.size(), counter + 1
 +			])
 +		if not spectate_positions.is_empty():
@@ -482,30 +483,30 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
  		players[player_presence.network_id] = player_character
  		active_players[player_presence.network_id] = player_character
  		players_by_position[counter] = player_presence.network_id
-@@ -223,6 +664,18 @@ func spawn_players():
+@@ -223,6 +665,18 @@ func spawn_players():
  	if GameManager.local_game:
  		local_handler.set_players(players.values())
  
-+	# [MP8] 谁坐在哪个方位 —— 事后对照画面/对照散弹枪扫描顺序时全靠这行。
++	# [MP8] Who sits at which bearing — this line is what you rely on when checking screenshots / the shotgun scan order afterwards.
 +	var seats := PackedStringArray()
 +	for i in player_count:
 +		var nm: String = "id%d" % players_by_position.get(i, 0)
 +		var pid: int = players_by_position.get(i, 0)
 +		if PlayerManager.player_presences.has(pid):
 +			nm = String(PlayerManager.player_presences[pid].network_name)
-+		seats.append("座位%d=%s(%.0f°)" % [i, nm, _mp8_wrap360(player_rotations[i])])
-+	print("[MP8] 凿刻考验：%d 人就座（观战点 %d 个）—— %s" % [
++		seats.append("seat%d=%s(%.0f°)" % [i, nm, _mp8_wrap360(player_rotations[i])])
++	print("[MP8] Chisel Gauntlet: %d players seated (%d spectate points) — %s" % [
 +		player_count, spectate_positions.size(), ", ".join(seats)
 +	])
 +
  func generate_random_cube_instructions():
  
  	var instructions: Array[int] = []
-@@ -234,12 +687,19 @@ func generate_random_cube_instructions():
+@@ -234,12 +688,19 @@ func generate_random_cube_instructions():
  
  	update_instructions_rpc.rpc(instructions)
  
-+	# [MP8] 记忆阶段：这时所有人都在看巨幕，能看到对面几个座位的全景
++	# [MP8] Memorize phase - everyone is watching the jumbotron now, so the seats across the room are in full view
 +	mp8_shot_rpc.rpc("memorize", 3.0)
 +
  func start_round_timer(_duration: float):
@@ -514,19 +515,19 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
  	round_timer.wait_time = 1.0
  	round_timer.start()
  
-+	# [MP8] 凿刻阶段：这时每个人都低头看**自己的桌子** ——
-+	# "新座位有没有可见桌子"就看这一张。
++	# [MP8] Carving phase - everyone is looking down at **their own desk** now —
++	# this is the shot that shows "whether new seats have visible desks".
 +	mp8_shot_rpc.rpc("desk", 2.0)
 +
  func check_all_submitted():
  
  	if submitted_solutions.size() == active_players.size():
-@@ -263,6 +723,21 @@ func check_game_end():
+@@ -263,6 +724,21 @@ func check_game_end():
  			for player in active_players.values():
  				player.trigger_achievement_rpc.rpc()
  
-+	# [MP8] 只读日志：本轮扣分的实际数值（起手 = 总人数，淘汰时 -= 还活着的人数，
-+	# 这是全 15 个小游戏里唯一会算出负分的算分族）。**一分钱都不改。**
++	# [MP8] Read-only log - the actual points deducted this round (start = total players, and on elimination -= number of players still alive,
++	# the only scoring family among all 15 minigames that can go negative). **Doesn't change a single point.**
 +	if multiplayer.is_server() and not eliminate_players.is_empty():
 +		var outs := PackedStringArray()
 +		for network_id in eliminate_players.keys():
@@ -536,14 +537,14 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +			outs.append("%s %d→%d" % [
 +				nm, player_scores[network_id], player_scores[network_id] - players_alive.size()
 +			])
-+		print("[MP8] 凿刻考验：本轮淘汰 %d 人（扣 %d 分/人）—— %s" % [
++		print("[MP8] Chisel Gauntlet: %d players eliminated this round (%d points deducted each) — %s" % [
 +			eliminate_players.size(), players_alive.size(), ", ".join(outs)
 +		])
 +
  	for network_id in eliminate_players.keys():
  		player_scores[network_id] -= players_alive.size()
  
-@@ -277,6 +752,7 @@ func check_game_end():
+@@ -277,6 +753,7 @@ func check_game_end():
  
  	if active_players.size() <= 1:
  
@@ -551,12 +552,12 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
  		player_scores_finalized.emit(player_scores)
  		await get_tree().create_timer(1.0).timeout
  		set_minigame_sfx_linear_volume_rpc.rpc(0.0)
-@@ -376,6 +852,22 @@ func _on_all_brief_ready():
+@@ -376,6 +853,22 @@ func _on_all_brief_ready():
  
  func _on_player_eliminated(network_id: int):
  
-+	# [MP8] 验收硬阻塞 ② 的直接证据：座位 4~7 的人到底会不会被枪打到。
-+	# 只打日志，不改行为。
++	# [MP8] Direct evidence for accepting hard blocker ② - whether players in seats 4~7 actually get shot.
++	# Logging only, no behavior change.
 +	if multiplayer.is_server():
 +		var seat: int = -1
 +		for k in players_by_position.keys():
@@ -566,10 +567,10 @@ diff --git a/minigames/chisel_gauntlet_multiplayer/scripts/chisel_gauntlet.gd b/
 +		var nm: String = "id%d" % network_id
 +		if PlayerManager.player_presences.has(network_id):
 +			nm = String(PlayerManager.player_presences[network_id].network_name)
-+		var deg: String = "座位查无此人"
++		var deg: String = "no seat found for this player"
 +		if seat >= 0 and seat < player_rotations.size():
-+			deg = "座位 %d（%.0f°）" % [seat, _mp8_wrap360(player_rotations[seat])]
-+		print("[MP8] 凿刻考验：淘汰 %s —— %s" % [nm, deg])
++			deg = "seat %d (%.0f°)" % [seat, _mp8_wrap360(player_rotations[seat])]
++		print("[MP8] Chisel Gauntlet: eliminated %s — %s" % [nm, deg])
 +
  	if GameManager.local_game:
  		if players.has(network_id):

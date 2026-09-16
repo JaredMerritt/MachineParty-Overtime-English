@@ -1,10 +1,10 @@
 # ============================================================================
-#  ⚠️ 这个文件是必需的，别删。
+#  ⚠️ This file is required. Don't delete it.
 #
-#  Windows 上 git 的 core.autocrlf 默认常常是开的：签出时把 LF 换成 CRLF。
-#  而本仓库的差异补丁**必须是 LF** —— 它们要打到 gdre 解包出来的 LF 源码上，
-#  补丁一旦变成 CRLF，每一行上下文都对不上，git apply 会整片失败。
+#  On Windows, git's core.autocrlf is often on by default, turning LF into CRLF on checkout.
+#  The diff patches in this repo **must be LF** — they apply on top of the LF source that gdre unpacks,
+#  and once a patch turns CRLF no context line matches, so git apply fails wholesale.
 #
-#  -text 把补丁标成"不做任何行尾转换"，无论克隆者本机怎么设都不会被改。
+#  -text marks the patches as "no line-ending conversion", so the cloner's local settings can never change them.
 # ============================================================================
 *.patch -text

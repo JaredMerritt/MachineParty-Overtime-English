@@ -6,16 +6,16 @@ diff --git a/minigames/duck_hunt/states/role_reveal_state.gd b/minigames/duck_hu
  func reveal_online():
  
 -	owner.ui_role_label.text = tr("LOC_CONTROL_HUNTER_NAME") % owner.hunter_name.to_upper()
-+	# [MP8] 原版是 `tr("LOC_CONTROL_HUNTER_NAME") % owner.hunter_name.to_upper()`。
-+	# 双猎人要显示两个名字，还要带这一档的强弱提示；
-+	# 文案在 duck_hunt.gd 的 mp8_role_reveal_text() 里拼
-+	# （编译过的 .translation 加不了新 key，只能硬编码）。
++	# [MP8] Vanilla was `tr("LOC_CONTROL_HUNTER_NAME") % owner.hunter_name.to_upper()`.
++	# Dual hunters need to show two names, plus a hint about how strong or weak this tier is.
++	# The text is built in mp8_role_reveal_text() in duck_hunt.gd
++	# (a compiled .translation can't take new keys, so it has to be hardcoded).
 +	await owner.mp8_apply_role_reveal_label()
  
  	var t: = create_tween()
  	t.tween_property(owner.ui_role_label, "modulate:a", 1.0, 1.0)
  	await t.finished
-+	owner.mp8_shot("role")  # [MP8] 文字完全显出来之后截一张
++	owner.mp8_shot("role")  # [MP8] Take a screenshot once the text has fully faded in
  	await get_tree().create_timer(1.0).timeout
  
  	t = create_tween()
@@ -25,7 +25,7 @@ diff --git a/minigames/duck_hunt/states/role_reveal_state.gd b/minigames/duck_hu
  
 -	if owner.hunter_player:
 -		owner.hunter_player.set_can_aim_rpc.rpc(true)
-+	# [MP8] 原版只放行一个猎人，双猎人要逐个放行
++	# [MP8] Vanilla only releases one hunter. With dual hunters each one is released in turn
 +	for h in owner.hunter_players:
 +		if is_instance_valid(h):
 +			h.set_can_aim_rpc.rpc(true)

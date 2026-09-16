@@ -8,15 +8,15 @@ diff --git a/minigames/intermission_new/components/intermission_user_container.g
 +	_mp8_apply_bold()
 +
 +
-+# [MP8] 名字上限与字重。**这段和 intermission_user_container_2d.gd 里那份一模一样**，
-+# 不抽公共文件的理由见那边的注释（新加 class_name 要连 project.binary 一起打补丁）。
-+# 唯一区别：这里是 Label3D，字体在 `font` 属性上，不走主题覆盖。
-+const MP8_NAME_MAX: int = 7   # 用户定案 2026-08-15（原版 9，试过 20）
-+const MP8_BOLD: float = 0.12  # 0.3 实测太肥，数字的内孔糊死（见 HANDOFF T16）
++# [MP8] Name length limit and font weight. **This block is identical to the one in intermission_user_container_2d.gd**,
++# and why it isn't pulled into a shared file is explained in the comment over there (a new class_name means patching project.binary too).
++# The only difference is that this one is a Label3D, so the font lives on the `font` property instead of a theme override.
++const MP8_NAME_MAX: int = 7   # User's final call 2026-08-15 (vanilla 9, tried 20)
++const MP8_BOLD: float = 0.12  # 0.3 was too heavy in testing and the holes inside the digits filled in (see HANDOFF T16)
 +
 +
 +static func _mp8_arg_int(prefix: String, fallback: int) -> int:
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var t: String = String(a)
 +		if t.begins_with(prefix):
 +			return int(t.substr(prefix.length()))
@@ -24,7 +24,7 @@ diff --git a/minigames/intermission_new/components/intermission_user_container.g
 +
 +
 +static func _mp8_arg_float(prefix: String, fallback: float) -> float:
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var t: String = String(a)
 +		if t.begins_with(prefix):
 +			return float(t.substr(prefix.length()))
@@ -65,7 +65,7 @@ diff --git a/minigames/intermission_new/components/intermission_user_container.g
 -	if _name.length() > 9:
 -		formatted_name = _name.left(8)
 -		formatted_name += "-"
-+	var formatted_name = _mp8_format_name(_name)  # [MP8] 原版砍到 8 字符
++	var formatted_name = _mp8_format_name(_name)  # [MP8] Vanilla cut names to 8 characters
  
  	label_name.text = formatted_name
  

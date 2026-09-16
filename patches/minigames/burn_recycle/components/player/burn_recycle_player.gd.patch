@@ -5,11 +5,11 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
  @export var player_marker: Node3D
  @export var player_name_label: PlayerNameLabel
  
-+# [MP8] ⚠️ 原版是 `const`，而且是**按玩家下标索引的定长 4 项**（坑第 13 条那个模式，
-+# 跟 T15 的 rank_y_positions 一模一样）：5~8 号工位会越界读。
-+# 现在不再索引它，改走 _mp8_visual_rotation() 的公式（= 180 + 角步*seat）。
-+# 保留这一行是当**原版基准值**用：角步 90° 时公式逐项等于这张表（360≡0、450≡90），
-+# 所以 4 人局一个值都没变。_mp8_self_check() 每局开头会真的逐项比一遍。
++# [MP8] ⚠️ Vanilla declares this as a `const`, and it's a **fixed 4-entry array indexed by player** (the pitfall #13 pattern,
++# exactly like T15's rank_y_positions), so stations 5~8 would read out of bounds.
++# It is no longer indexed. The _mp8_visual_rotation() formula is used instead (= 180 + angle step*seat).
++# The line is kept as the **vanilla reference values**. With a 90° angle step the formula matches this table entry for entry (360≡0, 450≡90),
++# so 4-player matches don't change a single value. _mp8_self_check() really compares every entry at the start of each match.
  const visual_parent_rotations: Array[float] = [180.0, 270.0, 0.0, 90.0]
  
  var game_instance: BurnRecycleMinigame
@@ -17,14 +17,14 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
  
  func setup_clientside_visuals(_seat_counter: int):
  	await get_tree().create_timer(1, false).timeout
-+	# [MP8] 原版这里是 visual_parent_rotations[_seat_counter]（4 项，5~8 号越界）
++	# [MP8] Vanilla used visual_parent_rotations[_seat_counter] here (4 entries, 5~8 out of bounds)
  	game_instance.clientside_visuals_parent.rotation_degrees = Vector3(
 -		0.0, visual_parent_rotations[_seat_counter], 0.0
 +		0.0, _mp8_visual_rotation(_seat_counter), 0.0
  	)
  
-+	# [MP8] 亮的是**前一个工位**那个人的结算指示灯。原版环形回绕写死成 3（4 工位），
-+	# 8 工位要绕到 7 —— 不改的话 0 号工位会去点 3 号的灯，而 4~7 号的灯永远不亮。
++	# [MP8] This lights the results indicator of the player at the **previous station**. Vanilla hardcoded the wraparound to 3 (4 stations),
++	# but 8 stations must wrap to 7 — otherwise station 0 would light station 3's indicator and stations 4~7 would never light up.
  	var index_to_enable_indicator_on = _seat_counter - 1
  	if index_to_enable_indicator_on == -1:
 -		index_to_enable_indicator_on = 3
@@ -37,13 +37,13 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
  	active_seat_index = _seat_counter
  	debug.text = "seat: " + str(_seat_counter)
 -	active_belt = game_instance.belts[_seat_counter]
-+	# [MP8] 原版直接 belts[_seat_counter]，4 条带子 8 个人 → 5~8 号越界拿到 null，
-+	# 之后 move_items_visual() 里 active_belt.get_active_material(0) 每推进一格报一次错。
-+	# 上界校验 + 喊出来（burn_recycle.gd 已经把数组补到 8 并按工位号重排）。
++	# [MP8] Vanilla did belts[_seat_counter] directly. With 4 belts and 8 players, stations 5~8 get null out of bounds,
++	# and then active_belt.get_active_material(0) in move_items_visual() throws an error on every step.
++	# Bounds check + shout about it (burn_recycle.gd has already padded the array to 8 and reordered it by station number).
 +	if _seat_counter < game_instance.belts.size():
 +		active_belt = game_instance.belts[_seat_counter]
 +	else:
-+		printerr("[MP8] 人工筛选：%d 号工位没有传送带（数组只有 %d 条）—— 货道不会滚" % [
++		printerr("[MP8] Burn Recycle: station %d has no conveyor belt (array only has %d) — the item lane won't scroll" % [
 +			_seat_counter, game_instance.belts.size()])
  
  func set_active_press(_seat_counter: int):
@@ -51,11 +51,11 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
  		if i.press_id == _seat_counter:
  			active_press = i
  			break
-+	# [MP8] 匹配不到就是致命的：set_eliminated_rpc() 第一句 active_press.start_press()
-+	# 会报错**中断整个函数**，后面的 is_dead=true / active=false 全不执行
-+	# → 被淘汰的人照样能继续玩。所以这里必须喊出来。
++	# [MP8] Failing to match is fatal. The first statement of set_eliminated_rpc(), active_press.start_press(),
++	# errors out and **aborts the whole function**, so the later is_dead=true / active=false never run
++	# → an eliminated player can keep playing. That's why this has to be reported loudly.
 +	if active_press == null:
-+		printerr("[MP8] 人工筛选：%d 号工位配不到冲压机（共 %d 台）—— 淘汰流程会出问题" % [
++		printerr("[MP8] Burn Recycle: station %d has no matching press (%d total) — elimination will break" % [
 +			_seat_counter, game_instance.presses.size()])
  
  func play_lever_sound():
@@ -64,19 +64,19 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
  	speaker_death.play()
  
  func look_at_seat(_seat_index: int):
-+	# [MP8] 原版是一张写死的 4×4 表（我的工位 × 出事的工位 → self/right/center/left）。
-+	# 那张表的语义就是**相对位次**：offset = (目标 - 我 + N) % N，
-+	# 0=self、1=right、2=center、3=left。下面的公式在 N=4 时与原表**逐格一致**
-+	# （已逐格核对过），N=8 时把 1~3 归 right、4 归 center、5~7 归 left。
++	# [MP8] Vanilla used a hardcoded 4×4 table (my station × the station where it happened → self/right/center/left).
++	# What that table encodes is **relative position**, offset = (target - me + N) % N,
++	# 0=self, 1=right, 2=center, 3=left. The formula below matches the original table **cell for cell** at N=4
++	# (checked cell by cell), and at N=8 maps 1~3 to right, 4 to center and 5~7 to left.
 +	#
-+	# ⚠️ 两条已知妥协，都是表现层，等用户看过再决定要不要动：
-+	#   1. 动画只有这四个方向，8 工位表达不出"隔三个工位那个人"；
-+	#   2. `look left/right` 的转头角度是按 **90° 邻座**烘死在 anim_camera movement 里的，
-+	#      45° 间隔下会转过头（转 90° 却只该转 45°）。
++	# ⚠️ Two known compromises, both cosmetic, left until the user has seen them and decides whether to change anything.
++	#   1. The animation only has these four directions, so with 8 stations it can't express "the person three stations over".
++	#   2. The head-turn angle for `look left/right` is baked into anim_camera movement for **90° neighbors**,
++	#      so at 45° spacing it over-rotates (turns 90° when it should only turn 45°).
 +	#
-+	# 另外原版这里读的是 active_press.press_id —— 5~8 号工位配不到冲压机时那是 null，
-+	# 整个函数当场中断。改用 active_seat_index（两者恒等：press 就是按工位号配的），
-+	# 顺带把这个空指针堵掉。
++	# Also, vanilla read active_press.press_id here — for stations 5~8 with no matching press that's null,
++	# and the whole function aborts on the spot. Using active_seat_index instead (the two are always equal because presses are matched by station number)
++	# also plugs that null reference.
 +	var n: int = _mp8_seats()
 +	var offset: int = ((_seat_index - active_seat_index) % n + n) % n
  	var direction: String = "center"
@@ -117,15 +117,15 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
  				item_tweens.erase(item)
  		)
  
-+		# [MP8] active_belt 可能是 null（工位配不到带子），原版裸用会中断整个搬货循环
++		# [MP8] active_belt may be null (no belt for this station). Vanilla used it unchecked, which would abort the whole item-moving loop
 +		if active_belt == null:
 +			continue
  		var t2 = create_tween()
  		var mat: StandardMaterial3D = active_belt.get_active_material(0)
  		var prev_uv = mat.uv1_offset.x
 -		t2.tween_property(mat, "uv1_offset", Vector3(prev_uv - 0.028, mat.uv1_offset.y, mat.uv1_offset.z), conveyor_move_time / 1.5)
-+		# [MP8] 原版写死 0.028（= 18 槽那条长带子上"一格 1 米"对应的 UV）。
-+		# 带子按槽位数缩短后，同样的 UV 值对应的世界距离变了 → 不补就是"带子滚得比货慢"。
++		# [MP8] Vanilla hardcoded 0.028 (= the UV for "one slot, 1 meter" on the long 18-slot belt).
++		# Once the belt is shortened to the slot count, the same UV value covers a different world distance → without compensating, "the belt scrolls slower than the items".
 +		t2.tween_property(mat, "uv1_offset", Vector3(prev_uv - _mp8_uv_step(), mat.uv1_offset.y, mat.uv1_offset.z), conveyor_move_time / 1.5)
  
  
@@ -135,17 +135,17 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
  	ik_left.stop()
  	ik_right.stop()
 -	active_press.start_press()
-+	# [MP8] 原版这里裸调 active_press.start_press()。它一旦是 null（工位配不到冲压机），
-+	# 报错会**中断整个函数**，下面的 is_dead=true / active=false 全不执行 →
-+	# 人死了还能继续搬货。冲压机没了是表现问题，淘汰本身不能跟着黄。
++	# [MP8] Vanilla called active_press.start_press() unchecked here. If it's null (no matching press for this station),
++	# the error **aborts the whole function** and the is_dead=true / active=false below never run →
++	# the dead player can keep moving items. A missing press is a visual problem, and elimination itself must not fall apart with it.
 +	if active_press != null:
 +		active_press.start_press()
 +	else:
-+		printerr("[MP8] 人工筛选：%d 号工位没有冲压机，跳过压死动画（淘汰照常生效）" % active_seat_index)
++		printerr("[MP8] Burn Recycle: station %d has no press, skipping the crush animation (elimination still applies)" % active_seat_index)
  	anim_character.play("thrown on control panel death1")
  	hide_nametag()
  	shake_camera()
-@@ -559,15 +592,185 @@ func set_active_rpc(_active: bool):
+@@ -559,15 +592,187 @@ func set_active_rpc(_active: bool):
  	active = _active
  
  @rpc("any_peer", "call_local", "reliable")
@@ -154,20 +154,22 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
  
  	rotation_degrees = _rotation_degrees
  
-+	# [MP8] 两派摆位：奇数号工位整体沿自己的径向往外退（内圈原位不动）。
-+	# 径向 = 转过之后的**局部 +Z**（⚠️ 不是 +X，第一版错在这儿：+X 是货道方向，
-+	# 按 +X 推等于把工位沿着自己的传送带平移，看起来就是"玩家没跟着工位动"）。
-+	# 控制台、货道、记分屏、摄像机全挂在这个实例下，所以推整个实例 = 连人带镜头一起退后，
-+	# 本人看自己工位的取景**一点没变**（用户 2026-08-17 想到的那条）。
-+	# 必须放在 rotation_degrees 之后：basis.z 要用转过之后的。
-+	if _push != 0.0:
++	# [MP8] Two-tier layout. Odd-numbered stations move outward as a whole along their own radial direction (the inner ring stays put).
++	# Radial = the **local +Z** after rotation (⚠️ not +X, which is where the first version went wrong. +X is the item lane direction,
++	# so pushing along +X slides the station along its own conveyor belt, which looks like "the player didn't move with the station").
++	# The control panel, item lane, score screen and camera all hang off this instance, so pushing the whole instance = moving the player and camera back together,
++	# and the player's framing of their own station **doesn't change at all** (the idea the user came up with on 2026-08-17).
++	# Must come after rotation_degrees, since basis.z has to be the rotated one.
++	# [MP8] setup_rpc is any_peer in vanilla. The two values this mod added are only taken from the host.
++	var mp8_from_host: bool = NetworkManager.mp8_sender_is_host(multiplayer)
++	if _push != 0.0 and mp8_from_host and NetworkManager.mp8_finite(_push, 100.0):
 +		position = transform.basis.z.normalized() * _push
 +
-+	# [MP8] -BurnEdit 的手调增量（相对默认摆位）。整个实例一起挪 =
-+	# 控制台/货道/记分屏/**摄像机**一起挪，本人取景不变。
-+	# ⚠️ 顺序与手调时**必须一致**：先绕工位锚点转 dyaw，再平移 dpos。
-+	# 锚点不是实例原点（那在场地正中，绕它转人会飞到对面），
-+	# 而是实例局部 (0, 0, 半径) 处 —— 详见 burn_recycle.gd 末尾「-BurnEdit」那一节。
++	# [MP8] Manual tweak offsets from -BurnEdit (relative to the default layout). Moving the whole instance =
++	# moving control panel/item lane/score screen/**camera** together, so the player's framing stays the same.
++	# ⚠️ The order **must match** the manual tweak. First rotate by dyaw around the station anchor, then translate by dpos.
++	# The anchor is not the instance origin (that's the arena center, and rotating around it would fling the player to the opposite side),
++	# but instance-local (0, 0, radius) — see the "-BurnEdit" section at the end of burn_recycle.gd for details.
 +	if game_instance != null and game_instance.has_method("mp8_layout_delta"):
 +		var d: Array = game_instance.mp8_layout_delta(active_seat_index)
 +		var dyaw: float = float(d[1])
@@ -181,10 +183,10 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
 +			global_transform = t
 +		position += d[0] as Vector3
 +
-+	# [MP8] 第三个参数是原版没有的：服务器权威的货道槽位数（见 burn_recycle.gd 文件头）。
-+	# 必须在这里（而不是 _ready）应用 —— _ready 时 game_instance 还没接上，问不到人数。
-+	# 这时候还没有任何货物（货是倒计时开始才发的），所以砍数组是安全的。
-+	if _slots > 0:
++	# [MP8] The third parameter is new in this mod. It carries the server-authoritative item lane slot count (see the burn_recycle.gd file header).
++	# It must be applied here (not in _ready) — at _ready time game_instance isn't hooked up yet, so the player count can't be queried.
++	# No items exist yet at this point (items are only handed out once the countdown starts), so trimming the array is safe.
++	if _slots > 0 and mp8_from_host:
 +		_mp8_apply_slot_count(_slots)
 +
  	for b in _random_types_byte_array:
@@ -192,36 +194,36 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
  			BurnRecycleMinigame.ItemTypes.values()[b]
  		)
  
-+	# [MP8] 玩家操作平台的可见开关（mp8burnnopanel，play.ps1 -BurnNoPanel）。
-+	# 放在这里而不是 _ready：拉杆/活塞的世界位置到这一步才定下来。
-+	# 各端各自读命令行，不走 RPC —— 所以这个参数要**给全部实例**，
-+	# 只给房主会出现"房主看不到操作台、别人看得到"。
-+	if Array(OS.get_cmdline_args()).has("mp8burnnopanel"):
++	# [MP8] Visibility switch for the player control platform (mp8burnnopanel, play.ps1 -BurnNoPanel).
++	# It lives here rather than in _ready because the lever/piston world positions are only settled at this point.
++	# Each peer reads its own command line, no RPC — so this argument has to be **passed to every instance**.
++	# Passing it only to the host gives "the host can't see the control panel but everyone else can".
++	if NetworkManager.mp8_args().has("mp8burnnopanel"):
 +		mp8_set_panel_visible(false)
 +
-+	# [MP8] 局内绑定调试面板（-BurnDebug）。放在这里是因为到这一步
-+	# 工位号、带子、冲压机、槽位、外推增量全都定下来了。
++	# [MP8] In-match binding debug panel (-BurnDebug). It goes here because by this point
++	# the station number, belt, press, slots and outward push offset are all settled.
 +	_mp8_debug_build()
 +	_mp8_debug_refresh()
 +
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 以下全是新增
++# [MP8] Everything below is new
 +# ═══════════════════════════════════════════════════════════════════════════
 +
-+# [MP8] 玩家操作平台（活塞 / 两根拉杆 / 控制台屏）的显隐。
++# [MP8] Show/hide the player control platform (piston / two levers / control panel screen).
 +#
-+# **和"可见平台"是两件不同的东西，别混**：
-+#   · 玩家操作平台 = 这几件，挂在玩家实例下、跟着工位走，**8 个工位都有**；
-+#   · 可见平台     = 主场景 `burn recycle visuals final` 下那几套**静态**工位框架，
-+#     归 burn_recycle.gd 的 `_mp8_set_frames_visible()` 管（原版只有 4 套，理由见那边）。
++# **This is a different thing from the "visible platform", don't mix them up.**
++#   · Player control platform = these pieces, parented under the player instance and following the station. **All 8 stations have one.**
++#   · Visible platform     = the **static** station frames under `burn recycle visuals final` in the main scene,
++#     managed by `_mp8_set_frames_visible()` in burn_recycle.gd (vanilla only has 4 sets, see there for why).
 +#
-+# ⚠️ 三样**故意不动**：
-+#   · 记分屏 `score_parent`（ScoreScreenParent）—— show_end_score_rpc 结算要用它显示分数；
-+#   · 角色本体与 `indicator` —— 隐了就判不出"人站在哪个工位"，而摆位正是要判这个；
-+#   · 货位 `item_position_parent` 与货物 —— 那是玩法可读性，不属于平台。
-+# ⚠️ `visible = false` 只关画面：Area3D 的碰撞照旧（改的不是 scale，与坑第 28 条无关），
-+# 所以隐着照样能烧/回收/被冲压 —— 它是纯观察开关，不改玩法。
++# ⚠️ Three things are **deliberately left alone**.
++#   · Score screen `score_parent` (ScoreScreenParent) — show_end_score_rpc uses it to show scores at results.
++#   · The character itself and `indicator` — hiding them makes it impossible to tell "which station a player is standing at", which is exactly what the layout needs to judge.
++#   · Item slots `item_position_parent` and the items — those are for gameplay readability and not part of the platform.
++# ⚠️ `visible = false` only hides the visuals. Area3D collision still works (this doesn't change scale, so pitfall #28 doesn't apply),
++# so hidden pieces can still burn/recycle/get pressed — it's a pure observation switch that doesn't change gameplay.
 +func mp8_set_panel_visible(on: bool) -> void :
 +
 +	var hit: int = 0
@@ -232,37 +234,37 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
 +		n3.visible = on
 +		hit += 1
 +
-+	# 四件都该在。少了就报警：这个开关"没生效"和"生效了"在画面上难分辨，
-+	# 不报的话下次会白查一轮（同 burn_recycle.gd 那边找不到框架时的处理）。
++	# All four pieces should be there. Warn if any are missing, because "switch didn't work" and "switch worked" are hard to tell apart on screen,
++	# and without a warning the next investigation would be wasted (same handling as burn_recycle.gd when it can't find the frames).
 +	if hit < 4:
-+		push_warning("[MP8] 人工筛选：%d 号工位的操作平台只找到 %d/4 件（活塞/两拉杆/台屏），其余照旧" % [
++		push_warning("[MP8] Burn Recycle: station %d control platform only found %d/4 pieces (piston/two levers/panel screen), the rest are unchanged" % [
 +			active_seat_index, hit])
 +
 +
-+# [MP8] 控制台屏那一组。原版没给它 @export，只能按名字找（probe65 量的节点名）。
-+# 找的是 parent 而不是 mesh 本身：屏幕内容是挂在 parent 下的 SubViewport 那一套。
++# [MP8] The control panel screen group. Vanilla has no @export for it, so it's found by name (node name measured by probe65).
++# It looks up the parent rather than the mesh itself, because the screen content is the SubViewport setup hanging under that parent.
 +func _mp8_panel_screen() -> Node3D :
 +	return find_child("control panel screen parent", true, false) as Node3D
 +
 +
-+# [MP8] 工位总数。game_instance 还没接上时退回 4（= 原版），
-+# 这样任何一处早于 set_manager_from_path_rpc 的调用都不会拿到 0 去做取模。
++# [MP8] Total station count. Falls back to 4 (= vanilla) while game_instance isn't hooked up yet,
++# so any call that happens before set_manager_from_path_rpc never gets 0 to take a modulo with.
 +func _mp8_seats() -> int:
 +	if game_instance != null and game_instance.mp8_seats > 0:
 +		return game_instance.mp8_seats
 +	return 4
 +
 +
-+# [MP8] 每推进一格带子该滚多少 UV（带子缩短后要按比例放大，见 move_items_visual）
++# [MP8] How much UV the belt should scroll per step (scaled up proportionally once the belt is shortened, see move_items_visual)
 +func _mp8_uv_step() -> float:
 +	if game_instance != null and game_instance.mp8_belt_uv_step > 0.0:
 +		return game_instance.mp8_belt_uv_step
 +	return 0.028
 +
 +
-+# [MP8] 客户端视觉总成的朝向。
-+# 原版是 visual_parent_rotations[seat]（定长 4 项，5~8 号越界）；
-+# 那张表就是 180 + 90*seat（mod 360），换成公式即可推广到任意角步。
++# [MP8] Rotation of the client-side visuals assembly.
++# Vanilla used visual_parent_rotations[seat] (fixed 4 entries, 5~8 out of bounds).
++# That table is just 180 + 90*seat (mod 360), so a formula generalizes it to any angle step.
 +func _mp8_visual_rotation(seat: int) -> float:
 +	var step: float = 90.0
 +	if game_instance != null and game_instance.mp8_seat_step > 0.0:
@@ -270,13 +272,13 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
 +	return fposmod(180.0 + step * float(seat), 360.0)
 +
 +
-+# [MP8] 把货道砍到 n 格。
++# [MP8] Trim the item lane to n slots.
 +#
-+# 原版 18 格里只有 0~3 有玩法意义（0~2 预告、3 操作位），4~17 是"没分拣的货开走"的
-+# 视觉尾巴；45° 八工位下那条 16.89 米的带子会横穿邻座，用户 2026-08-17 定砍到 8~10 格。
++# Of the 18 vanilla slots only 0~3 matter for gameplay (0~2 preview, 3 is the action slot). 4~17 are the visual tail where "unsorted items ride off",
++# and with 8 stations at 45° that 16.89 m belt cuts across the neighboring seat, so on 2026-08-17 the user decided to trim it to 8~10 slots.
 +#
-+# ⚠️ 两端格数必须一致：move_items_data() 的 erase 下标是从 items 长度推的，
-+# 长度不同两端会 erase 不同的格子。所以格数由服务器经 setup_rpc 下发，本函数不自己算。
++# ⚠️ Both sides must have the same slot count. The erase index in move_items_data() is derived from the items length,
++# and with different lengths the two sides would erase different slots. So the server sends the slot count via setup_rpc and this function doesn't compute it.
 +func _mp8_apply_slot_count(n: int) -> void :
 +
 +	if n <= 4 or n >= item_positions.size():
@@ -290,28 +292,28 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
 +		items[i] = null
 +
 +	if active_item_index >= n:
-+		printerr("[MP8] 人工筛选：操作位下标 %d 超出 %d 格货道，货永远走不到操作位" % [
++		printerr("[MP8] Burn Recycle: action slot index %d is beyond the %d-slot item lane, items will never reach the action slot" % [
 +			active_item_index, n])
 +
 +
-+# [MP8] 自检：burn_recycle.gd 缩短带子用的是三个写死的几何常量
-+# （首格 z=+3、格距 1 米、原版 18 格，都是 probe57 从原装 PCK 量的）。
-+# 游戏更新后场景一改，那三个数就可能不对，而带子长度错了只是"看着怪"，不会报错。
-+# 所以这里拿真实货位逐项比一遍，对不上就喊出来。只在 0 号工位报一次，不刷屏。
++# [MP8] Self-check. burn_recycle.gd shortens the belts using three hardcoded geometry constants
++# (first slot z=+3, 1 m slot spacing, 18 vanilla slots, all measured by probe57 from the stock PCK).
++# If a game update changes the scene those numbers may be wrong, and a wrong belt length only "looks odd" without raising any error.
++# So this compares them against the real item slots one by one and shouts if they don't match. It only reports once, on station 0, to avoid log spam.
 +func _mp8_self_check() -> void :
 +
 +	if active_seat_index != 0 or item_positions.size() < 2 or game_instance == null:
 +		return
 +
-+	# ⚠️ 必须换算到**玩家根节点自己的坐标系**（to_local）再比 —— 这一条踩过两次：
-+	# 玩家场景根节点烘死了 90° yaw，而运行时 rotation_degrees 把它覆盖掉了，
-+	# 所以"连根变换一起累乘"量出来的坐标（probe57 那一版）跟运行时差 90°。
-+	# 运行时真相（probe62）：货道沿局部 **x** 走（-3.00 起，格距 1 米），径向是 **z**（恒 5.20）。
++	# ⚠️ Must convert into the **player root node's own coordinate space** (to_local) before comparing — this pitfall was hit twice.
++	# The player scene root has a baked-in 90° yaw, but at runtime rotation_degrees overwrites it,
++	# so coordinates measured by "multiplying through the root transform too" (the probe57 version) are 90° off from runtime.
++	# Runtime ground truth (probe62) — the item lane runs along local **x** (starting at -3.00, 1 m spacing) and radial is **z** (always 5.20).
 +	var p0: Vector3 = to_local(item_positions[0].global_position)
 +	var p1: Vector3 = to_local(item_positions[1].global_position)
 +	var first_x: float = p0.x
 +	var spacing: float = absf(p1.x - p0.x)
-+	print("[MP8] 人工筛选货道实况：%d 格 / 首格 x=%.2f / 格距 %.2f 米 / 径向 z=%.2f（常量是 %d / %.2f / %.2f / %.2f）" % [
++	print("[MP8] Burn Recycle item lane actual: %d slots / first slot x=%.2f / spacing %.2f m / radial z=%.2f (constants are %d / %.2f / %.2f / %.2f)" % [
 +		item_positions.size(), first_x, spacing, p0.z,
 +		BurnRecycleMinigame.MP8_ORIG_SLOTS, BurnRecycleMinigame.MP8_SLOT_FIRST_X,
 +		BurnRecycleMinigame.MP8_SLOT_SPACING, BurnRecycleMinigame.MP8_STATION_RADIAL_Z])
@@ -320,48 +322,48 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
 +			or absf(first_x - BurnRecycleMinigame.MP8_SLOT_FIRST_X) > 0.05 \
 +			or absf(spacing - BurnRecycleMinigame.MP8_SLOT_SPACING) > 0.05 \
 +			or absf(p0.z - BurnRecycleMinigame.MP8_STATION_RADIAL_Z) > 0.05:
-+		printerr("[MP8] ⚠️ 人工筛选：货道几何跟 burn_recycle.gd 里的常量对不上 —— 带子长度/外推方向会摆错，去改那三个常量")
++		printerr("[MP8] ⚠️ Burn Recycle: item lane geometry doesn't match the constants in burn_recycle.gd — belt length/push direction will be wrong, go fix those three constants")
 +
-+	# 顺带核对"公式等于原表"这条（角步 90° 时必须逐项一致，否则 4 人局就被我改坏了）
++	# Also verify "formula equals the original table" (with a 90° step every entry must match, otherwise I've broken 4-player matches)
 +	for s in visual_parent_rotations.size():
 +		var want: float = visual_parent_rotations[s]
 +		var got: float = fposmod(180.0 + 90.0 * float(s), 360.0)
 +		if absf(fposmod(want - got, 360.0)) > 0.01:
-+			printerr("[MP8] ❌ 视觉朝向公式与原版表第 %d 项不符（表 %.1f / 公式 %.1f）" % [s, want, got])
++			printerr("[MP8] ❌ Visual rotation formula doesn't match vanilla table entry %d (table %.1f / formula %.1f)" % [s, want, got])
 +
  @rpc("any_peer", "call_local", "reliable")
  func set_random_type_array_rpc(_random_types_byte_array: PackedByteArray):
  
-@@ -623,3 +826,100 @@ func set_player_presence(_network_id: int, seat_counter: int):
+@@ -623,3 +828,100 @@ func set_player_presence(_network_id: int, seat_counter: int):
  
  		set_process(false)
  		indicator.visible = false
 +
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 局内绑定调试面板（-BurnDebug / 命令行 mp8burndebug），**默认全关**
++# [MP8] In-match binding debug panel (-BurnDebug / command line mp8burndebug), **off by default**
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 屏幕左上角，**每台机器显示自己那个玩家的绑定**（8 个窗口各看各的）。
++# Top-left of the screen, **each machine shows its own player's bindings** (each of the 8 windows sees its own).
 +#
-+# 为什么值得单独做一个：本局最致命的一类 bug 就是"工位号 → 硬件"配错或配不到 ——
-+#   * belts[seat] 越界拿到 null → 货道不滚；
-+#   * presses 匹配不到 → active_press 恒 null → set_eliminated_rpc() 第一句就报错
-+#     中断整个函数 → **被淘汰的人照样能继续玩**。
-+# 这两条在画面上都不会立刻显形（第二条要等有人被淘汰才爆），
-+# 所以把绑定结果直接摆在屏幕上，一眼就能判 8 个工位是不是都配齐了。
++# Why it's worth a dedicated panel — the deadliest class of bug in this match is a wrong or missing "station number → hardware" binding.
++#   * belts[seat] out of bounds gives null → the item lane doesn't scroll.
++#   * presses fails to match → active_press is always null → the first statement of set_eliminated_rpc() errors,
++#     aborting the whole function → **an eliminated player can keep playing**.
++# Neither shows up on screen right away (the second only blows up once someone is eliminated),
++# so the bindings are put right on screen, where one glance tells you whether all 8 stations are fully wired.
 +#
-+# 原版有一个 `debug: Label3D` 只写了 "seat: N"，那是**世界空间**里的小牌子，
-+# 远了根本看不清，也不含 id 与硬件绑定 —— 这里是屏幕空间的独立面板，不动它。
++# Vanilla has a `debug: Label3D` that only shows "seat: N". That's a small sign in **world space**,
++# unreadable from a distance and without the id or hardware bindings — this is a separate screen-space panel and leaves that one alone.
 +#
-+# ⚠️ ③ 收尾：这是显式开关、默认关、不跟 -debug-tools 走。不传参数一个像素都不多。
++# ⚠️ ③ Wrap-up — this is an explicit switch, off by default and not tied to -debug-tools. Without the argument not a single extra pixel is drawn.
 +
 +var _mp8_dbg_canvas: CanvasLayer = null
 +var _mp8_dbg_panel: Label = null
 +
 +
 +func _mp8_debug_on() -> bool :
-+	return Array(OS.get_cmdline_args()).has("mp8burndebug")
++	return NetworkManager.mp8_args().has("mp8burndebug")
 +
 +
 +func _mp8_debug_build() -> void :
@@ -369,7 +371,7 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
 +	if _mp8_dbg_panel != null or not _mp8_debug_on():
 +		return
 +
-+	# 只在**本人那一端**建面板：每个窗口显示自己的绑定，不是别人的。
++	# Only build the panel on the **player's own peer**. Each window shows its own bindings, not anyone else's.
 +	if player_presence == null:
 +		return
 +	if not GameManager.local_game and player_presence.network_id != multiplayer.get_unique_id():
@@ -403,16 +405,16 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
 +		pname = String(player_presence.network_name)
 +		pid = player_presence.network_id
 +
-+	# 指示灯：本工位负责点亮的是**前一个工位**那盏（原版语义，环形回绕）
++	# Indicator — this station is responsible for lighting the **previous station's** light (vanilla semantics, wrapping around)
 +	var ind_id: int = active_seat_index - 1
 +	if ind_id < 0:
 +		ind_id = seats - 1
 +
-+	var belt_txt: String = "✗ 没配到"
++	var belt_txt: String = "✗ not bound"
 +	if active_belt != null:
 +		belt_txt = "✓ %s" % String(active_belt.name)
 +
-+	var press_txt: String = "✗ 没配到（淘汰流程会炸）"
++	var press_txt: String = "✗ not bound (elimination will blow up)"
 +	if active_press != null:
 +		press_txt = "✓ press_id=%d" % active_press.press_id
 +
@@ -420,16 +422,16 @@ diff --git a/minigames/burn_recycle/components/player/burn_recycle_player.gd b/m
 +	var push: float = 0.0
 +	if game_instance != null:
 +		push = float(game_instance.mp8_ring_push)
-+		ring = "外圈 +%.2f 米" % push if (active_seat_index % 2) == 1 and push > 0.0 else "内圈"
++		ring = "outer ring +%.2f m" % push if (active_seat_index % 2) == 1 and push > 0.0 else "inner ring"
 +
 +	var lines := PackedStringArray()
-+	lines.append("[MP8] 人工筛选 · 绑定调试")
-+	lines.append("玩家 %s    id = %d" % [pname, pid])
-+	lines.append("工位 %d / 共 %d 个    %s" % [active_seat_index, seats, ring])
-+	lines.append("传送带  %s" % belt_txt)
-+	lines.append("冲压机  %s" % press_txt)
-+	lines.append("指示灯  我负责点亮 %d 号工位那盏" % ind_id)
-+	lines.append("货道 %d 格    工位世界坐标 (%.2f, %.2f)" % [
++	lines.append("[MP8] Burn Recycle · binding debug")
++	lines.append("Player %s    id = %d" % [pname, pid])
++	lines.append("Station %d / %d total    %s" % [active_seat_index, seats, ring])
++	lines.append("Belt  %s" % belt_txt)
++	lines.append("Press  %s" % press_txt)
++	lines.append("Indicator  I light the one for station %d" % ind_id)
++	lines.append("Item lane %d slots    station world pos (%.2f, %.2f)" % [
 +		item_positions.size(), global_position.x, global_position.z])
 +
 +	_mp8_dbg_panel.text = "\n".join(lines)

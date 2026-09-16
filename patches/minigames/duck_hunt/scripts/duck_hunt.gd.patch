@@ -6,40 +6,40 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  var duck_player_count: int = 0
  var duck_players: Dictionary[int, DuckHuntDuckPlayer]
 +
-+# [MP8] 原版只有一个猎人。6 人及以上改成两个，所以主存储换成数组；
-+# `hunter_player` 保留为"第一个猎人"——本地分屏的取景器只支持一个视口。
++# [MP8] Vanilla has only one hunter. With 6 or more players there are two, so the main storage is now an array.
++# `hunter_player` is kept as "the first hunter" — the local split-screen viewfinder only supports one viewport.
 +var hunter_players: Array[DuckHuntHunterPlayer] = []
  var hunter_player: DuckHuntHunterPlayer
  
-+# [MP8] ===== 8 人改造参数（用户 2026-08-14 定稿，见 HANDOFF T6）=====
++# [MP8] ===== 8-player rework parameters (finalized by the user 2026-08-14, see HANDOFF T6) =====
 +#
-+# 人数 → 鸭:猎    ≤4 → 3:1 ｜ 5 → 4:1 ｜ 6 → 4:2 ｜ 7 → 5:2 ｜ 8 → 6:2
-+# 弹夹/射速的五档表在 hunter_player.gd（原版就有那两张 @export 表，只是索引改成了总人数）。
++# Players → duck:hunter    ≤4 → 3:1 | 5 → 4:1 | 6 → 4:2 | 7 → 5:2 | 8 → 6:2
++# The five-tier magazine/fire-rate table is in hunter_player.gd (vanilla already has those two @export tables, only the index was changed to total player count).
 +const MP8_TWO_HUNTERS_FROM: int = 6
 +
-+# 双猎人站位。实测几何：猎人位 (0, 16.629, -21)，鸭子排在 z=104，相距约 125 米。
++# Dual hunter positions. Measured geometry - hunter spot (0, 16.629, -21), ducks line up at z=104, about 125 m apart.
 +#
-+# 改判过一次（2026-08-15）：
-+#   初版按"分守两侧、形成交叉火力"给了 ±15，实跑后**用户判定火力覆盖意味太强**——
-+#   两个狙击位隔着 30 米，鸭子无论往哪边跑都在某一个人的正面，压迫感过头。
-+#   现在改成**中间并列**：两人从原位各往两边挪一个身位，肩并肩守中路。
-+#   这样两人视野基本重合，火力集中而不是包夹，鸭子仍有侧翼可绕。
-+#   2026-08-15 再调：1 个身位太挤，改成 2（两人之间隔约 4 米）。
++# This was re-decided once (2026-08-15).
++#   The first version used ±15 to "guard both flanks and create crossfire", but after a real run **the user judged the fire coverage too oppressive** —
++#   with the two sniper spots 30 m apart, whichever way a duck runs it's in front of one of them, which is too much pressure.
++#   It's now **side by side in the middle**. Each hunter steps one body-width outward from the original spot, shoulder to shoulder guarding the center.
++#   That way their views mostly overlap, fire is concentrated rather than pincering, and ducks still have flanks to go around.
++#   Tweaked again 2026-08-15. 1 body-width was too cramped, so it's now 2 (about 4 m between them).
 +const MP8_HUNTER_SIDE_OFFSET: float = 2.0
 +
-+# 鸭子出生点：只在原版 3 个点的跨度里均分，**不往外扩**（往外扩会出地图，用户实测）。
-+# ⚠️ 也不能套通用补位算法（取相邻两点的中点）：对 3 个点会算出**重合**的出生点——
-+#    j=1 时 (-5,+5) 的中点 = 0，与原版 Marker3D 完全重合，实测两对鸭子叠在一起。
++# Duck spawn points are spread evenly only within the span of vanilla's 3 points and **don't extend outward** (extending goes off the map, tested by the user).
++# ⚠️ The generic fill-in algorithm (midpoint of two neighboring points) can't be used either. With 3 points it produces **overlapping** spawn points —
++#    at j=1 the midpoint of (-5,+5) = 0, exactly on top of the vanilla Marker3D, and in testing two pairs of ducks stacked on each other.
 +var _mp8_duck_span_set: bool = false
 +var _mp8_duck_span_min: float = 0.0
 +var _mp8_duck_span_max: float = 0.0
 +
 +
-+# [MP8] 自截图：文件名带角色（hunter/duck），事后一眼能挑出猎人那张。
-+# 和另外两块屏一样，靠游戏自己存 PNG，不需要任何屏幕录制权限（见 HANDOFF 第八节）。
++# [MP8] Self-screenshot. The file name includes the role (hunter/duck) so the hunter's shot is easy to pick out afterwards.
++# Like the other two screens, it relies on the game saving its own PNG and needs no screen recording permission (see HANDOFF section 8).
 +func mp8_shot(tag: String, delay: float = 0.0) -> void :
 +
-+	if not Array(OS.get_cmdline_args()).has("mp8shot"):
++	if not NetworkManager.mp8_args().has("mp8shot"):
 +		return
 +
 +	if delay > 0.0:
@@ -53,38 +53,38 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +	var img: Image = get_viewport().get_texture().get_image()
 +	if img != null:
 +		img.save_png("user://mp8_duck_%s_%s_%d.png" % [tag, role, peer])
-+		print("[MP8] mp8shot：已存 user://mp8_duck_%s_%s_%d.png" % [tag, role, peer])
++		print("[MP8] mp8shot: saved user://mp8_duck_%s_%s_%d.png" % [tag, role, peer])
 +
 +
-+# [MP8] 本局该有几个猎人。至少留一只鸭，否则没人可打。
++# [MP8] How many hunters this match should have. Always leave at least one duck, otherwise there's nobody to shoot.
 +func _mp8_hunter_count(total_players: int) -> int:
-+	# [MP8] mp8lone：测试开关，强制单猎人。
-+	# "独狼回合"本来只出现在 7 人局的**最后一个**小回合，而挂机机器人打不完前三个
-+	# （鸭子不死不逃），那一轮的强化参数和专属口号根本验不到。
-+	# 有了这个开关，8 人局直接就是 1 猎 7 鸭，独狼那套全走一遍。
-+	if Array(OS.get_cmdline_args()).has("mp8lone"):
++	# [MP8] mp8lone - test switch that forces a single hunter.
++	# A "lone hunter round" normally only happens in the **last** round of a 7-player match, and idle bots can't get through the first three
++	# (ducks neither die nor escape), so that round's buffed parameters and special slogans could never be verified.
++	# With this switch an 8-player match is simply 1 hunter vs 7 ducks, exercising the whole lone hunter path.
++	if NetworkManager.mp8_args().has("mp8lone"):
 +		return 1
 +	var wanted: int = 2 if total_players >= MP8_TWO_HUNTERS_FROM else 1
 +	return clampi(wanted, 1, maxi(total_players - 1, 1))
 +
 +
-+# [MP8] 猎人站位：一个猎人守中间（原版位置），两个猎人分守两侧。
++# [MP8] Hunter positions. One hunter guards the center (vanilla position), two hunters take one side each.
 +func _mp8_hunter_position(index: int, total_hunters: int) -> Vector3:
 +	var base: Vector3 = hunter_player_spawn_position.global_position
 +	if total_hunters <= 1:
 +		return base
-+	# index 0 → 左，index 1 → 右
++	# index 0 → left, index 1 → right
 +	var side: float = -1.0 if index == 0 else 1.0
 +	return base + Vector3(side * MP8_HUNTER_SIDE_OFFSET, 0.0, 0.0)
 +
 +
-+# [MP8] 鸭子出生点从 3 个补到够用为止。
++# [MP8] Fill duck spawn points up from 3 until there are enough.
 +#
-+# 第一版是"按原版间距 5 向两侧延伸"（x = 0, ±5, ±10, -15），
-+# **用户实测：有人会跳出地图** —— 往外扩就扩到场地边界外面去了。
-+# 现在改成**只在原版那 3 个点的跨度里均分**（x ∈ [-5, +5]）：
-+# 那个跨度是原版唯一背书过"一定在场地内"的范围，往外一步都不迈。
-+# 代价只是鸭子起跑时挨得近一些（6 只时间距 2），换来的是绝不出界。
++# The first version "extended outward on both sides with vanilla's spacing of 5" (x = 0, ±5, ±10, -15),
++# **and in the user's testing some players jumped off the map** — extending outward went past the arena boundary.
++# Now it **only spreads evenly within the span of vanilla's 3 points** (x ∈ [-5, +5]).
++# That span is the only range vanilla vouches for as "definitely inside the arena", so it never steps outside it.
++# The only cost is that ducks start a bit closer together (spacing 2 with 6 ducks), in exchange for never going out of bounds.
 +func _mp8_ensure_duck_spawns(needed: int) -> void :
 +
 +	var container: Node3D = duck_player_spawn_positions
@@ -92,7 +92,7 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +	if kids.is_empty() or needed <= 0:
 +		return
 +
-+	# 原版跨度只在第一次采集，之后自己补的点不能再参与计算（否则会一轮轮往外爬）
++	# The vanilla span is only captured the first time. Points we add later must not feed into it (otherwise it creeps outward round after round)
 +	if not _mp8_duck_span_set:
 +		var xs: Array[float] = []
 +		for k in kids:
@@ -112,7 +112,7 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +		dup.name = "MP8DuckSpawn%d" % container.get_child_count()
 +		container.add_child(dup)
 +
-+	# 全部重新均分到原版跨度里（含原有那 3 个，间距会变密但都在界内）
++	# Re-spread everything evenly within the vanilla span (including the original 3, spacing gets tighter but all stay in bounds)
 +	var all: Array = container.get_children()
 +	var n: int = all.size()
 +	for i in n:
@@ -125,7 +125,7 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +	var final_xs: Array = []
 +	for k in all:
 +		final_xs.append(snappedf((k as Node3D).position.x, 0.01))
-+	print("[MP8] 鸭子出生点 %d -> %d，跨度 [%.1f, %.1f]，x = %s" % [
++	print("[MP8] Duck spawn points %d -> %d, span [%.1f, %.1f], x = %s" % [
 +		kids.size(), n, _mp8_duck_span_min, _mp8_duck_span_max, str(final_xs)
 +	])
 +
@@ -133,35 +133,35 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  var spectate_duck_players: Array[DuckHuntDuckPlayer]
  var spectator_index: int = 0
  var spectate_player: DuckHuntDuckPlayer
-@@ -63,6 +186,181 @@ var player_scores: Dictionary[int, int]
+@@ -63,6 +186,182 @@ var player_scores: Dictionary[int, int]
  var player_count: int
  var hunter_name: String = ""
  
-+# [MP8] 角色揭示界面要用：本局所有猎人的名字 + 总人数（决定显示哪条强弱提示）
++# [MP8] Used by the role reveal screen - the names of all hunters this match + total player count (decides which strength hint to show)
 +var mp8_hunter_names: Array = []
 +var mp8_total_players: int = 0
 +
 +
-+# [MP8] 角色揭示界面（用户 2026-08-15 定的版式）：
++# [MP8] Role reveal screen (layout decided by the user 2026-08-15)
 +#
-+#   被选中者        ← 红
-+#   玩家名字1
-+#   玩家名字2
-+#   增强已启动 / 削弱已启动   ← 增强红、削弱蓝；基准档不显示这行
++#   The Chosen        ← red
++#   Player name 1
++#   Player name 2
++#   Buff engaged / Nerf engaged   ← buff red, nerf blue. The baseline tier doesn't show this line
 +#
-+# 为什么硬编码文案而不是加本地化 key：游戏的 .translation 是编译过的
-+# OptimizedTranslation 资源，**加不了新 key**（用户拍板的四条之一）。
++# Why the text is hardcoded instead of adding localization keys. The game's .translation is a compiled
++# OptimizedTranslation resource that **can't take new keys** (one of the four points the user signed off on).
 +#
-+# 为什么要塞一个 RichTextLabel 进去：原版 `ui_role_label` 是普通 Label，
-+# **一个 Label 只能有一种字色**，做不到"这行红、那行蓝"。
-+# RichTextLabel 挂成它的子节点，就能白蹭原有的淡入 tween 和 shake 动画
-+# （两者都作用在父节点上，子节点自动跟着）。
-+const MP8_ROLE_COLOR_NAME: String = "#9bcf87"  # 原版那个绿，保持画面调性
-+const MP8_ROLE_COLOR_BUFF: String = "#ff2d2d"  # 增强 = 红
-+const MP8_ROLE_COLOR_NERF: String = "#3fa9ff"  # 削弱 = 蓝
-+const MP8_ROLE_COLOR_NONE: String = "#4dff6a"  # 无效果 = 绿（比名字那个绿更亮，好和名字区分开）
++# Why a RichTextLabel is stuffed in. Vanilla's `ui_role_label` is a plain Label,
++# and **a Label can only have one font color**, so it can't do "this line red, that line blue".
++# Attaching the RichTextLabel as its child gets the existing fade-in tween and shake animation for free
++# (both act on the parent node, and children follow automatically).
++const MP8_ROLE_COLOR_NAME: String = "#9bcf87"  # Vanilla's green, to keep the look consistent
++const MP8_ROLE_COLOR_BUFF: String = "#ff2d2d"  # Buff = red
++const MP8_ROLE_COLOR_NERF: String = "#3fa9ff"  # Nerf = blue
++const MP8_ROLE_COLOR_NONE: String = "#4dff6a"  # No effect = green (brighter than the name green so it's easy to tell apart from names)
 +
-+# "被选中者"放大两号：原版 Label 字号 32，这里用 BBCode 单独放大这一行
++# "The Chosen" is two sizes larger. The vanilla Label font size is 32, and BBCode enlarges just this line
 +const MP8_ROLE_TITLE_FONT_SIZE: int = 44
 +
 +
@@ -186,15 +186,15 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +			rtl.add_theme_font_size_override("normal_font_size", fs)
 +		ui_role_label.add_child(rtl)
 +
-+	# ⚠️ 原 Label 的 modulate 是绿色 (0.61,0.81,0.53)，而 modulate **会往下传给子节点**，
-+	# 不改的话红色会被乘成暗橄榄色。这里把它改成白色，颜色全交给 BBCode；
-+	# alpha 仍旧由原来的淡入 tween 控制（那个 tween 只动 modulate:a，不碰 RGB）。
++	# ⚠️ The original Label's modulate is green (0.61,0.81,0.53), and modulate **is inherited by child nodes**,
++	# so without changing it the red gets multiplied into a dark olive. It's set to white here and all color is left to BBCode.
++	# Alpha is still driven by the original fade-in tween (that tween only animates modulate:a and doesn't touch RGB).
 +	ui_role_label.modulate = Color(1.0, 1.0, 1.0, ui_role_label.modulate.a)
 +	ui_role_label.text = ""
 +
 +	rtl.text = mp8_role_reveal_bbcode()
 +
-+	# RichTextLabel 没有垂直居中，等一帧拿到内容高度再把它压到中间
++	# RichTextLabel has no vertical centering, so wait a frame for the content height and then push it to the middle
 +	await get_tree().process_frame
 +	if is_instance_valid(rtl):
 +		rtl.offset_top = maxf(
@@ -202,20 +202,20 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +		)
 +
 +
-+# [MP8] 本回合是不是「独狼回合」—— 本该两个猎人却只有一个
-+# （7 人局的最后一个小回合：possible_hunters 每轮 pop 两个，7 个人分成 2/2/2/1；
-+#  或者传了 mp8lone 测试开关）。
++# [MP8] Whether this round is a "lone hunter round" — it should have two hunters but only has one
++# (the last round of a 7-player match, where possible_hunters pops two per round so 7 players split into 2/2/2/1.
++#  Or the mp8lone test switch was passed).
 +#
-+# ⚠️ 与 hunter_player.gd 的 `_mp8_is_lone_hunter()`
-+# （`mp8_hunter_total == 1 and mp8_player_count >= 6`）是**同一条判据**，
-+# 只是这边用客户端拿得到的数据表达 —— `hunter_players` 只有服务器有，
-+# 而 `mp8_hunter_names` 是 `set_hunter_names_rpc` 广播下来的。
++# ⚠️ This is **the same condition** as `_mp8_is_lone_hunter()` in hunter_player.gd
++# (`mp8_hunter_total == 1 and mp8_player_count >= 6`),
++# just expressed with data the client can get — `hunter_players` only exists on the server,
++# while `mp8_hunter_names` is broadcast down by `set_hunter_names_rpc`.
 +#
-+# 🩸 2026-08-24 用户 7 人实机报的：这条判据原先只写在 `_mp8_setup_countdown()` 里，
-+# 两个角色揭示函数各自漏掉，于是 7 人局最后一轮**倒计时说「猎人已大幅增强」、
-+# 揭示屏说「削弱已启动」** —— 同一局的两块屏互相打架。
-+# 收成一个函数就是为了不再出现第二份抄写。
-+# **今后任何按强弱分支的显示，一律调这个函数，不要再抄那行表达式。**
++# 🩸 Reported by the user from a real 7-player match on 2026-08-24. This condition used to live only in `_mp8_setup_countdown()`,
++# and both role reveal functions missed it, so in the last round of a 7-player match **the countdown said "Hunter greatly buffed"
++# while the reveal screen said "Nerf engaged"** — two screens in the same match contradicting each other.
++# It was folded into one function so that a second copy never appears again.
++# **From now on any display that branches on strength must call this function. Don't copy that expression again.**
 +func _mp8_is_lone_round() -> bool :
 +	return mp8_hunter_names.size() == 1 and mp8_total_players >= MP8_TWO_HUNTERS_FROM
 +
@@ -225,50 +225,51 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +	var zh: bool = TranslationServer.get_locale().to_upper().begins_with("ZH")
 +
 +	var lines: Array[String] = []
-+	# "被选中者"放大两号（原版 Label 是 32）
++	# "The Chosen" two sizes larger (the vanilla Label is 32)
 +	lines.append("[font_size=%d][color=%s]%s[/color][/font_size]" % [
-+		MP8_ROLE_TITLE_FONT_SIZE, MP8_ROLE_COLOR_BUFF, "被选中者" if zh else "THE CHOSEN"
++		MP8_ROLE_TITLE_FONT_SIZE, MP8_ROLE_COLOR_BUFF, "The Chosen" if zh else "THE CHOSEN"
 +	])
 +
 +	for n in mp8_hunter_names:
-+		lines.append("[color=%s]%s[/color]" % [MP8_ROLE_COLOR_NAME, String(n).to_upper()])
++		# Names are escaped so a player name can't open BBCode tags of its own
++		lines.append("[color=%s]%s[/color]" % [MP8_ROLE_COLOR_NAME, NetworkManager.mp8_bbcode_text(String(n).to_upper())])
 +
-+	# [MP8] 🩸 独狼回合先判 —— 那一轮猎人拿的是**独狼专属参数**
-+	# （hunter_player.gd 的 mp8_lone_hunter_magazine / _cycle），和下面这张
-+	# 按总人数分的五档表根本没关系。判据见 _mp8_is_lone_round() 上的说明。
++	# [MP8] 🩸 Check for a lone hunter round first — that round the hunter gets **lone-hunter-only parameters**
++	# (mp8_lone_hunter_magazine / _cycle in hunter_player.gd), which have nothing to do with the
++	# five-tier table by total player count below. See the notes above _mp8_is_lone_round() for the condition.
 +	if _mp8_is_lone_round():
 +		lines.append("[color=%s]%s[/color]" % [
-+			MP8_ROLE_COLOR_BUFF, "大幅增强已启动" if zh else "GREATLY BUFFED"
++			MP8_ROLE_COLOR_BUFF, "Major buff engaged" if zh else "GREATLY BUFFED"
 +		])
 +	else:
-+		# 三种状态各有各的提示：增强红、削弱蓝、**无效果绿**（≤4 和 8 人是基准档）
++		# Each of the three states has its own hint - buff red, nerf blue, **no effect green** (≤4 and 8 players are the baseline tiers)
 +		match mp8_total_players:
 +			5:
 +				lines.append("[color=%s]%s[/color]" % [
-+					MP8_ROLE_COLOR_BUFF, "增强已启动" if zh else "BUFF ENGAGED"
++					MP8_ROLE_COLOR_BUFF, "Buff engaged" if zh else "BUFF ENGAGED"
 +				])
 +			6, 7:
 +				lines.append("[color=%s]%s[/color]" % [
-+					MP8_ROLE_COLOR_NERF, "削弱已启动" if zh else "NERF ENGAGED"
++					MP8_ROLE_COLOR_NERF, "Nerf engaged" if zh else "NERF ENGAGED"
 +				])
 +			_:
 +				lines.append("[color=%s]%s[/color]" % [
-+					MP8_ROLE_COLOR_NONE, "无效果" if zh else "NO EFFECT"
++					MP8_ROLE_COLOR_NONE, "No effect" if zh else "NO EFFECT"
 +				])
 +
 +	return "[center]" + "\n".join(lines) + "[/center]"
 +
 +
-+# [MP8] 纯文本版（保留：本地分屏等拿不到富文本的地方还用得上）
++# [MP8] Plain text version (kept because places without rich text, like local split-screen, still use it)
 +func mp8_role_reveal_text() -> String:
 +
-+	# ⚠️ 本作的 locale 是**大写**代码（globals.gd 的 debug_locales：EN / ZHS / ZHT / JA …），
-+	# 游戏自己也是拿 `match TranslationServer.get_locale(): "ZHS":` 这么比的。
-+	# 第一版写成 begins_with("zh")，中文界面下判定成 false，显示了英文。
++	# ⚠️ This game's locales are **uppercase** codes (debug_locales in globals.gd - EN / ZHS / ZHT / JA …),
++	# and the game itself compares them like `match TranslationServer.get_locale(): "ZHS":`.
++	# The first version used begins_with("zh"), which was false under the Chinese UI and showed English.
 +	var loc: String = TranslationServer.get_locale().to_upper()
 +	var zh: bool = loc.begins_with("ZH")
 +
-+	# 猎人名字：一个就用原版那句本地化，两个就自己拼
++	# Hunter names. With one, use vanilla's localized line. With two, build it ourselves
 +	var names: Array = mp8_hunter_names
 +	var head: String = ""
 +	if names.size() <= 1:
@@ -277,36 +278,36 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +		var joined: String = ""
 +		for i in names.size():
 +			if i > 0:
-+				joined += " ＋ " if zh else " + "
++				joined += " + " if zh else " + "
 +			joined += String(names[i]).to_upper()
-+		head = ("双猎人：%s" % joined) if zh else ("HUNTERS: %s" % joined)
++		head = ("Dual hunters: %s" % joined) if zh else ("HUNTERS: %s" % joined)
 +
-+	# 强弱提示：只有偏离基准的档位才提示
++	# Strength hint. Only tiers that deviate from the baseline get a hint
 +	#
-+	# [MP8] 🩸 独狼回合先判，理由同 mp8_role_reveal_bbcode()（同一个 bug 的另一半）。
-+	# ⚠️ 这里**故意不写具体数值**：独狼那两个数是 hunter_player 上的 @export，
-+	# 本文件够不着，抄一份过来迟早对不上。措辞与倒计时那行保持一致。
++	# [MP8] 🩸 Check for a lone hunter round first, for the same reason as mp8_role_reveal_bbcode() (the other half of the same bug).
++	# ⚠️ **Actual numbers are deliberately left out** here. The lone hunter's two values are @exports on hunter_player,
++	# which this file can't reach, and a copy here would drift sooner or later. The wording matches the countdown line.
 +	var tip: String = ""
 +	if _mp8_is_lone_round():
-+		tip = "猎人大幅增强　独狼回合" if zh else "HUNTER GREATLY BUFFED  LONE ROUND"
++		tip = "Hunter greatly buffed  Lone round" if zh else "HUNTER GREATLY BUFFED  LONE ROUND"
 +	else:
-+		# 🩸 这几行的数字是**手抄**自 hunter_player.gd 的两张 @export 表
-+		# （`magazine_capacity_by_player_count` / `cycle_time_by_player_count`）——
-+		# duck_hunt.gd 够不着它们：那两张表在**猎人实例**上，而鸭子端根本没有猎人实例。
-+		# **改表就必须回来改这里**，两处对不上不会有任何东西报错。
++		# 🩸 The numbers in these lines are **copied by hand** from the two @export tables in hunter_player.gd
++		# (`magazine_capacity_by_player_count` / `cycle_time_by_player_count`) —
++		# duck_hunt.gd can't reach them. Those tables live on the **hunter instance**, and the duck side has no hunter instance at all.
++		# **If you change the tables you must come back and change this too.** Nothing will report an error if the two drift apart.
 +		#
-+		# 2026-08-24 逐值对账时抓到一处**已经漂了 9 天**的：5 人档 08-15 就从 0.70
-+		# 改成了 0.42，这行还写着 0.70。已改正。四档现在逐值一致：
-+		#   4 人 10 / 0.80（不显示）　5 人 12 / 0.42　6 人 7 / 1.375　7 人 8 / 0.80　8 人 10 / 0.80
++		# The 2026-08-24 value-by-value audit caught one that had **already drifted for 9 days**. The 5-player tier changed from 0.70
++		# to 0.42 on 08-15, but this line still said 0.70. Fixed now. All four tiers now match value for value.
++		#   4 players 10 / 0.80 (not shown)   5 players 12 / 0.42   6 players 7 / 1.375   7 players 8 / 0.80   8 players 10 / 0.80
 +		match mp8_total_players:
 +			5:
-+				tip = "猎人强化　弹夹 12・射速 0.42" if zh else "HUNTER BUFFED  MAG 12 / CYCLE 0.42"
++				tip = "Hunter buffed  Mag 12 · Fire rate 0.42" if zh else "HUNTER BUFFED  MAG 12 / CYCLE 0.42"
 +			6:
-+				tip = "猎人削弱　弹夹 7・射速 1.375" if zh else "HUNTER NERFED  MAG 7 / CYCLE 1.375"
++				tip = "Hunter nerfed  Mag 7 · Fire rate 1.375" if zh else "HUNTER NERFED  MAG 7 / CYCLE 1.375"
 +			7:
-+				tip = "猎人削弱　弹夹 8・射速 0.80" if zh else "HUNTER NERFED  MAG 8 / CYCLE 0.80"
++				tip = "Hunter nerfed  Mag 8 · Fire rate 0.80" if zh else "HUNTER NERFED  MAG 8 / CYCLE 0.80"
 +			8:
-+				tip = "基准配置　弹夹 10・射速 0.80" if zh else "BASELINE  MAG 10 / CYCLE 0.80"
++				tip = "Baseline setup  Mag 10 · Fire rate 0.80" if zh else "BASELINE  MAG 10 / CYCLE 0.80"
 +
 +	if tip == "":
 +		return head
@@ -315,25 +316,25 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  var last_spectate_camera_transform: Transform3D
  
  var local_duck_players: Dictionary[int, DuckHuntDuckPlayer]
-@@ -216,17 +514,47 @@ func spawn_players():
+@@ -216,17 +515,47 @@ func spawn_players():
  		local_game_players_order[player_presence] = null
  
  
-+	# [MP8] 本局的猎人们（6 人及以上是 2 个）。原版这里只 pop 一个。
-+	# 顺带一个好处：`check_game_end()` 是"possible_hunters 空了才结束"，
-+	# 也就是每人轮流当一次猎人 = 一局的小回合数 = 人数。
-+	# 8 人时一次 pop 两个 → 4 个小回合，和原版 4 人 1 猎的节奏一致，不会拖长一倍。
++	# [MP8] This match's hunters (2 with 6 or more players). Vanilla only pops one here.
++	# A side benefit - `check_game_end()` is "end once possible_hunters is empty",
++	# which means everyone takes one turn as hunter = rounds per match = player count.
++	# With 8 players two are popped at once → 4 rounds, the same pace as vanilla's 4 players with 1 hunter, so the match doesn't take twice as long.
  	possible_hunters.shuffle()
 -	var hunter_network_id = possible_hunters.pop_front()
  
 -	set_hunter_name_rpc.rpc(PlayerManager.player_presences[hunter_network_id].network_name)
-+	# [MP8] mp8hunterme：测试用，把猎人固定成 **P1 和 P2**（窗口 1 和窗口 2）。
-+	# 不然猎人是随机抽的：人工试手感要满屏找哪个窗口是猎人，
-+	# 试音效更麻烦——第一人称音效只在他自己那台机器上响，
-+	# 得先知道第二个猎人是哪个实例，才能用 -Audio 把声音给到他。
-+	# 固定下来之后：窗口 1 = 左猎人，窗口 2 = 右猎人，`-Audio 2` 就能听右边那个。
-+	if Array(OS.get_cmdline_args()).has("mp8hunterme"):
-+		for wanted_name in ["P2", "P1"]:   # 倒着塞，最后 P1 在最前面
++	# [MP8] mp8hunterme - for testing, pins the hunters to **P1 and P2** (window 1 and window 2).
++	# Otherwise hunters are picked at random. Testing the feel by hand means searching the screen for whichever window is the hunter,
++	# and testing sound is even worse — first-person sound only plays on that hunter's own machine,
++	# so you need to know which instance the second hunter is before you can route audio to them with -Audio.
++	# Once pinned, window 1 = left hunter and window 2 = right hunter, so `-Audio 2` lets you hear the right one.
++	if NetworkManager.mp8_args().has("mp8hunterme"):
++		for wanted_name in ["P2", "P1"]:   # Pushed in reverse so P1 ends up first
 +			for nid in possible_hunters:
 +				var pres = PlayerManager.player_presences.get(nid)
 +				if pres != null and pres.network_name == wanted_name:
@@ -361,12 +362,12 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 -		set_ducks_ambient_light_rpc.rpc(hunter_network_id)
 +		set_ducks_ambient_light_rpc.rpc(hunter_network_ids)
 +
-+	# [MP8] 鸭子位原版只有 3 个，先补够再取
++	# [MP8] Vanilla only has 3 duck spots, so fill them up before taking them
 +	_mp8_ensure_duck_spawns(total_players - hunter_network_ids.size())
  
  	var spawn_positions = duck_player_spawn_positions.get_children()
  	spawn_positions.shuffle()
-@@ -235,7 +563,7 @@ func spawn_players():
+@@ -235,7 +564,7 @@ func spawn_players():
  	var counter: int = 0
  	for network_id in PlayerManager.player_presences.keys():
  
@@ -375,13 +376,13 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  			continue
  
  		player_presence = PlayerManager.player_presences[network_id]
-@@ -261,19 +589,12 @@ func spawn_players():
+@@ -261,19 +590,12 @@ func spawn_players():
  		counter += 1
  
  	duck_player_count = duck_players.size()
 -	set_hunter_rpc.rpc(hunter_network_id)
-+	# [MP8] 名次分要用"本小回合开局有几只鸭"。duck_player_count 会被 remove_player_rpc
-+	# 改动（有人掉线时），所以单独留一份开局快照，免得算出来的名次分随掉线飘。
++	# [MP8] Placement scores need "how many ducks this round started with". duck_player_count gets changed by remove_player_rpc
++	# (when someone disconnects), so a separate snapshot is kept at round start to stop placement scores drifting with disconnects.
 +	_mp8_round_duck_count = duck_players.size()
 +	set_hunters_rpc.rpc(hunter_network_ids)
  
@@ -399,12 +400,12 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  	var hunter_initialization_delay = 8.0
  	if current_round > 0:
  		hunter_initialization_delay = 5.0
-@@ -281,16 +602,43 @@ func spawn_players():
+@@ -281,16 +603,43 @@ func spawn_players():
  	if GameManager.local_game:
  		hunter_initialization_delay -= 2.0
  
 -	hunter_player_character.initialize_hunter_rpc.rpc(hunter_initialization_delay)
-+	# [MP8] 逐个生成猎人（原版这里只有一个，没有循环）
++	# [MP8] Spawn hunters one by one (vanilla has only one here, no loop)
 +	hunter_players.clear()
 +	for hunter_index in hunter_network_ids.size():
 +		var hunter_network_id: int = hunter_network_ids[hunter_index]
@@ -433,7 +434,7 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +
 +	hunter_player = hunter_players[0] if not hunter_players.is_empty() else null
 +
-+	print("[MP8] 猎鸭开局：%d 人 → %d 鸭 %d 猎，猎人位 %s" % [
++	print("[MP8] Duck Hunt start: %d players → %d ducks %d hunters, hunter slots %s" % [
 +		total_players, duck_player_count, hunter_players.size(),
 +		str(hunter_names)
 +	])
@@ -442,22 +443,22 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  		duck_player_added_rpc.rpc(network_id)
  
 -	local_handler.setup(local_multiplayer_camera_viewport, hunter_player.local_viewport)
-+	# [MP8] 本地分屏取景器只支持一个视口，用第一个猎人的；加个空判防止没猎人时崩
++	# [MP8] The local split-screen viewfinder only supports one viewport, so use the first hunter's. Null check added to avoid a crash with no hunter
 +	if hunter_player:
 +		local_handler.setup(local_multiplayer_camera_viewport, hunter_player.local_viewport)
  
  func force_game_end():
  
-@@ -317,9 +665,15 @@ func check_game_end():
+@@ -317,9 +666,15 @@ func check_game_end():
  	if resetting:
  		return
  
 -	if not duck_players.is_empty() and hunter_player:
-+	if not duck_players.is_empty() and not hunter_players.is_empty():  # [MP8] 原为单个 hunter_player
++	if not duck_players.is_empty() and not hunter_players.is_empty():  # [MP8] Was a single hunter_player
  		return
  
-+	# [MP8] 小回合结算，方便对着日志核算名次分对不对
-+	print("[MP8] 小回合结束：%d 鸭 %d 猎，跑掉 %d 只、被打死 %d 只，累计分 %s" % [
++	# [MP8] Round results, so placement scores can be checked against the log
++	print("[MP8] Round over: %d ducks %d hunters, %d escaped, %d shot, running scores %s" % [
 +		_mp8_round_duck_count, hunter_players.size(),
 +		players_finished.size(), players_shot.size(), str(player_scores)
 +	])
@@ -465,12 +466,12 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  	if not possible_hunters.is_empty():
  		resetting = true
  		await get_tree().create_timer(3.0).timeout
-@@ -337,12 +691,23 @@ func check_game_end():
+@@ -337,12 +692,23 @@ func check_game_end():
  func set_hunter_name_rpc(_hunter_name: String):
  	hunter_name = _hunter_name
  
-+# [MP8] 双猎人版：名字变成一串，另外把本局人数一起发下去，
-+# 角色揭示界面要用它显示"这一档猎人被加强/削弱了"。
++# [MP8] Dual hunter version. Names are now a list, and this match's player count is sent down too,
++# which the role reveal screen uses to show "this tier's hunter was buffed/nerfed".
  @rpc("authority", "call_local", "reliable")
 -func set_ducks_ambient_light_rpc(_hunter_id):
 -	if multiplayer.get_unique_id() == _hunter_id:
@@ -482,7 +483,7 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +
 +@rpc("authority", "call_local", "reliable")
 +func set_ducks_ambient_light_rpc(_hunter_ids):
-+	# [MP8] 原来收单个 id，现在收一串：两个猎人都要看不见"只有鸭子能看见"的补光
++	# [MP8] Used to take a single id, now takes a list. Both hunters must not see the "ducks only" fill light
 +	var is_local_hunter: bool = false
 +	if _hunter_ids is Array:
 +		is_local_hunter = (_hunter_ids as Array).has(multiplayer.get_unique_id())
@@ -493,33 +494,36 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  
  @rpc("authority", "call_local", "reliable")
  func duck_player_added_rpc(_network_id):
-@@ -368,6 +733,56 @@ func set_hunter_rpc(_network_id):
+@@ -368,6 +734,59 @@ func set_hunter_rpc(_network_id):
  
  	acknowledge_role_rpc.rpc(multiplayer.get_unique_id())
  
-+# [MP8] 双猎人版：收一串 id，判断自己在不在里面
++# [MP8] Dual hunter version. Takes a list of ids and checks whether we're in it
 +@rpc("any_peer", "call_local", "reliable")
 +func set_hunters_rpc(_network_ids: Array):
++
++	if not NetworkManager.mp8_sender_is_host(multiplayer):
++		return
 +
 +	is_hunter = _network_ids.has(multiplayer.get_unique_id())
 +	if is_hunter:
 +		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 +
-+	_mp8_setup_countdown()  # 角色定了才知道该给自己显示哪句
++	_mp8_setup_countdown()  # Only once the role is known do we know which line to show ourselves
 +	acknowledge_role_rpc.rpc(multiplayer.get_unique_id())
 +
 +
-+# [MP8] 倒计时的文字/配色（用户 2026-08-15 定的版式）。
++# [MP8] Countdown text/colors (layout decided by the user 2026-08-15).
 +#
-+# 全部小回合：数到 "1" 时数字变红；"GO!" 换成分角色的口号并抖动。
-+#   鸭子 → 狂奔吧！      猎人 → 狩猎吧！
-+# 独狼回合（本该两猎却只有一个，即 7 人局最后一轮）额外：
-+#   倒计时下方多一行**大一号的红字**"猎人已大幅增强"，
-+#   口号升级成  鸭子 → 夺命狂奔吧！   猎人 → 尽情狩猎吧！
++# Every round - the number turns red at "1", and "GO!" is replaced by a role-specific slogan that shakes.
++#   Duck → Sprint!      Hunter → Go hunt!
++# Lone hunter rounds (should have two hunters but only have one, i.e. the last round of a 7-player match) additionally get
++#   an extra line of **larger red text** "Hunter greatly buffed" under the countdown,
++#   and upgraded slogans  Duck → Run for your life!   Hunter → Hunt freely!
 +#
-+# 这些都是**本机渲染**的（服务器只广播 "3"/"2"/"1"/"GO!"），
-+# 所以同一时刻鸭子和猎人各看各的，不用额外 RPC。
-+# 客户端判断独狼靠 set_hunter_names_rpc 发下来的名字数组，不依赖只有服务器才有的 hunter_players。
++# All of this is **rendered locally** (the server only broadcasts "3"/"2"/"1"/"GO!"),
++# so ducks and hunters each see their own at the same moment without any extra RPC.
++# Clients detect a lone hunter round from the name array sent by set_hunter_names_rpc, not from hunter_players which only the server has.
 +func _mp8_setup_countdown() -> void :
 +
 +	if minigame_overlay == null:
@@ -532,33 +536,33 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +
 +	if is_hunter:
 +		minigame_overlay.mp8_go_text = (
-+			("尽情狩猎吧！" if zh else "HUNT THEM ALL!") if lone
-+			else ("狩猎吧！" if zh else "HUNT!")
++			("Hunt freely!" if zh else "HUNT THEM ALL!") if lone
++			else ("Go hunt!" if zh else "HUNT!")
 +		)
 +	else:
 +		minigame_overlay.mp8_go_text = (
-+			("夺命狂奔吧！" if zh else "RUN FOR YOUR LIFE!") if lone
-+			else ("狂奔吧！" if zh else "RUN!")
++			("Run for your life!" if zh else "RUN FOR YOUR LIFE!") if lone
++			else ("Sprint!" if zh else "RUN!")
 +		)
 +
-+	# **只有独狼回合**才把倒计时的 "1" 整个换成红色提示语；
-+	# 其余回合保持原版正常的白色 "1"（用户 2026-08-15 修正）。
++	# **Only in lone hunter rounds** is the countdown's "1" replaced entirely by the red hint text.
++	# Other rounds keep vanilla's normal white "1" (corrected by the user 2026-08-15).
 +	minigame_overlay.mp8_one_text = ""
 +	if lone:
-+		minigame_overlay.mp8_one_text = "猎人已大幅增强" if zh else "HUNTER GREATLY BUFFED"
++		minigame_overlay.mp8_one_text = "Hunter greatly buffed" if zh else "HUNTER GREATLY BUFFED"
 +
  @rpc("any_peer", "call_local", "reliable")
  func acknowledge_role_rpc(_network_id: int):
  	if not multiplayer.is_server():
-@@ -376,10 +791,14 @@ func acknowledge_role_rpc(_network_id: int):
+@@ -376,10 +795,14 @@ func acknowledge_role_rpc(_network_id: int):
  	players_acknowledged.append(_network_id)
  
  	if players_acknowledged.size() == PlayerManager.player_presences.keys().size():
 -		if first_round:
-+		# [MP8] mp8rolereveal：测试开关。角色揭示界面原本只在第二个小回合起才出现
-+		# （第一个小回合走的是 "ROUND x/y" 那屏），而 8 个 AFK 实例根本打不完一个小回合，
-+		# 于是那屏永远等不到。这个开关让第一个小回合就走角色揭示，好截图看文案。
-+		if first_round and not Array(OS.get_cmdline_args()).has("mp8rolereveal"):
++		# [MP8] mp8rolereveal - test switch. The role reveal screen normally only appears from the second round onward
++		# (the first round goes to the "ROUND x/y" screen), and 8 AFK instances can never finish a round,
++		# so that screen never comes. This switch sends the first round to the role reveal too, so the text can be screenshotted.
++		if first_round and not NetworkManager.mp8_args().has("mp8rolereveal"):
  			first_round = false
  			state_machine.transition_to_rpc.rpc(&"Round", {"round": round_number, "total": total_rounds})
  		else:
@@ -566,40 +570,40 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  			state_machine.transition_to_rpc.rpc(&"RoleReveal")
  
  @rpc("any_peer", "call_local", "reliable")
-@@ -429,7 +848,9 @@ func remove_player_rpc(_network_id: int):
+@@ -429,7 +852,9 @@ func remove_player_rpc(_network_id: int):
  			remove_spectate_player_rpc.rpc(_network_id)
  			duck_players.erase(_network_id)
  		if player_instance is DuckHuntHunterPlayer:
 -			hunter_player = null
-+			# [MP8] 只摘掉走掉的那个猎人，另一个还在场上
++			# [MP8] Only remove the hunter who left. The other one is still in play
 +			hunter_players.erase(player_instance)
 +			hunter_player = hunter_players[0] if not hunter_players.is_empty() else null
  			duck_player_count -= 1
  
  		player_instance.queue_free()
-@@ -450,6 +871,16 @@ func player_disconnected(_network_id: int):
+@@ -450,6 +875,16 @@ func player_disconnected(_network_id: int):
  
  	if multiplayer.is_server():
  		await get_tree().create_timer(1.0).timeout
 +
-+		# [MP8] T44 守卫：本局还没正式开始（有人卡在加载里，闸门未放行）。
-+		# 猎鸭的判据是 `if not duck_players.is_empty() and not hunter_players.is_empty(): return`
-+		# —— 开局前**两个都是空的**，条件为假，直接穿过去走结算。
-+		# ⚠️ 缩进是**两个**制表符：调用埋在一层多余的 `if multiplayer.is_server():` 里
-+		#    （函数开头已经提前返回过一次了）。完整分析见 T44。
++		# [MP8] T44 guard. The match hasn't properly started yet (someone is stuck loading and the gate hasn't opened).
++		# Duck Hunt's check is `if not duck_players.is_empty() and not hunter_players.is_empty(): return`
++		# — before the match starts **both are empty**, so the condition is false and it falls straight through to results.
++		# ⚠️ The indentation is **two** tabs. The call is buried inside a redundant `if multiplayer.is_server():`
++		#    (the function already returned early once at the top). See T44 for the full analysis.
 +		if not is_all_player_loaded:
-+			print("[MP8] 猎鸭：%d 掉线时本局还没开始，跳过收尾检查" % _network_id)
++			print("[MP8] Duck Hunt: %d disconnected before the match started, skipping the end-of-match check" % _network_id)
 +			return
 +
  		check_game_end()
  
  func _on_duck_player_spectate(_network_id):
-@@ -498,13 +929,20 @@ func _on_player_finished(_network_id: int):
+@@ -498,13 +933,20 @@ func _on_player_finished(_network_id: int):
  			local_duck_players.erase(_network_id)
  
  	if duck_players.has(_network_id):
 +
-+		# [MP8] 猎人按"打掉多少血"拿分：这只鸭跑掉了，但可能是带着伤跑掉的
++		# [MP8] Hunters score by "how much health was knocked off". This duck escaped, but may have escaped wounded
 +		_mp8_award_hunters(_mp8_damage_taken(duck_players[_network_id]))
 +
  		duck_players.erase(_network_id)
@@ -609,8 +613,8 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 -			player_scores[_network_id] += 1
  
 -		player_scores[_network_id] += 1
-+		# [MP8] 名次分：第 j 个抵达出口的拿 2×(D-1-j)，越早到越高。
-+		# 原版是"第一个到 +2、其余 +1"，第 3 名和第 6 名完全同分，名次信息全丢了。
++		# [MP8] Placement score. The j-th duck to reach the exit gets 2×(D-1-j), so earlier arrivals score higher.
++		# Vanilla was "first to arrive +2, everyone else +1", so 3rd and 6th place scored exactly the same and placement information was lost.
 +		var j: int = players_finished.size()
 +		players_finished.append(_network_id)
 +		player_scores[_network_id] += MP8_DUCK_RANK_STEP * maxi(
@@ -619,17 +623,17 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  
  	check_game_end()
  
-@@ -517,15 +955,76 @@ func _on_player_died(_network_id: int):
+@@ -517,15 +959,76 @@ func _on_player_died(_network_id: int):
  	if duck_players.has(_network_id):
  		duck_players.erase(_network_id)
  		remove_spectate_player_rpc.rpc(_network_id)
 -		player_scores[hunter_player.player_presence.network_id] += 1
-+		# [MP8] 死掉的鸭子一定被打满了血量（爆头 2 伤、身体两枪 1+1，都是 2），
-+		# 所以直接按满血给，不用管它是怎么死的。过量伤害也不会多算。
++		# [MP8] A dead duck has always had its full health knocked off (headshot 2 damage, two body shots 1+1, both are 2),
++		# so just award full health regardless of how it died. Overkill damage isn't counted extra either.
 +		_mp8_award_hunters(MP8_DUCK_MAX_HEALTH)
  
-+	# [MP8] 名次分：第 i 个被打死的拿 2i —— 第一个死的 0 分，撑得越久越高。
-+	# （原版被打死是 0 分，死得早死得晚一个样。）
++	# [MP8] Placement score. The i-th duck shot gets 2i — the first to die gets 0, and the longer you survive the higher you score.
++	# (In vanilla being shot was 0 points, whether you died early or late.)
 +	var i: int = players_shot.size()
  	players_shot.append(_network_id)
 +	if player_scores.has(_network_id):
@@ -637,42 +641,42 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  
 -	if players_shot.size() == (player_count - 1):
 -		player_scores[hunter_player.player_presence.network_id] += 1
-+	# 原版"把鸭子全打光再 +1"的奖励去掉了：现在全歼自然拿到 2D（满额），
-+	# 已经高于任何一只鸭子的 2(D-1)，不需要额外补。
++	# Vanilla's "+1 for shooting every duck" bonus is removed. A full wipe now naturally earns 2D (the maximum),
++	# which is already more than any duck's 2(D-1), so no extra bonus is needed.
  
  	check_game_end()
  
 +
-+# [MP8] ===== 名次制算分（T13，2026-08-15 用户定稿）=====
++# [MP8] ===== Placement-based scoring (T13, finalized by the user 2026-08-15) =====
 +#
-+# 原版是累加型：鸭子跑到出口 +1（第一个再 +1），被打死 0 分；猎人每杀一只 +1。
-+# 毛病是**单局最多拉开 2 分，而且跑第 3 名和第 6 名完全同分**——
-+# 名次信息被压掉了，撼动不了总排名（见第六点五节"反超难"）。
++# Vanilla is cumulative. A duck reaching the exit gets +1 (the first gets another +1), getting shot is 0, and the hunter gets +1 per kill.
++# The problem is that **a single round can open a gap of at most 2 points, and 3rd and 6th place score exactly the same** —
++# placement information gets squashed and can't shake up the overall standings (see section 6.5 "hard to come back").
 +#
-+# 现在改成用小游戏**自己已有的顺序数组**当名次源（players_shot / players_finished），
-+# 和淘汰型小游戏一个路子：
++# Now it uses the minigame's **own existing order arrays** as the placement source (players_shot / players_finished),
++# the same approach as the elimination minigames.
 +#
-+#   鸭子·被打死  第 i 个死的      → 2i          （第一个死 = 0 分）
-+#   鸭子·跑掉    第 j 个到出口的  → 2(D-1-j)    （第一个到 = 最高分）
-+#   猎人（共享） 打掉多少血就拿多少 = 2×击杀 + 1×带伤逃脱
++#   Duck · shot       i-th to die            → 2i          (first to die = 0 points)
++#   Duck · escaped    j-th to reach exit     → 2(D-1-j)    (first to arrive = highest score)
++#   Hunters (shared)  score = health knocked off = 2×kills + 1×wounded escapes
 +#
-+# 两组分数正好拼成 {0,2,4,…,2(D-1)} 一整套，不重不漏（死的占低位、跑掉的占高位）。
++# The two sets of scores fit together into exactly {0,2,4,…,2(D-1)}, with no duplicates or gaps (the dead take the low slots, escapees the high ones).
 +#
-+# **为什么步长是 2 而不是 1**：留出"击伤 = 半只鸭"的整数表达。
-+# 鸭子 2 点血，身体一枪 1 伤、爆头 2 伤，所以用"血量"当分度单位最自然：
-+# 爆头击杀 = 2 分，身体两枪击杀 = 1+1 = 2 分（**和爆头等价，不奖励低效打法**），
-+# 打伤但让它跑了 = 1 分。
++# **Why the step is 2 and not 1** - it leaves room to express "wounded = half a duck" as an integer.
++# A duck has 2 health, a body shot does 1 damage and a headshot 2, so using "health" as the unit of score is the most natural.
++# Headshot kill = 2 points, two-body-shot kill = 1+1 = 2 points (**equal to a headshot, inefficient play isn't rewarded**),
++# wounded but escaped = 1 point.
 +const MP8_DUCK_RANK_STEP: int = 2
 +const MP8_DUCK_MAX_HEALTH: int = 2
 +
-+# 本小回合开局时有几只鸭（算"第 j 个到达"的分数要用；duck_player_count 会被
-+# remove_player_rpc 改动，所以单独存一份开局快照）
++# How many ducks this round started with (needed to score "j-th to arrive". duck_player_count gets changed by
++# remove_player_rpc, so a separate snapshot is stored at round start)
 +var _mp8_round_duck_count: int = 0
 +
 +
-+# [MP8] 这只鸭子身上已经被打掉多少血。用于"带伤逃脱"给猎人半额。
-+# 夹到 [0, max_health]：死掉的鸭子 health 会是 0 或负数（爆头打残血 = 过量伤害），
-+# 不夹的话过量伤害会多算分。
++# [MP8] How much health has already been knocked off this duck. Used to give hunters half for a "wounded escape".
++# Clamped to [0, max_health]. A dead duck's health can be 0 or negative (a headshot on a wounded duck = overkill damage),
++# and without the clamp overkill damage would add extra points.
 +func _mp8_damage_taken(duck) -> int:
 +	if duck == null or not is_instance_valid(duck):
 +		return 0
@@ -681,9 +685,9 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +	return clampi(max_hp - hp, 0, max_hp)
 +
 +
-+# [MP8] 双猎人**合作**：共享总分，纯粹鸭 vs 猎，猎人之间不竞争（用户拍板的四条之一）。
-+# 所以每次得分是**每个猎人都加同样的分**，而不是只给开枪的那个。
-+# 副作用：一个猎人也走这条路径，行为与原版完全一致。
++# [MP8] Dual hunters **cooperate**. They share a total score, purely ducks vs hunters, with no competition between hunters (one of the four points the user signed off on).
++# So every score event **adds the same points to every hunter**, not just the one who fired.
++# Side effect - a single hunter also goes through this path, and the behavior is identical to vanilla.
 +func _mp8_award_hunters(amount: int) -> void :
 +	for h in hunter_players:
 +		if not is_instance_valid(h):
@@ -699,58 +703,58 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
  func _on_countdown_expired():
  	super._on_countdown_expired()
  
-@@ -534,3 +1033,131 @@ func _on_countdown_expired():
+@@ -534,3 +1037,131 @@ func _on_countdown_expired():
  func _on_unpaused():
  
  	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 +
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] T52 点名器 —— 玩家报「猎鸭 5 人会有人卡住、按 wasd 无反应」
++# [MP8] T52 roll-call logger — a player reported "in 5-player Duck Hunt someone gets stuck and WASD does nothing"
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 2026-08-30 纯读码 + 四个探针，**没找到**病因，四条假说全被测量否掉
-+# （出生点几何 / spawn_limit / 我们改过移动代码 / 下标越界，见 HANDOFF T52）。
-+# 读到这儿就该停手上测量了 —— 同 T49 的做法。
++# 2026-08-30 pure code reading + four probes **did not find** the cause, and all four hypotheses were ruled out by measurement
++# (spawn point geometry / spawn_limit / the movement code we changed / index out of bounds, see HANDOFF T52).
++# Having read this far, it's time to stop and measure — same approach as T49.
 +#
 +# ═══════════════════════════════════════════════════════════════════════════
-+# 🩸 2026-09-01 更正：**下面这套 A/B/C/D/E 的前提已经被玩家的一句话推翻。**
++# 🩸 Correction 2026-09-01 - **the premise of the A/B/C/D/E set below has been overturned by one sentence from a player.**
 +# ═══════════════════════════════════════════════════════════════════════════
-+# 玩家补充：「鸭子走到石墙处 wasd 无反应，**但是右键下蹲正常**，位置刚好猎人狙不到。」
-+# `update_crouch()` 是 `_process` 的**最后一行**，排在 PauseMenu / game_focused /
-+# active 三道闸和 `movement_input` 赋值之后 —— **下蹲能用就等于三道闸全过、输入有值**。
-+# 所以 A/B/C/D/E 全部排除，真正的病灶在 `move_and_slide()` 那一侧：**被几何卡住**。
++# The player added "The duck walked up to the stone wall and WASD did nothing, **but right-click crouch worked**, and the spot happened to be where the hunter couldn't snipe."
++# `update_crouch()` is the **last line** of `_process`, after the three gates PauseMenu / game_focused /
++# active and the `movement_input` assignment — **crouch working means all three gates passed and input has a value**.
++# So A/B/C/D/E are all ruled out, and the real cause is on the `move_and_slide()` side. **Stuck in geometry.**
 +#
-+# 修法与新判据都在 `duck_player.gd` 的 `_mp8_check_stuck()`（有输入却不动 → 退回一米，
-+# 并把卡住坐标打进日志）。**本点名器保留，但它现在只用来排除"角色/激活"那一类**，
-+# 不再是主判据 —— 别再拿它的"全绿"下任何结论。
++# The fix and the new check are both in `_mp8_check_stuck()` in `duck_player.gd` (input held but not moving → move back one meter,
++# and log the stuck coordinates). **This roll-call logger stays, but it's now only used to rule out the "character/activation" class**,
++# and is no longer the main check — don't draw any conclusions from it being "all green" again.
 +#
-+# 鸭子能不能动只有一个闸：`duck_player.active`，由 `play_state.enter()` 里
-+# `set_active_rpc.rpc(true)` 打开，而那个循环遍历的是 **`players`**。
-+# 所以「按 wasd 没反应」只可能是下面三种，且三种在画面上**完全一样**：
++# Whether a duck can move has only one gate, `duck_player.active`, which is opened by
++# `set_active_rpc.rpc(true)` in `play_state.enter()`, and that loop iterates over **`players`**.
++# So "WASD does nothing" can only be one of the three cases below, and all three look **exactly the same** on screen.
 +#
-+#   A. 服务器压根没给他造角色  → 他不在 `players` 里，激活轮不到他；
-+#   B. 服务器造了、也激活了，但那个节点**没复制到他那台机器**
-+#      → 他本机没有自己的角色，摄像机不切、输入无处可去；
-+#   C. 造了、复制了、但 `active` 还是 false（RPC 丢了 / 到得比节点早）。
++#   A. The server never created a character for them  → they're not in `players`, so activation never reaches them.
++#   B. The server created and activated it, but that node **never replicated to their machine**
++#      → they have no character of their own locally, the camera doesn't switch, and input has nowhere to go.
++#   C. Created and replicated, but `active` is still false (RPC lost / arrived before the node).
 +#
-+# 光看画面分不出是哪种，所以点两次名，一次在服务器一次在本机：
++# You can't tell which from the screen alone, so the roll is called twice, once on the server and once locally.
 +#
-+#   mp8_roll_call()  服务器视角：每个 presence 有没有角色、active 是不是 true
-+#   mp8_self_check() 本机视角：**我自己**的角色在不在这台机器上、active 如何
++#   mp8_roll_call()  server view - does every presence have a character, and is active true
++#   mp8_self_check() local view - is **my own** character on this machine, and what is its active state
 +#
-+# 只有 A → roll_call 报缺人；只有 B → roll_call 全绿而某台的 self_check 报找不到自己；
-+# 只有 C → 两边都找得到，但 active=false。**一句日志就能定位到层。**
++# Only A → roll_call reports missing players. Only B → roll_call is all green but some machine's self_check can't find itself.
++# Only C → both sides find it, but active=false. **One log line pins down the layer.**
 +#
-+# ⚠️ 故意做成**常开**（不挂 `-debug-tools`），因为这个 bug 我们本机复现不出来，
-+#    只能等真人局；玩家送来的 `godot.log` 里必须自带这几行才有用。
-+#    代价是每个小回合两行，可接受（旁边那条「猎鸭开局」本来就是常开的）。
++# ⚠️ Deliberately **always on** (not behind `-debug-tools`), because we can't reproduce this bug locally
++#    and have to wait for a real match. The `godot.log` a player sends must already contain these lines to be useful.
++#    The cost is two lines per round, which is acceptable (the "Duck Hunt start" line next to it is always on anyway).
 +func _mp8_who(nid: int) -> String:
 +	var pres = PlayerManager.player_presences.get(nid)
 +	return "%s(%d)" % [pres.network_name if pres != null else "?", nid]
 +
 +
-+# [MP8] 服务器点全场：presence ↔ 角色 ↔ active 三者对不对得上。
++# [MP8] Server roll call for everyone - do presence ↔ character ↔ active all match up.
 +func mp8_roll_call() -> void :
 +
 +	if not multiplayer.is_server():
@@ -771,27 +775,27 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +			not_active.append(_mp8_who(nid))
 +
 +	if no_body.is_empty() and not_active.is_empty():
-+		print("[MP8] 猎鸭点名（服务器）：%d 人全部有角色且已激活" % PlayerManager.player_presences.size())
++		print("[MP8] Duck Hunt roll call (server): all %d players have a character and are active" % PlayerManager.player_presences.size())
 +		return
 +
-+	# 走到这儿就是 A 或 C —— 把人名打出来，玩家日志里一眼能对上是谁在喊卡住
-+	print("[MP8] 🩸 猎鸭点名异常（服务器）：%d 人 / %d 个角色 —— 没角色 %s ；没激活 %s（T52）" % [
++	# Reaching here means A or C — print the names so a player's log shows at a glance who is reporting being stuck
++	print("[MP8] 🩸 Duck Hunt roll call problem (server): %d players / %d characters — no character %s, not active %s (T52)" % [
 +		PlayerManager.player_presences.size(), owned.size(),
-+		str(no_body) if not no_body.is_empty() else "无",
-+		str(not_active) if not not_active.is_empty() else "无",
++		str(no_body) if not no_body.is_empty() else "none",
++		str(not_active) if not not_active.is_empty() else "none",
 +	])
 +
 +
-+# [MP8] 本机点自己：这台机器上到底有没有「我」的角色。
-+# 专抓 B —— 服务器一切正常、偏偏这一台没收到节点。服务器那边看不见这种。
++# [MP8] Local self check - is there actually a character for "me" on this machine.
++# Specifically catches B — the server is fine but this one machine never got the node. The server side can't see this.
 +func mp8_self_check() -> void :
 +
-+	# 分屏本地模式一台机器管所有人，这个判据不成立，直接跳过
++	# In local split-screen mode one machine handles everyone, so this check doesn't apply and is skipped
 +	if GameManager.local_game:
 +		return
 +
-+	# 等两秒再点：节点复制、set_player_presence、set_active_rpc 都是
-+	# 开打前后陆续到的，立刻点会把「还在路上」误报成「丢了」。
++	# Wait two seconds before checking. Node replication, set_player_presence and set_active_rpc
++	# all trickle in around the start of play, and checking immediately would misreport "still on the way" as "lost".
 +	await get_tree().create_timer(2.0, false).timeout
 +	if not is_inside_tree():
 +		return
@@ -809,25 +813,25 @@ diff --git a/minigames/duck_hunt/scripts/duck_hunt.gd b/minigames/duck_hunt/scri
 +			break
 +
 +	if mine == null:
-+		print("[MP8] 🩸 猎鸭自检（本机 %d）：开打 2 秒了，场上**找不到我自己的角色** —— 这就是「人卡住、按 wasd 没反应」（T52-B）" % me)
++		print("[MP8] 🩸 Duck Hunt self-check (local %d): 2 s into play and **my own character can't be found on the field** — this is exactly 'player stuck, WASD does nothing' (T52-B)" % me)
 +		return
 +
 +	if not mine.active:
-+		print("[MP8] 🩸 猎鸭自检（本机 %d）：角色在，但 active 还是 false —— 激活没到（T52-C）" % me)
++		print("[MP8] 🩸 Duck Hunt self-check (local %d): character present, but active is still false — activation never arrived (T52-C)" % me)
 +		return
 +
-+	# 🩸 **这一行的结论 2026-09-01 改了。**
-+	# 老注释写的是「全绿 ⇒ 问题在输入层」——**那是错的**，见本文件上方那段更正：
-+	# 玩家报「右键下蹲正常」，而下蹲与移动读的是同一段 `_process`，
-+	# 所以全绿恰恰是**卡墙**那个 bug 的正常长相，不是"不关我们事"的证据。
++	# 🩸 **The conclusion of this line changed on 2026-09-01.**
++	# The old comment said "all green ⇒ the problem is in the input layer" — **that was wrong**. See the correction further up this file.
++	# The player reported "right-click crouch works", and crouch and movement read the same `_process`,
++	# so all green is exactly what the **wall-stuck** bug normally looks like, not evidence that "it's not our problem".
 +	#
-+	# 现在这行只剩两个用途：
-+	#   1. 排除「角色没造出来 / 没复制到这台 / 激活没到」这三种（A/B/C）；
-+	#   2. 顺带记下 game_focused 与 PauseMenu —— 它们**不再是嫌疑**，
-+	#      但留着能在日志里一眼确认"确实不是失焦"。
-+	# **真正的判据在 duck_player.gd 的 `_mp8_check_stuck()`** —— 它会在
-+	# "按着方向键连续 3 秒没挪动"时打一行带坐标的日志并把人退回一米。
-+	# ⚠️ 仍要留意的一种全绿：**他本回合是猎人**，猎人本来就不该能走。
-+	print("[MP8] 猎鸭自检（本机 %d）：角色在、已激活，%s；窗口聚焦=%s 暂停=%s" % [
-+		me, "猎人（wasd 本来就不动）" if is_hunter else "鸭子",
++	# This line now has only two uses.
++	#   1. Rule out the three cases "character never created / not replicated to this machine / activation never arrived" (A/B/C).
++	#   2. Also record game_focused and PauseMenu — they're **no longer suspects**,
++	#      but keeping them lets the log confirm at a glance that "it really wasn't lost focus".
++	# **The real check is `_mp8_check_stuck()` in duck_player.gd** — it
++	# prints a log line with coordinates and moves the player back one meter when "a direction key is held for 3 seconds straight without moving".
++	# ⚠️ One all-green case to still watch for - **they're the hunter this round**, and hunters aren't supposed to be able to walk anyway.
++	print("[MP8] Duck Hunt self-check (local %d): character present and active, %s; window focused=%s paused=%s" % [
++		me, "hunter (WASD doesn't move anyway)" if is_hunter else "duck",
 +		str(GameManager.game_focused), str(PauseMenu.active)])

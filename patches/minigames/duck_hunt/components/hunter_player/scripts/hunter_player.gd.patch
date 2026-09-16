@@ -10,42 +10,42 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 -	1: 7, 
 -	2: 8, 
 -	3: 10, 
-+# [MP8] 原版这两张表**按鸭子数**索引，5~8 人时表达不了想要的强弱：
-+# 5 人和 6 人都是 4 只鸭，一个要加强猎人、一个要削弱，同一个键给不出两个值。
-+# 所以索引改成**总人数**（用户 2026-08-14 拍板的四条之一）。
++# [MP8] Vanilla indexes these two tables **by duck count**, which can't express the intended strength at 5~8 players.
++# 5 and 6 players both have 4 ducks, but one needs the hunter buffed and the other nerfed, and a single key can't hold two values.
++# So the index is now **total player count** (one of the four points the user signed off on 2026-08-14).
 +#
-+# 顺带修掉原版一个现存 bug：原来查表用 `.get(duck_count, 7)` / `.get(duck_count, 0.95)`，
-+# **缺键就回落到全表最弱的那档**。5~8 人（4~6 只鸭）时全部缺键，
-+# 于是猎人拿着最差的枪去打最多的鸭，方向正好反了。
-+# 现在改成把人数**夹到表的键范围内**再查，不会再落到兜底值。
++# This also fixes an existing vanilla bug. The lookup used to be `.get(duck_count, 7)` / `.get(duck_count, 0.95)`,
++# and **a missing key falls back to the weakest tier in the whole table**. At 5~8 players (4~6 ducks) every key is missing,
++# so the hunter got the worst gun against the most ducks — exactly backwards.
++# Now the player count is **clamped to the table's key range** before the lookup, so it never lands on the fallback value again.
 +#
-+# ⚠️ 原名 `reload_speed_by_duck_count` 骗人：它其实是 cycle_time
-+#    （打完一枪到能再打的间隔，值越小越快）。真正的换弹写死在 3.8-0.95=2.85 秒，不受此表控制。
++# ⚠️ The original name `reload_speed_by_duck_count` is misleading. It is actually cycle_time
++#    (the delay after a shot before you can fire again, smaller is faster). The real reload is hardcoded at 3.8-0.95=2.85 seconds and isn't controlled by this table.
 +#
-+# 五档表（用户定稿 2026-08-14）：
-+#   人数  鸭:猎   弹夹  cycle  说明   ⚠️ 这列是 cycle 不是间隔，间隔 = 0.5 + cycle
-+#   ≤4   3:1     10   0.80   原版基准
-+#   5    4:1     12   0.42   猎人最亏 → 加强（0.70 是 08-14 初稿，08-15 已改 0.42）
-+#   6    4:2      7   1.375  鸭子最亏 → 削弱（2026-08-24 又降了 20% 射速，见下）
-+#   7    5:2      8   0.80   仅削弱弹夹
-+#   8    6:2     10   0.80   比值回到基准，性能不变
++# Five-tier table (finalized by the user 2026-08-14)
++#   Players  Duck:Hunter  Mag  cycle  Notes   ⚠️ this column is cycle, not the interval. Interval = 0.5 + cycle
++#   ≤4       3:1          10   0.80   Vanilla baseline
++#   5        4:1          12   0.42   Hunter worst off → buff (0.70 was the 08-14 first draft, changed to 0.42 on 08-15)
++#   6        4:2           7   1.375  Ducks worst off → nerf (fire rate cut another 20% on 2026-08-24, see below)
++#   7        5:2           8   0.80   Magazine nerf only
++#   8        6:2          10   0.80   Ratio back to baseline, performance unchanged
 +#
-+# [MP8] 2026-08-24 用户定：6 人档射速再降 20%（cycle 1.00 → 1.375）。
++# [MP8] On 2026-08-24 the user decided the 6-player tier's fire rate drops another 20% (cycle 1.00 → 1.375).
 +#
-+# 起因：6 人档单把枪确实是全表最弱的，但**两个猎人只面对 4 只鸭**——
-+# 削弱是按"单个猎人"给的，猎人却从 1 个变成 2 个，鸭子只从 3 只变成 4 只。
-+# 按"每只鸭承受的持续火力"重算（含换弹，= 猎人数 × 单猎发/秒 ÷ 鸭子数）：
++# The reason is that the 6-player tier's single gun really is the weakest in the table, but **two hunters face only 4 ducks** —
++# the nerf was sized for "a single hunter", yet hunters went from 1 to 2 while ducks only went from 3 to 4.
++# Recomputing by "sustained fire each duck takes" (reloads included, = hunter count × shots/s per hunter ÷ duck count) gives
 +#
-+#   ≤4 基准 0.2103 ｜ 5 人 0.2160 ｜ 独狼 0.2169 ｜ 8 人 0.2103   ← 四档都在 0.210~0.216
-+#   6 人（改前）0.2622 —— 比基准高 24.7%，**全表唯一跑偏的一档**，方向还和"鸭子最亏"正好反了
++#   ≤4 baseline 0.2103 | 5 players 0.2160 | lone hunter 0.2169 | 8 players 0.2103   ← all four tiers sit within 0.210~0.216
++#   6 players (before) 0.2622 — 24.7% above baseline, **the only tier in the table that is off**, and in the opposite direction from "ducks worst off"
 +#
-+# 换句话说：那个"削弱"标签对单把枪没说错，对整局是反的。不削弱的话是 +50%，
-+# 原来的削弱只补回了一半。用户实机判定"2 打 4 压力还是太大"。
++# In other words, that "nerf" label was right about the single gun but backwards for the match as a whole. Without the nerf it would be +50%,
++# and the original nerf only clawed back half of that. The user judged in real play that "2 vs 4 is still too much pressure".
 +#
-+# 倍率照 5 人档那套算法作用在**总间隔**上：1.50 ÷ 0.8 = 1.875 秒 → cycle = 1.875 - 0.5 = 1.375。
-+# 改后单猎 0.438 发/秒（比基准慢 30.5%），每鸭承压 0.2191（+4.2%），落回上面那一簇。
-+# ⚠️ 弹夹保持 7 不动：用户要的是"削弱射击间隔"，不是缩弹夹。
-+# ⚠️ 7 人档同样偏高（0.2415，+14.8%），**用户 2026-08-24 明确"不动"**，别顺手一起改。
++# The multiplier is applied to the **total interval** using the same method as the 5-player tier. 1.50 ÷ 0.8 = 1.875 s → cycle = 1.875 - 0.5 = 1.375.
++# Afterwards a single hunter fires 0.438 shots/s (30.5% slower than baseline) and pressure per duck is 0.2191 (+4.2%), back inside the cluster above.
++# ⚠️ The magazine stays at 7. The user asked to "nerf the shot interval", not to shrink the magazine.
++# ⚠️ The 7-player tier is also on the high side (0.2415, +14.8%), but **the user explicitly said "leave it" on 2026-08-24**, so don't change it along the way.
 +@export var magazine_capacity_by_player_count: Dictionary[int, int] = {
 +	4: 10,
 +	5: 12,
@@ -58,70 +58,70 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 -	1: 0.95, 
 -	2: 0.9, 
 -	3: 0.8, 
-+# ⚠️ 表里是 cycle_time，**不等于两枪之间的间隔**：
-+#    实际间隔 = 0.5 秒（原版写死）+ cycle_time。
-+#    所以想要"5 人档射速是基准的 1.3 倍"，得先算总间隔再反推 cycle：
-+#      5 人档原总间隔 1.20 秒 → ÷1.3 = 0.923 秒 → cycle = 0.923 - 0.5 = 0.42
++# ⚠️ The table holds cycle_time, which **is not the interval between two shots**.
++#    Actual interval = 0.5 s (hardcoded in vanilla) + cycle_time.
++#    So to get "the 5-player tier fires at 1.3x the baseline rate", work out the total interval first and then derive cycle from it.
++#      5-player tier original total interval 1.20 s → ÷1.3 = 0.923 s → cycle = 0.923 - 0.5 = 0.42
 +@export var cycle_time_by_player_count: Dictionary[int, float] = {
-+	4: 0.80,   # 总间隔 1.30 秒（基准）
-+	5: 0.42,   # 总间隔 0.92 秒 = 原 5 人档(1.20)的 1.3 倍射速（用户 2026-08-15 定）
-+	6: 1.375,  # 总间隔 1.875 秒 = 原 6 人档(1.50)的 0.8 倍射速（用户 2026-08-24 定）
-+	7: 0.80,   # 总间隔 1.30 秒
-+	8: 0.80,   # 总间隔 1.30 秒
++	4: 0.80,   # Total interval 1.30 s (baseline)
++	5: 0.42,   # Total interval 0.92 s = 1.3x the fire rate of the original 5-player tier (1.20) (set by the user 2026-08-15)
++	6: 1.375,  # Total interval 1.875 s = 0.8x the fire rate of the original 6-player tier (1.50) (set by the user 2026-08-24)
++	7: 0.80,   # Total interval 1.30 s
++	8: 0.80,   # Total interval 1.30 s
  }
  
-+# [MP8] setup_rpc 传进来的总人数（0 = 没传，退回按鸭子数推）
++# [MP8] Total player count passed in by setup_rpc (0 = not passed, fall back to deriving it from duck count)
 +var mp8_player_count: int = 0
 +
 +
-+# [MP8] ===== 腰射扩散（不开镜打不准）=====
++# [MP8] ===== Hip-fire spread (inaccurate without scoping) =====
 +#
-+# 原版无论开不开镜都是从 laser_raycast 打一条绝对精准的射线，
-+# 所以"抬手就打"和"架镜瞄准"命中率一样，镜子只是看得清楚而已。
-+# 这里给**不开镜**的射击加一个圆锥内的随机偏移。
++# Vanilla fires a perfectly accurate ray from laser_raycast whether scoped or not,
++# so "snap shooting" and "scoped aiming" have the same hit rate, and the scope only lets you see more clearly.
++# This adds a random offset within a cone to **unscoped** shots.
 +#
-+# 为什么这个角度是个好机制：偏差是**角度**，落点误差随距离线性放大。
-+# 2° 在 125 米外约偏 4.4 米（鸭子约 1 米宽 → 基本打不中），
-+# 在 20 米内只偏 0.7 米（还能打中）。
-+# 于是自然形成"远距离必须架镜、近距离可以抬手打"，不需要额外写规则。
++# Why this makes a good mechanic - the deviation is an **angle**, so the miss distance grows linearly with range.
++# 2° at 125 m is about 4.4 m off (a duck is about 1 m wide → basically unhittable),
++# while within 20 m it's only 0.7 m off (still hittable).
++# That naturally produces "long range needs the scope, close range can hip-fire" without writing any extra rules.
 +#
-+# zoom_fov_index：0 = 不开镜（FOV 75），1/2 = 开镜，只有 0 吃扩散。
-+# 2026-08-15 用户判定 2° 太小，加到 8°：
-+#   8° 时中位偏移 125米→12.4米、40米→4.0米、20米→2.0米、10米→1.0米
-+#   ——也就是**不开镜基本就别想打中**，10 米内才勉强有戏。
-+#   （各候选值的对照表见 tools\probe\probe18.gd，改完跑一次就能看）
++# zoom_fov_index - 0 = unscoped (FOV 75), 1/2 = scoped. Only 0 gets spread.
++# On 2026-08-15 the user judged 2° too small, so it was raised to 8°.
++#   At 8° the median offset is 125 m→12.4 m, 40 m→4.0 m, 20 m→2.0 m, 10 m→1.0 m
++#   — in other words **you basically can't hit anything unscoped**, with only a slim chance within 10 m.
++#   (A comparison table of the candidate values is in tools\probe\probe18.gd. Run it once after a change to see.)
 +@export var mp8_hipfire_spread_deg: float = 8.0
 +
 +var _mp8_spread_saved_rotation: Vector3 = Vector3.ZERO
 +var _mp8_spread_applied: bool = false
 +
 +
-+# [MP8] ===== 射速调试热键（数字键 1 / 2 / 3）=====
++# [MP8] ===== Fire-rate debug hotkeys (number keys 1 / 2 / 3) =====
 +#
-+# 为什么"改了射速没感觉"：**两枪之间的间隔不只有 cycle_time**，
-+# 而是 `0.5 秒（写死）+ cycle_time`，弹夹打空时还要再加 2.85 秒换弹。
-+# 所以 0.80 → 0.70 只是把 1.30 秒变成 1.20 秒，**只快了 8%**，手感上基本察觉不到。
++# Why "changing the fire rate doesn't feel any different". **The gap between two shots isn't just cycle_time**,
++# it is `0.5 s (hardcoded) + cycle_time`, plus another 2.85 s reload when the magazine runs dry.
++# So 0.80 → 0.70 only turns 1.30 s into 1.20 s, **just 8% faster**, which you basically can't feel.
 +#
-+# 因此这个调试倍率作用在**整个间隔**上（那 0.5 秒也一起缩放），
-+# 按 2 就是实打实的两倍射速，好让人分辨得出来。
-+#   1 = 原速   2 = 2 倍射速（间隔 ×0.5）   3 = 半速（间隔 ×2）
++# That's why this debug multiplier applies to the **whole interval** (the 0.5 s is scaled too),
++# so pressing 2 really gives double the fire rate and people can actually tell the difference.
++#   1 = normal speed   2 = 2x fire rate (interval ×0.5)   3 = half speed (interval ×2)
 +#
-+# 只在带 `-debug-tools` 或 `mp8ratekeys` 时生效，发布版按不出来。
++# Only active in dev builds (MP8_DEV_TOOLS) launched with `mp8ratekeys`, so it can't be triggered in release builds.
 +var _mp8_rate_scale: float = 1.0
 +var _mp8_rate_keys: bool = false
 +var _mp8_rate_label: Label = null
-+var _mp8_id_label: RichTextLabel = null  # 两行两色，必须富文本
++var _mp8_id_label: RichTextLabel = null  # Two lines in two colors, so it has to be rich text
 +var _mp8_debug_canvas: CanvasLayer = null
 +
-+# [MP8] 本猎人是第几个 / 共几个（右上角显示"左/右"用）
++# [MP8] Which hunter this is / how many there are in total (used to show "left/right" in the top-right)
 +var mp8_hunter_index: int = -1
 +var mp8_hunter_total: int = 1
 +
 +
 +func _mp8_init_rate_keys() -> void :
-+	# [MP8] 2026-08-15 用户要求关掉调试键：现在**只认显式的 mp8ratekeys**，
-+	# 不再跟着 -debug-tools 一起打开（测试台默认带 -debug-tools，那样等于常开）。
-+	_mp8_rate_keys = Array(OS.get_cmdline_args()).has("mp8ratekeys")
++	# [MP8] On 2026-08-15 the user asked for the debug keys to be turned off. Now it **only honors an explicit mp8ratekeys**
++	# and no longer turns on along with -debug-tools (the test bench passes -debug-tools by default, which would make it always on).
++	_mp8_rate_keys = NetworkManager.mp8_args().has("mp8ratekeys")
 +
 +
 +func _mp8_handle_rate_key(event: InputEvent) -> void :
@@ -148,17 +148,17 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +	_mp8_rate_scale = scale
 +
 +	var base: float = 0.5 + _mp8_effective_cycle()
-+	var label: String = "原速" if is_equal_approx(scale, 1.0) else (
-+		"2 倍射速" if scale < 1.0 else "半速"
++	var label: String = "Normal speed" if is_equal_approx(scale, 1.0) else (
++		"2x fire rate" if scale < 1.0 else "Half speed"
 +	)
-+	var msg: String = "[射速调试] %s  两枪间隔 %.2f 秒 (%d 人档 cycle=%.2f)" % [
++	var msg: String = "[Fire rate debug] %s  shot interval %.2f s (%d-player tier cycle=%.2f)" % [
 +		label, base * scale, _mp8_tier(), _mp8_effective_cycle()
 +	]
 +	print("[MP8] " + msg)
 +	_mp8_show_rate_hint(msg)
 +
 +
-+# [MP8] 调试用的覆盖层，射速提示和玩家 id 共用一个
++# [MP8] Debug overlay, shared by the fire-rate hint and the player id
 +func _mp8_debug_layer() -> CanvasLayer:
 +	if _mp8_debug_canvas == null:
 +		_mp8_debug_canvas = CanvasLayer.new()
@@ -167,10 +167,10 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +	return _mp8_debug_canvas
 +
 +
-+# [MP8] 给调试用的 Label 套上游戏自己的字体。
-+# ⚠️ 不套的话用的是默认主题字体，**字距是坏的**：实测字全挤在一起叠成一团
-+# （"P3  id 104..." 会显示成 "P36idc104..."），空格换成半角也没用。
-+# 游戏自己那些 Label 都显式指定了 Terminal F4，照做即可。
++# [MP8] Gives debug Labels the game's own font.
++# ⚠️ Without it they use the default theme font, **and the letter spacing is broken**. In testing the characters all crushed together into a blob
++# ("P3  id 104..." showed up as "P36idc104..."), and switching to half-width spaces didn't help.
++# The game's own Labels all explicitly use Terminal F4, so we do the same.
 +func _mp8_style_debug_label(lbl: Label, color: Color) -> void :
 +
 +	var f = load("res://fonts/Terminal F4.ttf")
@@ -183,30 +183,30 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 +
 +
-+# [MP8] 右上角常驻显示本局猎人的强弱状态（弹夹 / 射速）。
++# [MP8] Permanently shows this match's hunter strength state (magazine / fire rate) in the top-right.
 +#
-+# 这块 HUD 一开始是调试用的"我是谁"（玩家名 + id + 左右），
-+# 排查音效那次就是靠它把变量隔离出来的（用户提的）。
-+# 排查完之后按用户要求换成玩家真正需要的信息：**弹夹和射速各自是强化还是削弱**，
-+# **不显示具体数值**（数值是设计者的事，玩家只需要知道方向），颜色沿用角色揭示屏那套：
-+#   增强 = 红   削弱 = 蓝   无效果 = 绿
++# This HUD started out as a debug "who am I" (player name + id + left/right),
++# and it's what isolated the variable when tracking down the sound issue (the user's idea).
++# Once that was solved it was switched, at the user's request, to info players actually need. **Whether magazine and fire rate are each buffed or nerfed**,
++# **without showing actual numbers** (numbers are the designer's business, players only need the direction). Colors follow the role reveal screen.
++#   Buffed = red   Nerfed = blue   No effect = green
 +#
-+# 现在是给玩家看的信息，所以**不再限定 -debug-tools**，正式游玩也显示。
++# It is now player-facing info, so it's **no longer limited to -debug-tools** and also shows in normal play.
 +func _mp8_show_id_hud() -> void :
 +
 +	if player_presence == null:
 +		return
 +
-+	# ⚠️ **两个猎人的节点在每台机器上都存在**（多人同步的是全部玩家）。
-+	# 不加这个判断的话，每块屏幕右上角会叠着两个 Label（自己那个和另一个猎人那个），
-+	# 实测两个窗口显示的是同一个人的 id——因为后建的那个盖住了先建的。
-+	# 这是第一人称 HUD，只该在**自己控制的那个猎人**的屏幕上出现。
++	# ⚠️ **Both hunters' nodes exist on every machine** (multiplayer syncs all players).
++	# Without this check every screen would have two Labels stacked in the top-right (your own and the other hunter's),
++	# and in testing both windows showed the same person's id — because the one created later covered the earlier one.
++	# This is a first-person HUD and should only appear on the screen of **the hunter you control**.
 +	if not GameManager.local_game:
 +		if player_presence.network_id != multiplayer.get_unique_id():
 +			return
 +
 +	if _mp8_id_label == null:
-+		# 两行要用两种颜色，普通 Label 做不到（一个 Label 只能一种字色），所以用富文本
++		# Two lines need two colors, which a plain Label can't do (one Label only has one font color), so use rich text
 +		var lbl := RichTextLabel.new()
 +		lbl.bbcode_enabled = true
 +		lbl.scroll_active = false
@@ -229,19 +229,19 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +	var zh: bool = TranslationServer.get_locale().to_upper().begins_with("ZH")
 +	var tier: int = _mp8_tier()
 +
-+	# 和基准档（4 人档）比：弹夹越大越强；间隔越小越强（cycle 是间隔，不是射速）
++	# Compared with the baseline tier (4 players). A bigger magazine is stronger and a smaller interval is stronger (cycle is an interval, not a fire rate)
 +	var base_mag: int = magazine_capacity_by_player_count.get(4, 10)
 +	var base_cycle: float = cycle_time_by_player_count.get(4, 0.80)
 +	var mag: int = _mp8_effective_magazine()
 +	var cyc: float = _mp8_effective_cycle()
 +
 +	_mp8_id_label.text = "[right]%s\n%s[/right]" % [
-+		_mp8_buff_line("弹夹" if zh else "MAG", _mp8_sign(float(mag - base_mag)), zh),
-+		_mp8_buff_line("射速" if zh else "RATE", _mp8_sign(base_cycle - cyc), zh),
++		_mp8_buff_line("Mag" if zh else "MAG", _mp8_sign(float(mag - base_mag)), zh),
++		_mp8_buff_line("Fire rate" if zh else "RATE", _mp8_sign(base_cycle - cyc), zh),
 +	]
 +
 +
-+# [MP8] 取符号：正=增强，负=削弱，0=无效果。浮点比较留一点容差，避免 0.7999 被判成削弱。
++# [MP8] Get the sign. Positive = buffed, negative = nerfed, 0 = no effect. Float comparison keeps a small tolerance so 0.7999 isn't judged a nerf.
 +func _mp8_sign(v: float) -> int:
 +	if v > 0.001:
 +		return 1
@@ -250,18 +250,18 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +	return 0
 +
 +
-+# [MP8] 一行"某项 + 强/弱/常规"，颜色沿用角色揭示屏：增强红、削弱蓝、无效果绿。
-+# **不显示具体数值**（用户要求）。
++# [MP8] One line of "stat + buffed/nerfed/normal". Colors follow the role reveal screen - buffed red, nerfed blue, no effect green.
++# **No actual numbers are shown** (user request).
 +func _mp8_buff_line(what: String, direction: int, zh: bool) -> String:
 +
 +	var color: String = "#4dff6a"
-+	var word: String = "无效果" if zh else "NORMAL"
++	var word: String = "No effect" if zh else "NORMAL"
 +	if direction > 0:
 +		color = "#ff2d2d"
-+		word = "增强" if zh else "BUFFED"
++		word = "Buffed" if zh else "BUFFED"
 +	elif direction < 0:
 +		color = "#3fa9ff"
-+		word = "削弱" if zh else "NERFED"
++		word = "Nerfed" if zh else "NERFED"
 +
 +	return "[color=%s]%s %s[/color]" % [color, what, word]
 +
@@ -284,9 +284,9 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +	t.tween_property(_mp8_rate_label, "modulate:a", 0.0, 0.6)
 +
 +
-+# [MP8] 让一段动画正好铺满给定的时间窗：速度 = 动画本身长度 / 可用时间。
-+# 拿不到动画长度就退回 1.0（原速），不至于把动画搞坏。
-+# 夹在 [0.25, 4.0]：再快就糊成一团、再慢就像卡住了，超出这个范围宁可不同步。
++# [MP8] Makes an animation exactly fill a given time window. Speed = the animation's own length / available time.
++# If the animation length can't be read, fall back to 1.0 (normal speed) so the animation doesn't get broken.
++# Clamped to [0.25, 4.0]. Any faster turns into a blur and any slower looks frozen, so outside that range it's better not to sync.
 +func _mp8_anim_speed_for(anim_name: StringName, window: float) -> float:
 +
 +	if window <= 0.0 or anim_rig == null:
@@ -302,7 +302,7 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +
 +
 +func _mp8_hipfire_spread_deg() -> float:
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		var t: String = String(a)
 +		if t.begins_with("mp8spread="):
 +			return float(t.substr(10))
@@ -315,7 +315,7 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +
 +	if laser_raycast == null:
 +		return
-+	if zoom_fov_index > 0:   # 开镜 = 精准，原样不动
++	if zoom_fov_index > 0:   # Scoped = accurate, leave as is
 +		return
 +
 +	var spread: float = deg_to_rad(_mp8_hipfire_spread_deg())
@@ -325,15 +325,15 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +	_mp8_spread_saved_rotation = laser_raycast.rotation
 +	_mp8_spread_applied = true
 +
-+	# 在圆锥内**按面积均匀**取一个方向：半径用 sqrt(randf()) 而不是 randf()，
-+	# 否则落点会往中心堆积，实际扩散比设定值小。
++	# Pick a direction **uniformly by area** within the cone. The radius uses sqrt(randf()) instead of randf(),
++	# otherwise hits bunch up toward the center and the actual spread is smaller than the configured value.
 +	var angle: float = randf() * TAU
 +	var radius: float = sqrt(randf()) * spread
 +	laser_raycast.rotation.x += sin(angle) * radius
 +	laser_raycast.rotation.y += cos(angle) * radius
 +
-+	# ⚠️ RayCast3D 的碰撞结果是上一帧物理算好的，转完必须手动重算，
-+	# 否则 is_colliding()/get_collider() 拿到的还是没偏之前的旧结果，扩散完全不生效。
++	# ⚠️ RayCast3D collision results come from the previous physics frame, so after rotating it must be recomputed manually,
++	# otherwise is_colliding()/get_collider() still return the old result from before the offset and the spread has no effect at all.
 +	laser_raycast.force_raycast_update()
 +
 +
@@ -346,40 +346,40 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +	laser_raycast.force_raycast_update()
 +
 +
-+# [MP8] ===== 独狼回合 =====
++# [MP8] ===== Lone hunter round =====
 +#
-+# 7 人是奇数：前 3 个小回合各抽走 2 个猎人，**最后一个回合只剩 1 个人当猎人，却要面对 6 只鸭**
-+# （猎人是"每人轮流当一次"，抽干为止）。而五档表是按"7 人 = 5鸭:2猎"配的，
-+# 那个倒霉蛋会一个人拿着被削弱的枪打 6 只鸭，和五档表的设计意图直接冲突。
++# 7 is odd. The first 3 rounds each take 2 hunters, so **the last round has only 1 person as hunter, facing 6 ducks**
++# (everyone takes one turn as hunter until the pool runs dry). But the five-tier table was set up for "7 players = 5 ducks:2 hunters",
++# so that unlucky player would face 6 ducks alone with a nerfed gun, directly contradicting the five-tier table's design intent.
 +#
-+# 用户 2026-08-15 定：这种回合按"1 猎"单独给参数，在 5 人档基础上再强化。
++# The user decided on 2026-08-15 that this kind of round gets its own "1 hunter" parameters, buffed further on top of the 5-player tier.
 +#
-+# **强化幅度的依据**（以 5 人档 4鸭:1猎、弹夹 12、间隔 0.92 秒为基准）：
-+#   独狼是 6鸭:1猎，压力正好 1.5 倍 → 按比值线性放大：弹夹 ×1.5 = 18，间隔 ÷1.5 = 0.61。
-+#   验算"含换弹的持续输出"（换弹固定 2.85 秒不变）：
-+#     5 人档  ：12×0.92 + 2.85 = 13.89 秒打 12 发 → 0.864 发/秒 ÷ 4 鸭 = 0.216
-+#     独狼    ：18×0.61 + 2.85 = 13.83 秒打 18 发 → 1.302 发/秒 ÷ 6 鸭 = 0.217
-+#   **每只鸭分摊到的火力压制只差 0.4%**，即线性放大恰好落在"与 5 人档每鸭火力持平"上。
++# **Basis for the buff amount** (baseline is the 5-player tier - 4 ducks:1 hunter, magazine 12, interval 0.92 s)
++#   The lone hunter is 6 ducks:1 hunter, exactly 1.5x the pressure → scale linearly by that ratio. Magazine ×1.5 = 18, interval ÷1.5 = 0.61.
++#   Checking against "sustained output including reloads" (reload stays fixed at 2.85 s)
++#     5-player tier - 12×0.92 + 2.85 = 13.89 s for 12 shots → 0.864 shots/s ÷ 4 ducks = 0.216
++#     Lone hunter   - 18×0.61 + 2.85 = 13.83 s for 18 shots → 1.302 shots/s ÷ 6 ducks = 0.217
++#   **Fire pressure per duck differs by only 0.4%**, so linear scaling lands right on "same per-duck fire as the 5-player tier".
 +@export var mp8_lone_hunter_magazine: int = 18
 +@export var mp8_lone_hunter_cycle: float = 0.11
 +
 +
-+# 本回合是不是"本该两猎却只有一个"的独狼局
++# Whether this round is a lone hunter round that "should have had two hunters but only has one"
 +func _mp8_is_lone_hunter() -> bool:
 +	return mp8_hunter_total == 1 and mp8_player_count >= 6
 +
 +
-+# [MP8] 把人数夹进表的键范围再查，避免缺键落到兜底值
++# [MP8] Clamp the player count to the table's key range before the lookup, so a missing key never lands on the fallback value
 +func _mp8_tier() -> int:
 +	var n: int = mp8_player_count
 +	if n <= 0:
-+		n = duck_count + 1  # 没传人数时的退路：鸭子数 + 1 个猎人
++		n = duck_count + 1  # Fallback when no player count was passed - duck count + 1 hunter
 +	return clampi(n, 4, 8)
 +
 +
-+# [MP8] 本回合实际生效的弹夹 / 射击间隔（独狼回合走单独那套）。
-+# set_active_rpc、shoot() 的循环等待、右上角 HUD 三处都必须走这两个函数，
-+# 否则会出现"显示的强弱和实际打起来的手感对不上"。
++# [MP8] The magazine / shot interval actually in effect this round (lone hunter rounds use their own set).
++# set_active_rpc, the cycle wait in shoot() and the top-right HUD must all go through these two functions,
++# otherwise "the strength shown won't match how shooting actually feels".
 +func _mp8_effective_magazine() -> int:
 +	if _mp8_is_lone_hunter():
 +		return mp8_lone_hunter_magazine
@@ -398,8 +398,8 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
  	if PauseMenu.active:
  		return
  
-+	# [MP8] 射速调试热键。放在 using_joystick 判断之前，手柄玩家也能用键盘按。
-+	# 只对自己控制的那个猎人生效，别人的实例不受影响。
++	# [MP8] Fire-rate debug hotkeys. Placed before the using_joystick check so controller players can also press them on the keyboard.
++	# Only affects the hunter you control. Other players' instances are unaffected.
 +	if GameManager.local_game or multiplayer.get_unique_id() == get_multiplayer_authority():
 +		_mp8_handle_rate_key(event)
 +
@@ -410,7 +410,7 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
  
  	laser_scale_node.visible = false
  
-+	_mp8_apply_hipfire_spread()  # [MP8] 腰射扩散：不开镜就打不准
++	_mp8_apply_hipfire_spread()  # [MP8] Hip-fire spread - unscoped shots are inaccurate
 +
  	if laser_raycast.is_colliding():
  		var collider = laser_raycast.get_collider()
@@ -419,7 +419,7 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
  				true
  			)
  
-+	_mp8_clear_hipfire_spread()  # [MP8] 判定完立刻把准星摆回去，别影响激光和下一帧
++	_mp8_clear_hipfire_spread()  # [MP8] Swing the aim back right after the hit check so it doesn't affect the laser or the next frame
 +
  	recoil_progress = 0.0
  	var t = create_tween()
@@ -428,25 +428,25 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
  	look_recoil.x += 0.025 * (-1 + (randf() * 2))
  
  	play_shoot_sound_rpc.rpc()
-+	# [MP8] ⚠️ 拉栓音效**保持原版位置**（开枪这一瞬间就响）。
-+	# 我一度把它挪到 0.5 秒后和拉栓动画一起触发，理由是"动作和声音对不上"，
-+	# **结果实测更糟**（用户 2026-08-15：原来右边猎人是完全正常的，挪完反而不正常了）——
-+	# 射速加快之后间隔只有 0.92 秒，挪到 0.5 秒处的拉栓声会和下一枪撞在一起。
-+	# 教训：**原版是对的就别动它**，"看起来不合理"不等于听起来不对。
++	# [MP8] ⚠️ The bolt-rack sound **stays where vanilla has it** (plays the instant you fire).
++	# I once moved it 0.5 s later to fire together with the bolt animation, reasoning that "the action and sound didn't line up",
++	# **and in testing it was worse** (user, 2026-08-15 - the right-hand hunter was completely fine before, and after the move it wasn't) —
++	# once fire rate went up the interval is only 0.92 s, so a bolt sound moved to 0.5 s collides with the next shot.
++	# Lesson learned. **If vanilla is right, don't touch it**. "Looks unreasonable" doesn't mean it sounds wrong.
  	if num_of_current_rounds_in_magazine != 1:
  		if GameManager.local_game or (multiplayer.get_unique_id() == get_multiplayer_authority()):
  			speaker_rack_rifle.play()
  
 -	await get_tree().create_timer(0.5).timeout
-+	await get_tree().create_timer(0.5 * _mp8_rate_scale).timeout  # [MP8] 调试倍率
++	await get_tree().create_timer(0.5 * _mp8_rate_scale).timeout  # [MP8] Debug multiplier
  	if unzoom_after_shot:
  		zoom_fov_index = 0
  		update_zoom()
  
  	num_of_current_rounds_in_magazine -= 1
  
-+	var cycle_time = _mp8_effective_cycle()  # [MP8] 按总人数查，独狼回合走单独那套
-+	var cycle_window: float = cycle_time * _mp8_rate_scale             # [MP8] 调试倍率
++	var cycle_time = _mp8_effective_cycle()  # [MP8] Looked up by total player count. Lone hunter rounds use their own set
++	var cycle_window: float = cycle_time * _mp8_rate_scale             # [MP8] Debug multiplier
 +
  	if num_of_current_rounds_in_magazine == 0:
  		await reload()
@@ -456,10 +456,10 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 -
 -	var cycle_time = reload_speed_by_duck_count.get(duck_count, 0.95)
 -	await get_tree().create_timer(cycle_time).timeout
-+		# [MP8] 拉栓动画要跟着射速走。原版是定速播的，而射击间隔现在是可变的
-+		# （五档表按人数给不同 cycle_time，调试热键还能再乘一个倍率），
-+		# 定速播就会两头不对：射速快时上一发的栓还没拉完就打下一枪，
-+		# 射速慢时栓早早拉完在那干等。
++		# [MP8] The bolt-pull animation has to follow the fire rate. Vanilla plays it at a fixed speed, but the shot interval is now variable
++		# (the five-tier table gives each player count a different cycle_time, and the debug hotkeys can multiply it further),
++		# so a fixed speed is wrong both ways. At high fire rates the previous bolt isn't finished when the next shot fires,
++		# and at low fire rates the bolt finishes early and just sits there waiting.
 +		anim_rig.play("rifle_pull_bolt_overwrite", -1, _mp8_anim_speed_for(
 +			&"rifle_pull_bolt_overwrite", cycle_window
 +		))
@@ -473,8 +473,8 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
  		play_reload_sound_rpc.rpc()
  	can_shoot = false
 +
-+	# [MP8] ⚠️ 换弹保持原版原样，**任何改动都不要作用到换弹和它的动画上**
-+	# （2026-08-15 用户明确要求）。射速倍率、五档表都不碰这里。
++	# [MP8] ⚠️ Reload stays exactly as in vanilla. **No changes of any kind should apply to reloading or its animation**
++	# (explicitly requested by the user 2026-08-15). The fire-rate multiplier and the five-tier table don't touch this.
  	anim_rig.play("rifle_reload_main_overwrite")
  	num_of_current_rounds_in_magazine = magazine_capacity
  	await get_tree().create_timer(3.8 - 0.95, false).timeout
@@ -482,11 +482,11 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
  	if not GameManager.local_game:
  		if multiplayer.get_unique_id() != get_multiplayer_authority(): return
  
-+	# [MP8] 排查用：这个函数负责装备步枪的动画和音效，只在自己那台机器上跑。
-+	# 如果第二个猎人这行没打出来，说明 RPC 根本没到（节点复制竞态），
-+	# 那就不只是没音效，连步枪都不会装备。
-+	if Array(OS.get_cmdline_args()).has("-debug-tools"):
-+		print("[MP8] 猎人初始化：本机=%d 枪主=%d 延迟=%.1f" % [
++	# [MP8] For troubleshooting. This function handles the rifle equip animation and sound, and only runs on your own machine.
++	# If this line isn't printed for the second hunter, the RPC never arrived (node replication race),
++	# and then it's not just missing sound - the rifle won't even be equipped.
++	if NetworkManager.mp8_args().has("-debug-tools"):
++		print("[MP8] Hunter init: local=%d gun owner=%d delay=%.1f" % [
 +			multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 0,
 +			player_presence.network_id if player_presence else -1, initial_delay
 +		])
@@ -501,17 +501,17 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 -	magazine_capacity = magazine_capacity_by_duck_count.get(
 -		duck_count, 7
 -	)
-+	# [MP8] 改按总人数查（见文件头那张五档表）；独狼回合走单独那套
++	# [MP8] Now looked up by total player count (see the five-tier table at the top of the file). Lone hunter rounds use their own set
 +	magazine_capacity = _mp8_effective_magazine()
  	num_of_current_rounds_in_magazine = magazine_capacity
-+	print("[MP8] 猎人调参：%d 人档%s → 弹夹 %d, 射击间隔 %.2f" % [
-+		_mp8_tier(), "（独狼回合）" if _mp8_is_lone_hunter() else "",
++	print("[MP8] Hunter tuning: %d-player tier%s → magazine %d, shot interval %.2f" % [
++		_mp8_tier(), " (lone hunter round)" if _mp8_is_lone_hunter() else "",
 +		magazine_capacity, _mp8_effective_cycle()
 +	])
  
  @rpc("any_peer", "call_local", "reliable")
  func set_player_presence(network_id: int) -> void :
-@@ -618,9 +1017,17 @@ func set_player_presence(network_id: int) -> void :
+@@ -618,9 +1017,20 @@ func set_player_presence(network_id: int) -> void :
  		set_physics_process(false)
  
  @rpc("any_peer", "call_local", "reliable")
@@ -522,11 +522,14 @@ diff --git a/minigames/duck_hunt/components/hunter_player/scripts/hunter_player.
 +):
  	global_position = _position
  	duck_count = _duck_count
-+	mp8_player_count = _player_count  # [MP8] 调参改按总人数，0 = 老调用方没传
-+	mp8_hunter_index = _hunter_index
-+	mp8_hunter_total = _hunter_total
++	# [MP8] setup_rpc is any_peer in vanilla. The tuning values this mod added are only taken from the host,
++	# so a modified client can't change another hunter's magazine or fire rate tier.
++	if NetworkManager.mp8_sender_is_host(multiplayer):
++		mp8_player_count = _player_count  # [MP8] Tuning now goes by total player count. 0 = an old caller didn't pass it
++		mp8_hunter_index = _hunter_index
++		mp8_hunter_total = _hunter_total
 +	_mp8_init_rate_keys()
-+	_mp8_show_id_hud.call_deferred()  # 右上角显示玩家 id（只在 -debug-tools 时）
++	_mp8_show_id_hud.call_deferred()  # Show the player id in the top-right (only with -debug-tools)
  
  
  

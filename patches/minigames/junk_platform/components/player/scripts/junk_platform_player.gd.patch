@@ -6,16 +6,16 @@ diff --git a/minigames/junk_platform/components/player/scripts/junk_platform_pla
  
  			for item in in_grab_area:
 +
-+				# [MP8] T47 ②：**别去抓已经在别人手里的那块。**原版这里一个检查都没有，
-+				# 谁按谁就本地 `held_item = item` 并广播「归我了」。后果两层：
-+				#   1. 两个人都以为自己拿着，箱子只跟一个 → 另一个按扔时
-+				#      `throw_rpc` 撞上 `if not held_by: return`，**空扔**
-+				#      （和碎骨者那条「按扔扔出别人背上那台」同一个味道）；
-+				#   2. 更隐蔽的是碰撞例外泄漏，见 cube 那边的注释。
-+				# 这道门挡掉的是**常见情况**（那块已经被拿走一会儿了）。
-+				# ⚠️ 真正同一帧一起按的窗口它挡不住 —— 那需要把抓取改成服务器裁决，
-+				#    代价是抓东西要多等一个来回的延迟，手感损失更大。**故意不做。**
-+				#    cube 那边的换手清理保证了即使撞上，也不会留下永久的碰撞例外。
++				# [MP8] T47 ② — **don't grab a piece that's already in someone else's hands.** Vanilla has no check at all here,
++				# whoever presses sets `held_item = item` locally and broadcasts "it's mine". That has two consequences.
++				#   1. Both players think they're holding it but the box only follows one → when the other presses throw,
++				#      `throw_rpc` hits `if not held_by: return` and **throws nothing**
++				#      (same flavor as the Spine Breaker issue where "pressing throw threw the one on someone else's back").
++				#   2. More subtle is the collision exception leak, see the comment on the cube side.
++				# This gate blocks the **common case** (the piece was already picked up a while ago).
++				# ⚠️ It can't block the true window where both press on the same frame — that would need server-authoritative grabbing,
++				#    at the cost of an extra round trip of latency per grab, which hurts the feel more. **Deliberately not done.**
++				#    The hand-off cleanup on the cube side guarantees that even if that happens, no permanent collision exception is left behind.
 +				if item.held_by_player != null and is_instance_valid(item.held_by_player) \
 +						and item.held_by_player != self:
 +					continue

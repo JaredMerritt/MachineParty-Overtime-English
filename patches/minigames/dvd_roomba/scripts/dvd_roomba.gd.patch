@@ -7,38 +7,38 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
  
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 出生点 4 → 8（2026-08-17）
++# [MP8] Spawn points 4 → 8 (2026-08-17)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# ⚠️⚠️ **通用补位在这个小游戏上会算出两个重合的点**，所以必须自己管。
++# ⚠️⚠️ **The generic top-up computes two overlapping points for this minigame**, so it has to manage its own.
 +#
-+# 原版 4 个 Marker 是正方形的四个角，但**场景里的排列顺序是对角交叉的**：
++# The 4 vanilla Markers are the four corners of a square, but **their order in the scene alternates diagonally**.
 +#     originals[0]=(-3.54,-3.54)  [1]=(+3.54,+3.54)  [2]=(-3.54,+3.54)  [3]=(+3.54,-3.54)
-+# 而容器式补位取的是"**相邻两点**的中点"（network_manager 的 `_mp8_topup`），
-+# 这里的"相邻"实际取到的是**对角线**，两条对角线共享同一个中点：
-+#     j=0: mid([0],[1]) = (0, 0)      ← 场地正中
++# The container-style top-up takes "the midpoint of **two adjacent points**" (network_manager's `_mp8_topup`),
++# and here "adjacent" actually lands on the **diagonals**, and both diagonals share the same midpoint.
++#     j=0: mid([0],[1]) = (0, 0)      ← dead center of the arena
 +#     j=1: mid([1],[2]) = (0, +3.54)
-+#     j=2: mid([2],[3]) = (0, 0)      ← 和 j=0 **完全重合**
++#     j=2: mid([2],[3]) = (0, 0)      ← **exactly the same point** as j=0
 +#     j=3: mid([3],[0]) = (0, -3.54)
-+# → 8 人局有两个人叠在场地正中生成。
++# → in an 8-player match two players spawn stacked in the center of the arena.
 +#
-+# T4b 已经把**数组式**那条路换成了凸包最远点插入（`_mp8_spread_inside`），
-+# 但**容器式这条路还是老的取中点算法**，所以这个坑仍然在。
-+# 这里不去动通用补位 —— 那条路上还挂着立足之本、残骸平台等**已验收**的小游戏，
-+# 全局改法有回归风险（用户定的铁律：一次只动一个）。
++# T4b already switched the **array-style** path to farthest-point insertion inside the convex hull (`_mp8_spread_inside`),
++# but **the container-style path still uses the old midpoint algorithm**, so this pitfall is still there.
++# The generic top-up is left alone here — Disco Dodge, Junk Platform and other **already signed-off** minigames still rely on that path,
++# and a global change risks regressions (the user's hard rule is to change only one thing at a time).
 +#
-+# 本小游戏的摆法：**保留原版 4 角，在它们中间补 4 个，凑成正八边形**。
-+# 半径和角度都从原版 4 个点**现算**（不写死 3.54 / 5.0）：
-+# 新点 = 中心 + 平均半径 × (相邻两个原版角度的中分角)。
-+# 原版角点到中心 5.01 米，八边形相邻间距 3.83 米，场地是 28×23 米，绰绰有余。
++# Layout for this minigame — **keep the 4 vanilla corners and add 4 between them to form a regular octagon**.
++# Radius and angles are **computed at runtime** from the 4 vanilla points (no hardcoded 3.54 / 5.0).
++# New point = center + average radius × (bisector of two adjacent vanilla angles).
++# The vanilla corners are 5.01 m from the center, adjacent octagon points are 3.83 m apart, and the arena is 28×23 m, so there's plenty of room.
 +var mp8_owns_spawns: bool = true
 +
 +
  func _ready() -> void :
  	super._ready()
  
-+	# 必须在 spawn_players() 读出生点之前建好；放 _ready() 每个端都会跑，
-+	# 但这些 Marker 只有服务器会读（位置是 teleport_rpc 明发的），多建几个空节点无害。
++	# Must be built before spawn_players() reads the spawn points. In _ready() this runs on every peer,
++	# but only the server reads these Markers (positions are sent explicitly via teleport_rpc), so a few extra empty nodes are harmless.
 +	_mp8_topup_spawns()
 +
  	camera.current = true
@@ -48,10 +48,10 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
  
  		counter += 1
  
-+# [MP8] 结算时把名次/名字/得分打进日志（不改任何分数）。
-+# 格式与残骸平台、碎骨者、吃豆子一致，几个名次制小游戏对照着看方便。
-+# ⚠️ 特别把「在场人数」和「阵亡人数」都打出来：两者差值 > 1 就说明有人掉线，
-+# 而掉线正是本次唯一要修的东西 —— 不打出来没法验证修没修对。
++# [MP8] Logs placement/name/score at results time (no scores are changed).
++# Same format as Junk Platform, Spine Breaker and Green Pea, so the placement-based minigames are easy to compare side by side.
++# ⚠️ Deliberately logs both the 'players present' and 'players dead' counts. A difference > 1 means someone disconnected,
++# and disconnects are the only thing this change fixes — without logging them there's no way to verify the fix.
 +func _mp8_log_scores() -> void :
 +
 +	if not multiplayer.is_server():
@@ -66,21 +66,21 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
 +		var nm: String = "id%d" % nid
 +		if PlayerManager.player_presences.has(nid):
 +			nm = String(PlayerManager.player_presences[nid].network_name)
-+		parts.append("第%d名 %s %d分" % [i + 1, nm, player_scores[nid]])
++		parts.append("#%d %s %d pts" % [i + 1, nm, player_scores[nid]])
 +
-+	print("[MP8] 致命反弹结算（开局 %d 人 / %d 人阵亡 / 幸存者拿 %d 分）：%s" % [
++	print("[MP8] DVD Roomba results (%d players at start / %d dead / survivor gets %d pts): %s" % [
 +		player_count, dead_players.size(), dead_players.size() + 1, " / ".join(parts)
 +	])
 +
 +
-+# [MP8] 把出生点补到 8 个，摆成正八边形。原版 4 个一个字节不动。
++# [MP8] Top up the spawn points to 8, arranged as a regular octagon. The 4 vanilla ones are not touched at all.
 +#
-+# ⚠️ 只补不够的数量：万一以后场景自己就给了 8 个，这里不重复补。
-+# ⚠️ 全部从原版点**现算**，不写死坐标 —— 场景挪了位置这段也跟着对。
++# ⚠️ Only adds what's missing. If the scene ever provides 8 on its own, nothing is added twice.
++# ⚠️ Everything is **computed at runtime** from the vanilla points, no hardcoded coordinates — if the scene moves, this still lines up.
 +func _mp8_topup_spawns() -> void :
 +
 +	if player_spawn_parent_node == null:
-+		push_warning("[MP8] 致命反弹：没有出生点容器，8 席不做")
++		push_warning("[MP8] DVD Roomba: no spawn point container, skipping 8-seat setup")
 +		return
 +
 +	var originals: Array = []
@@ -92,7 +92,7 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
 +	if n == 0 or n >= 8:
 +		return
 +
-+	# 中心 = 原版点的形心；半径 = 到形心的平均距离
++	# Center = centroid of the vanilla points. Radius = average distance to the centroid
 +	var center: Vector3 = Vector3.ZERO
 +	for o in originals:
 +		center += o.position
@@ -103,7 +103,7 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
 +		radius += Vector2(o.position.x - center.x, o.position.z - center.z).length()
 +	radius /= float(n)
 +
-+	# 原版各点的角度，排序后取相邻两个的中分角当新点方向
++	# Angles of the vanilla points, sorted, with the bisector of each adjacent pair used as a new point's direction
 +	var angles: Array = []
 +	for o in originals:
 +		angles.append(atan2(o.position.z - center.z, o.position.x - center.x))
@@ -119,7 +119,7 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
 +		var a: float = angles[i]
 +		var b: float = float(angles[(i + 1) % angles.size()])
 +		if b <= a:
-+			b += TAU                       # 跨过 -π/π 那一段，别算出反方向
++			b += TAU                       # Wrap across the -π/π seam so we don't get the opposite direction
 +		var mid: float = (a + b) * 0.5
 +
 +		var p: Vector3 = Vector3(
@@ -128,7 +128,7 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
 +			center.z + sin(mid) * radius
 +		)
 +
-+		# 模板取离新点最近的原版点：旋转/缩放/脚本就近继承
++		# Template is the vanilla point nearest the new point, so rotation/scale/script are inherited from the closest one
 +		var tmpl: Node3D = originals[0]
 +		var best: float = INF
 +		for o in originals:
@@ -143,9 +143,9 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
 +		dup.position = p
 +		added.append("(%.2f, %.2f)" % [p.x, p.z])
 +
-+	# 自检：把最小间距打出来。**两点重合正是这类补位最典型的坏法**
-+	# （原版容器补位在本小游戏上就会算出两个 (0,0)，见本文件顶部那段），
-+	# 光看"4 -> 8 成功"这行日志是看不出来的。
++	# Self-check that logs the minimum spacing. **Two coincident points is the classic way this kind of top-up breaks**
++	# (the vanilla container top-up produces two (0,0) points in this very minigame, see the section at the top of this file),
++	# and the "4 -> 8 succeeded" log line alone won't reveal it.
 +	var pts: Array = []
 +	for c in player_spawn_parent_node.get_children():
 +		if c is Node3D:
@@ -156,7 +156,7 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
 +		for j in range(i + 1, pts.size()):
 +			min_d = minf(min_d, Vector2(pts[i].x - pts[j].x, pts[i].z - pts[j].z).length())
 +
-+	print("[MP8] 致命反弹：出生点 %d → %d（中心 (%.2f, %.2f) 半径 %.2f，最小间距 %.2f 米）新增 %s" % [
++	print("[MP8] DVD Roomba: spawn points %d → %d (center (%.2f, %.2f) radius %.2f, min spacing %.2f m) added %s" % [
 +		n, pts.size(), center.x, center.z, radius, min_d, " ".join(added)
 +	])
 +
@@ -170,23 +170,23 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
  	for network_id in active_players.keys():
 -		player_scores[network_id] = player_count
  
-+		# [MP8] 幸存者：`player_count` → **`dead_players.size() + 1`**
-+		# （用户 2026-08-17 定：**这个游戏不压平，只堵掉线洞**）
++		# [MP8] Survivor score `player_count` → **`dead_players.size() + 1`**
++		# (user decision 2026-08-17 — **no flattening for this game, just plug the disconnect hole**)
 +		#
-+		# ⚠️ **`+1` 不能省** —— 省了就变成压平了，那是另一回事：
-+		#   没人掉线时 dead = 人数−1，加 1 正好等于 player_count，**与原版逐值一致**，
-+		#   冠亚之间那 2 分的断层原样保留（残骸平台 T13 / 碎骨者 T24 是特意去掉它，
-+		#   本局和立足之本 T23 一样**保留**）。
++		# ⚠️ **The `+1` can't be dropped** — without it this becomes flattening, which is a different change.
++		#   With no disconnects, dead = player count − 1, so adding 1 equals player_count exactly, **matching vanilla value for value**,
++		#   and the 2-point gap between 1st and 2nd is kept as is (Junk Platform T13 / Spine Breaker T24 removed it on purpose,
++		#   while this game **keeps** it, like Disco Dodge T23).
 +		#
-+		# 那修的是什么：中途掉线的人在 `remove_player_rpc` 里只被
-+		# `active_players.erase()`，**不会进 dead_players**。原版用 player_count，
-+		# 那时它比真正参与结算的人数大 → 冠军凭空多拿分。改用死亡人数推
-+		# = "比最后一个死的多 2 分"，掉线多少人都对。
++		# So what does it fix? A player who disconnects mid-match is only
++		# `active_players.erase()`d in `remove_player_rpc` and **never enters dead_players**. Vanilla uses player_count,
++		# which is then larger than the number of players actually in the results → the winner gets free points. Deriving it from the death count
++		# = "2 more points than the last to die", which is correct no matter how many disconnect.
 +		player_scores[network_id] = dead_players.size() + 1
  
  		break
  
-+	_mp8_log_scores()          # [MP8] 只读，纯为事后对账
++	_mp8_log_scores()          # [MP8] Read-only, purely for reconciling afterwards
  	player_scores_finalized.emit(player_scores)
  
  	await get_tree().create_timer(2.0).timeout
@@ -194,13 +194,13 @@ diff --git a/minigames/dvd_roomba/scripts/dvd_roomba.gd b/minigames/dvd_roomba/s
  	remove_player_rpc.rpc(_network_id)
  	await get_tree().create_timer(1.0).timeout
  
-+	# [MP8] T44 守卫：本局还没正式开始（有人卡在加载里，闸门未放行）。
-+	# 此时 `spawn_players()` 还没跑过（它由 `initialize()` 触发），场上一个人都没有，
-+	# 下面那句会把一局**尚未开始**的游戏当成打完了收尾。
-+	# 判据是 active_players.size() > 1，开局前是 0，条件为假直接穿过去结算。
-+	# 清理照做，只不做收尾。完整分析见 T44。
++	# [MP8] T44 guard for when this match hasn't officially started (someone is stuck loading and the gate hasn't opened).
++	# At that point `spawn_players()` hasn't run yet (it's triggered by `initialize()`) and nobody is on the field,
++	# so the line below would wrap up a match that **hasn't started yet** as if it were finished.
++	# The check is active_players.size() > 1, which is 0 before the start, so the condition is false and it falls straight through to results.
++	# Cleanup still happens, only the wrap-up is skipped. See T44 for the full analysis.
 +	if not is_all_player_loaded:
-+		print("[MP8] 致命反弹：%d 掉线时本局还没开始，跳过收尾检查" % _network_id)
++		print("[MP8] DVD Roomba: %d disconnected before this match started, skipping the end-of-game check" % _network_id)
 +		return
 +
  	check_game_end()

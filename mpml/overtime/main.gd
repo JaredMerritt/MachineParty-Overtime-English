@@ -1,136 +1,144 @@
 extends Node
 
 # =====================================================================
-#  Machine Party - Overtime  ·  MachinePartyModLoader 适配层
+#  Machine Party - Overtime  ·  MachinePartyModLoader adapter layer
 # ---------------------------------------------------------------------
-#  这是**备选安装方式**。主推的仍然是 overtime_launcher.exe。
-#  这条路线存在的理由只有一个：走 exe 的玩家装不了 MPML，也就用不了
-#  MachineParty+ / 第一人称 / 离线机器人那一整套。想要共存就走这条。
+#  This is the **alternative install method**. overtime_launcher.exe is still the recommended one.
+#  This route exists for one reason only. Players who go the exe route can't install MPML, so they can't use
+#  the whole MachineParty+ / first-person / offline bots package. If you want them to coexist, take this route.
 #
-#  整个 mod 的逻辑就一件事：在 MPML 第一个 autoload 的 _init() 窗口里，
-#  把 54 个已编译的 .gdc 覆盖进 res://。
+#  The whole mod does just one thing. In the _init() window of MPML's first autoload,
+#  it overlays 54 compiled .gdc files onto res://.
 #
-#  为什么不用 extends：
-#    Overtime 的补丁大量是「往原版方法体中间插代码」。用 extends 表达
-#    就必须把原版那段反编译代码抄进 mod 里再分发 —— 撞红线。
-#    覆盖包是整份替换，不需要引用原版任何一行。
+#  Why not use extends?
+#    Most of Overtime's patches "insert code into the middle of a vanilla method body". Expressing that with extends
+#    would mean copying that decompiled vanilla code into the mod and redistributing it — that crosses a red line.
+#    The overlay pack replaces whole files and doesn't need to reference a single line of vanilla.
 #
-#  为什么时机是安全的（实测，不是推演）：
-#    引擎的 autoload 是两趟 —— 先全部 _init，再全部 _ready。MPML 把自己
-#    设成第一个 autoload，并在 _init() 里跑各 mod 的 _mod_init()。
-#    那一刻游戏的任何脚本都还没被加载过（实测 ResourceLoader.has_cached
-#    全是 false），所以覆盖来得及。priority = -1000 保证我们跑在别的 mod 前面。
+#  Why the timing is safe (tested in practice, not just reasoned out)
+#    The engine runs autoloads in two passes — all _init first, then all _ready. MPML makes itself
+#    the first autoload and runs each mod's _mod_init() inside its _init().
+#    At that moment none of the game's scripts have been loaded yet (tested, ResourceLoader.has_cached
+#    is false for all of them), so the overlay arrives in time. priority = -1000 makes sure we run before other mods.
 # =====================================================================
 
 const MOD_ID := "overtime"
 const PACK := "overtime_overlay.zip"
 const MANIFEST := "vanilla_md5.json"
 
-# 自检哨兵：这几条一旦在我们之前就进了 ResourceCache，覆盖对它们就已经失效。
-# 静默失效是这套机制唯一的危险失败模式，所以必须出声。
+# Self-check sentinels. If any of these got into the ResourceCache before us, the overlay no longer works for them.
+# Silent failure is the only dangerous failure mode of this mechanism, so it has to speak up.
 const SENTINELS := [
 	"res://modules/multiplayer/network_manager.gd",
 	"res://scripts/scenes/game/game.gd",
 	"res://scenes/lobby/scripts/lobby_scene.gd",
 ]
 
-# 挂载成功了吗。_mod_init 没走到底时，_mod_ready 的交叉校验必须跳过 ——
-# 否则它会在一句对的失败原因后面再追一句「文件只换了一半」，
-# 而那个原因并不存在（三个失败分支全中），把玩家往错方向引。
+# Did mounting succeed? When _mod_init didn't make it to the end, the cross-check in _mod_ready must be skipped —
+# otherwise it would follow a correct failure reason with another line saying "the files were only half replaced",
+# a cause that doesn't exist (all three failure branches would hit it), and point the player in the wrong direction.
 var _mounted: bool = false
 
 
 func _mod_init(loader) -> void:
 
-	# ---- 1. 加载器版本 ----
-	# API 1 没有 dir_of 之外我们要的东西，但版本太老时要报一行看得懂的话，
-	# 而不是静默不工作。
+	# ---- 1. Loader version ----
+	# Besides dir_of, API 1 has nothing else we need, but when the version is too old we should report one readable line
+	# rather than silently not working.
 	if loader.has_method("has_api") and not loader.call("has_api", 2):
-		_fail(loader, "这个 Machine Party Mod Loader 太旧了（需要 API 2 或更新）。请更新加载器：https://github.com/Krunk-theduck/MachinePartyModLoader/releases")
+		_fail(loader, "This Machine Party Mod Loader is too old (API 2 or newer is required). Please update the loader: https://github.com/Krunk-theduck/MachinePartyModLoader/releases")
 		return
 
 	var dir: String = loader.dir_of(MOD_ID)
 	if dir.is_empty():
-		_fail(loader, "拿不到 mod 目录 —— mod.json 里的 id 必须是 \"%s\"" % MOD_ID)
+		_fail(loader, "Can't get the mod folder — the id in mod.json must be \"%s\"" % MOD_ID)
 		return
 
-	# ---- 2. 哨兵：我们来晚了吗 ----
+	# ---- 2. Sentinels. Did we arrive too late? ----
 	var late: Array = []
 	for p in SENTINELS:
 		if ResourceLoader.has_cached(p):
 			late.append(p)
 	if not late.is_empty():
-		_fail(loader, "有别的 mod 抢在 Overtime 之前加载了游戏脚本，覆盖不会生效：%s。请确认本 mod 的 priority 是 -1000。" % str(late))
+		_fail(loader, "Another mod loaded game scripts before Overtime, so the overlay won't take effect: %s. Please make sure this mod's priority is -1000." % str(late))
 		return
 
-	# ---- 3. 版本闸门 ----
+	# ---- 3. Version gate ----
 	#
-	# ⚠️ 这一步不能省。覆盖包里的 .gdc 是**针对某一个游戏版本**编译的。
-	# 游戏一更新，Steam 会换掉整包，而 mods 文件夹原封不动 —— 如果这时候
-	# 无脑挂载，我们就会拿旧版脚本盖掉新版，几乎必崩，而且玩家看不到任何原因。
+	# ⚠️ This step can't be skipped. The .gdc files in the overlay pack are compiled **for one specific game version**.
+	# When the game updates, Steam replaces the whole pack but leaves the mods folder untouched — if we
+	# mounted blindly at that point, we'd cover the new scripts with old ones, almost certainly crash, and the player would see no reason why.
 	#
-	# exe 那条路有 SHA 闸门挡着这种情况（安装器会拒绝非原版包），
-	# 覆盖包这条路**什么都没有**，所以闸门必须自己长在这里。
+	# The exe route has a SHA gate that blocks this case (the installer refuses non-vanilla packs),
+	# but the overlay route has **nothing**, so the gate has to live right here.
 	#
-	# 判据：逐个核对我们**将要覆盖**的那些文件的原版 md5。
-	# 对不上 = 当前游戏不是我们编译时那一版。
+	# The test is to check, one by one, the vanilla md5 of the files we're **about to overwrite**.
+	# A mismatch = the current game isn't the version we compiled against.
 	var manifest_path: String = dir.path_join(MANIFEST)
 	if not FileAccess.file_exists(manifest_path):
-		_fail(loader, "缺少 %s —— 这个 mod 包不完整，请重新下载" % MANIFEST)
+		_fail(loader, "%s is missing — this mod package is incomplete, please download it again" % MANIFEST)
 		return
 
 	var parsed = JSON.parse_string(FileAccess.get_file_as_string(manifest_path))
 	if typeof(parsed) != TYPE_DICTIONARY:
-		_fail(loader, "%s 不是合法 JSON —— 这个 mod 包不完整，请重新下载" % MANIFEST)
+		_fail(loader, "%s is not valid JSON — this mod package is incomplete, please download it again" % MANIFEST)
 		return
 
 	var expect: Dictionary = parsed.get("files", {})
 	var built_for: String = str(parsed.get("game_version", "?"))
 	if expect.is_empty():
-		_fail(loader, "%s 里没有文件清单 —— 这个 mod 包不完整，请重新下载" % MANIFEST)
+		_fail(loader, "%s has no file list — this mod package is incomplete, please download it again" % MANIFEST)
 		return
 
 	var bad: Array = []
 	for res_path in expect.keys():
 		var want: String = str(expect[res_path])
 		if not FileAccess.file_exists(res_path):
-			bad.append("%s（不存在）" % res_path)
+			bad.append("%s (does not exist)" % res_path)
 		elif FileAccess.get_md5(res_path) != want:
 			bad.append(res_path)
 		if bad.size() >= 3:
-			break            # 报前三个就够诊断了，不刷屏
+			break            # The first three are enough to diagnose it without flooding the log
 
 	if not bad.is_empty():
-		_fail(loader, ("游戏版本对不上 —— 本 mod 是给 %s 编译的，当前游戏不是那一版。"
-			+ "请下载与当前游戏版本匹配的 Overtime，或等适配版本发布。"
-			+ "（首批对不上的：%s）") % [built_for, ", ".join(PackedStringArray(bad))])
+		_fail(loader, ("Game version mismatch — this mod was compiled for %s, and the current game isn't that version. "
+			+ "Please download the Overtime that matches your current game version, or wait for a compatible release. "
+			+ "(First mismatches: %s)") % [built_for, ", ".join(PackedStringArray(bad))])
 		return
 
-	# ---- 4. 挂载 ----
+	# ---- 4. Mount ----
 	var pack: String = dir.path_join(PACK)
 	if not FileAccess.file_exists(pack):
-		_fail(loader, "缺少 %s —— 这个 mod 包不完整，请重新下载" % PACK)
+		_fail(loader, "%s is missing — this mod package is incomplete, please download it again" % PACK)
+		return
+
+	# The overlay holds compiled scripts that run with full engine access, so it must match the SHA256 recorded
+	# when the package was built. This catches a corrupted, half-updated or swapped zip. Someone replacing both
+	# files together isn't caught, so only use packages you built or got from a source you trust.
+	var want_overlay: String = str(parsed.get("overlay_sha256", ""))
+	if want_overlay.is_empty() or FileAccess.get_sha256(pack) != want_overlay:
+		_fail(loader, "%s doesn't match the checksum in %s — this mod package is damaged or was modified, please download it again" % [PACK, MANIFEST])
 		return
 
 	var ok := ProjectSettings.load_resource_pack(pack, true)
 	if not ok:
-		_fail(loader, "覆盖包挂载失败：%s" % pack)
+		_fail(loader, "Failed to mount the overlay pack: %s" % pack)
 		return
 
 	_mounted = true
-	loader.note("overtime: 已挂载（为 %s 编译，核对了 %d 个原版文件）" % [built_for, expect.size()])
+	loader.note("overtime: mounted (compiled for %s, checked %d vanilla files)" % [built_for, expect.size()])
 
 
 func _mod_ready(loader) -> void:
 
-	# 没挂载成功就什么都别说。失败原因 _mod_init 里已经报过一句准的了。
+	# If mounting didn't succeed, say nothing. _mod_init has already reported one accurate failure reason.
 	if not _mounted:
 		return
 
-	# 交叉校验：覆盖包声称的版本，必须与它实际盖进去的 network_manager.gd
-	# 里那个 MP8_VERSION_TAG 一致。不一致说明 mods 文件夹里的 zip 与
-	# mod.json 不是同一批（最常见：只换了一半文件），那会导致
-	# 「握手串对得上、行为却不同版」—— 能进同一个房但不同步，最难查的一类。
+	# Cross-check. The version the overlay pack claims must match the MP8_VERSION_TAG in the network_manager.gd
+	# it actually put in place. A mismatch means the zip in the mods folder and
+	# mod.json aren't from the same batch (most commonly, only half the files were replaced), which leads to
+	# "handshake strings match but behaviour is from different versions" — players can join the same lobby but don't sync, the hardest kind of bug to track down.
 	var declared: String = "?"
 	var mj: String = loader.dir_of(MOD_ID).path_join("mod.json")
 	if FileAccess.file_exists(mj):
@@ -143,14 +151,14 @@ func _mod_ready(loader) -> void:
 	if nm != null:
 		actual = str(nm.get("MP8_VERSION_TAG"))
 
-	# mod.json 写 "1.6.0"，MP8_VERSION_TAG 写 "overtime-1.6" —— 比后缀
-	if actual != "?" and declared != "?" and not actual.ends_with(declared.trim_suffix(".0")):
-		loader.note("overtime: ⚠️ 版本不一致 —— mod.json 说 %s，实际跑起来的是 %s。mods 文件夹里的文件可能只换了一半。" % [declared, actual])
-		printerr("[MP8] ⚠️ Overtime 版本不一致：mod.json=%s 实际=%s" % [declared, actual])
+	# mod.json says "1.7.0-en" and MP8_VERSION_TAG says "overtime-1.7-en" — so drop the ".0" and compare the suffix
+	if actual != "?" and declared != "?" and not actual.ends_with(declared.replace(".0-", "-").trim_suffix(".0")):
+		loader.note("overtime: ⚠️ version mismatch — mod.json says %s, but what's actually running is %s. The files in the mods folder may have only been half replaced." % [declared, actual])
+		printerr("[MP8] ⚠️ Overtime version mismatch: mod.json=%s actual=%s" % [declared, actual])
 	else:
-		loader.note("overtime: 就绪（%s）" % actual)
+		loader.note("overtime: ready (%s)" % actual)
 
 
 func _fail(loader, msg: String) -> void:
 	loader.note("overtime: ❌ " + msg)
-	printerr("[MP8] Overtime 没有启用：" + msg)
+	printerr("[MP8] Overtime is not enabled: " + msg)

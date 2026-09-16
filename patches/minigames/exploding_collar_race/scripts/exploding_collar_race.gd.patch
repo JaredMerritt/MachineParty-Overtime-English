@@ -6,108 +6,108 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
  var camera_player: ExplodingCollarRacePlayer
  
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 雷区 8 人适配 —— 出生点由用户自己摆（用户 2026-08-16 定）
++# [MP8] Exploding Collar Race 8-player adaptation — spawn points are placed by the user (user decision 2026-08-16)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# **这个小游戏的 8 人适配几乎只有出生点一件事**，其余全是天然可扩的（侦察结论，probe44）：
-+#   · 地雷是 `PoissonDiscSampling` 在多边形上按 `mine_distance` **程序生成**
-+#     → 数量随面积走、与人数无关，一个字不用改；
-+#   · 全文件**没有**按玩家下标索引的定长数组（只有出生点数组一处，坑第 13 条 grep 过）；
-+#   · 收割机只有一台、结束条件是 `active_players.is_empty()` → 与人数无关。
++# **For this minigame the 8-player adaptation is almost entirely about spawn points**. Everything else scales naturally (diagnostic finding, probe44).
++#   · Mines are **procedurally generated** by `PoissonDiscSampling` over a polygon using `mine_distance`
++#     → the count follows the area, not the player count, so nothing needs changing.
++#   · The whole file has **no** fixed-length arrays indexed by player (only the spawn point array, grepped per pitfall #13).
++#   · There's only one harvester, and the end condition is `active_players.is_empty()` → independent of player count.
 +#
-+# ⚠️ 场地实测边界（别摆出去）：
-+#   地雷生成变换是 `Vector3(-8.0 + p.x, 0, -10.0 - p.y)`，p∈[0,16]×[0,80]
-+#   → **雷区占 x∈[-8,+8]、z∈[-90,-10]**。出生点在 z≈+2~+7，也就是雷区**开始之前**。
-+#   · z 太小（< -10）= 直接生在雷区里；
-+#   · z 太大（≥ +10）= 撞上 `CameraTarget/KillArea`（落后就死的那块），**一生下来就没**。
-+#   所以夹在 MP8_SPAWN_BOX 里，见下。
++# ⚠️ Venue boundaries measured in practice (don't place anything outside them).
++#   The mine spawn transform is `Vector3(-8.0 + p.x, 0, -10.0 - p.y)`, p∈[0,16]×[0,80]
++#   → **the minefield covers x∈[-8,+8], z∈[-90,-10]**. Spawn points are at z≈+2~+7, i.e. **before** the minefield starts.
++#   · z too small (< -10) = spawning right inside the minefield.
++#   · z too large (≥ +10) = hitting `CameraTarget/KillArea` (the fall-behind-and-die zone), **dead the moment you spawn**.
++#   So positions are clamped to MP8_SPAWN_BOX, see below.
 +#
-+# 相机在 (0, 14, 8)、yaw 0、pitch -58°，**朝 -Z 看** → **屏幕左右 = 世界 x**、
-+# 屏幕上下 = 世界 z（往上 = 往终点方向）。手调时方向是从相机基向量实时算的，不写死。
++# The camera is at (0, 14, 8), yaw 0, pitch -58°, **looking toward -Z** → **screen left/right = world x**,
++# screen up/down = world z (up = toward the finish). During manual editing, directions are computed live from the camera basis vectors, not hardcoded.
 +#
-+# 原版 4 个出生点（probe44 量的真值）：
++# The 4 vanilla spawn points (true values measured by probe44).
 +#   0 (-4.910, 1.947)   1 ( 1.443, 1.742)   2 (-4.793, 7.494)   3 ( 3.542, 7.364)
-+# 默认 8 人布局 = **原版 4 个一个字节不动** + 在各自那一排的跨度内插 4 个。
++# Default 8-player layout = **the 4 vanilla points untouched down to the byte** + 4 inserted within the span of their respective rows.
 +const MP8_MAX_PLAYERS: int = 8
 +const MP8_SPAWN_FILE: String = "user://mp8_mine_spawns.txt"
 +
-+# ---- 场地横向拉宽（用户 2026-08-16：「雷区和车子同步拉宽 1.2 倍」）----
++# ---- Widening the venue sideways (user 2026-08-16 - "widen the minefield and the vehicle together by 1.2x") ----
 +#
-+# ⚠️ **只拉雷区是不行的**，这条走廊是严丝合缝的（probe45 量的）：
-+#   左墙内侧面 x=-8.06 / 右墙内侧面 x=+7.99（`Colliders/Walls`，1 米厚 ×105 长）
-+#   地雷区 x∈[-8,+8] —— **正好贴着两面墙**
-+#   收割机 KillArea Box 17 宽、x∈[-8.5,+8.5] —— 比走廊略宽，所以绕不过去
-+#   起点门洞（`StaticBody3D` 那几块）缺口 x∈[-9.04,+7.52]
-+# 只把地雷多边形拉宽 = 地雷撒进墙里、人还是被夹在 16 米内、收割机旁边露出空档。
-+# 所以**整条走廊一起缩放**：美术、墙、门洞、终点/中点判定区、收割机。
++# ⚠️ **Widening only the minefield doesn't work**. This corridor is a tight fit (measured by probe45).
++#   Left wall inner face x=-8.06 / right wall inner face x=+7.99 (`Colliders/Walls`, 1 m thick ×105 long)
++#   Minefield x∈[-8,+8] — **sits right against both walls**
++#   Harvester KillArea Box 17 wide, x∈[-8.5,+8.5] — slightly wider than the corridor, so there's no getting around it
++#   Starting gate opening (the `StaticBody3D` pieces) gap x∈[-9.04,+7.52]
++# Widening only the mine polygon = mines get scattered into the walls, players are still boxed into 16 m, and gaps open up beside the harvester.
++# So **the whole corridor is scaled together** - art, walls, gate opening, finish/midpoint trigger areas, harvester.
 +#
-+# 这几个顶层节点**不缩放**，因为它们要么是世界坐标要么会把人拉变形：
-+#   `Players`（人会被拉扁）、`Mines`（地雷按世界坐标撒）、`player spawn positions`、
-+#   `CameraTarget`（相机架）、`light parent`（缩灯会把聚光锥拉歪）。
++# These top-level nodes are **not scaled**, because they are either in world coordinates or would distort players.
++#   `Players` (players would get squashed), `Mines` (mines are scattered in world coordinates), `player spawn positions`,
++#   `CameraTarget` (camera rig), `light parent` (scaling lights would skew the spotlight cones).
 +const MP8_WIDE_DEFAULT: float = 1.2
 +
-+# 🩸 **能直接缩节点的，只有"里面全是网格或 BoxShape3D"的**。
++# 🩸 **Only nodes "containing nothing but meshes or BoxShape3D" can be scaled directly**.
 +#
-+# Godot **不支持对 SphereShape3D / CapsuleShape3D / CylinderShape3D 做非均匀缩放** ——
-+# 缩了碰撞体就算坏。第一版把 `StaticBody3D` 和 `Harvester` 整个 scale.x=1.2，
-+# 而它们底下正好有：`StaticBody3D/CollisionShape3D8|9` 两根**圆柱**（两块牌子的杆）、
-+# `Harvester/CollisionShape3D` 一个**球**(r=0.5)。
-+# 用户实测症状：**挨到 danger 牌子就卡死原地**。就是这个。
++# Godot **doesn't support non-uniform scaling of SphereShape3D / CapsuleShape3D / CylinderShape3D** —
++# scale them and the collision is broken. The first version set scale.x=1.2 on the whole of `StaticBody3D` and `Harvester`,
++# and right under them sit `StaticBody3D/CollisionShape3D8|9`, two **cylinders** (the poles of the two signs),
++# and `Harvester/CollisionShape3D`, a **sphere** (r=0.5).
++# Symptom the user hit in testing - **touching the danger sign gets you stuck in place**. This was the cause.
 +const MP8_WIDE_SCALE_NODES: Array[String] = [
-+	"Geometry",                        # 纯网格，没有碰撞体
-+	"Colliders",                       # 两侧墙是 Box + 地面是 WorldBoundary（平面，缩了无影响）
-+	"Interactive",                     # 终点区/中点区都是 Box（终点要跟货车走，货车在 Geometry 里）
++	"Geometry",                        # Meshes only, no colliders
++	"Colliders",                       # Side walls are Box + the ground is WorldBoundary (a plane, scaling has no effect)
++	"Interactive",                     # Finish and midpoint areas are both Box (the finish has to follow the truck, and the truck is in Geometry)
 +	"Harvester/KillArea",              # Box
 +	"Harvester/BehindKillArea",        # Box
-+	"Harvester/mine clearing machine1",# 车子的纯网格
++	"Harvester/mine clearing machine1",# The vehicle's meshes only
 +]
-+# 这些**只平移不缩放**：里面有圆柱/球，缩了会把碰撞算坏。
-+# 门洞那几块虽然是 Box，但和圆柱同在 `StaticBody3D` 下，一起走平移这条路更省事，
-+# 而且它们本来就有 19.39 米宽，只要把位置外移，门洞缺口自然跟着变宽。
++# These are **translated only, not scaled**. They contain cylinders/spheres, and scaling would break the collision.
++# The gate opening pieces are Box, but they share `StaticBody3D` with the cylinders, so it's simpler to translate them all together,
++# and they're already 19.39 m wide, so just moving them outward naturally widens the gate gap too.
 +const MP8_WIDE_MOVE_PARENTS: Array[String] = ["StaticBody3D"]
 +
-+# danger 牌子在起点区右侧（碰撞杆 x≈4.17、z≈2.65），拉宽后离出生点更近。
-+# 用户 2026-08-16 要求把它再往右挪开。命令行 `mp8minesign=<米>` 可调。
++# The danger sign is on the right side of the start area (collision pole x≈4.17, z≈2.65), and after widening it's closer to the spawn points.
++# On 2026-08-16 the user asked to move it further right. Adjustable via the command line `mp8minesign=<meters>`.
 +const MP8_SIGN_SHIFT_DEFAULT: float = 3.0
 +const MP8_SIGN_COLLIDER: String = "StaticBody3D/CollisionShape3D8"
 +const MP8_SIGN_VISUAL: String = "Geometry/collar race level mesh3/sand minefield/sign pole"
 +
 +var _mp8_wide: float = 1.0
-+# 夹取范围：x 留 0.5 米墙距；z 下界不进雷区，上界离 KillArea(z=+10) 留 1 米
++# Clamp range - x keeps 0.5 m from the walls. The z lower bound stays out of the minefield, and the upper bound keeps 1 m from KillArea(z=+10)
 +const MP8_SPAWN_BOX_MIN := Vector2(-7.5, -8.0)
 +const MP8_SPAWN_BOX_MAX := Vector2(7.5, 9.0)
 +const MP8_EDIT_STEPS: Array[float] = [1.0, 0.5, 0.1]
 +
-+# ⚠️ 让 network_manager 的通用补位**让开**：出生点从这里起由本小游戏自己管。
-+# 声明处就设 true，不放 _ready() —— 通用补位可能比 _ready() 先跑，晚了拦不住。
++# ⚠️ Makes network_manager's generic fill-in **step aside**. From here on this minigame manages its own spawn points.
++# It's set to true at the declaration, not in _ready() — the generic fill-in may run before _ready(), and by then it'd be too late to block it.
 +var mp8_owns_spawns: bool = true
 +
-+# ---- 名次制算分（用户 2026-08-16 定）----
++# ---- Placement-based scoring (user decision 2026-08-16) ----
 +#
-+# **原版机制**（核对过代码，不是抄文档）：起手 0 分，四个加分点 ——
-+#   跑过中点 +1（每人一次）/ 抵达终点 +1 / **第一个**到再 +1 / 满血抵达再 +1
-+#   单轮上限 4 分，默认歌单 3 轮 → 0~12 分。
-+#   ⚠️ 旧文档写"上限 3"是错的，漏了中点那一分。
++# **Vanilla mechanics** (verified against the code, not copied from docs) - start at 0, with four ways to score —
++#   pass the midpoint +1 (once per player) / reach the finish +1 / **first** to arrive another +1 / arrive at full health another +1
++#   Max 4 points per round, and the default playlist has 3 rounds → 0~12 points.
++#   ⚠️ Old docs saying "max 3" are wrong, they missed the midpoint point.
 +#
-+# **8 人下的毛病**：第 2 名和第 8 名完全同分，只有第 1 名多 1 分 ——
-+# 7 个人分不出先后，这正是 B 累加族的通病。而且打 3 轮才 0~12，
-+# 比只打 2 轮的 A 名次族（0~16）还不值钱。
++# **The problem with 8 players** - 2nd place and 8th place score exactly the same, only 1st place gets 1 extra point —
++# 7 players can't be told apart, which is exactly the common flaw of the B (cumulative) family. And 3 rounds only yields 0~12,
++# worth even less than the A (placement) family (0~16), which only plays 2 rounds.
 +#
-+# **改法**（项目既定做法：用小游戏自己已有的顺序数组下标当分数，
-+# 不在汇总处对整数计数排名）。雷区**现成就有两个按顺序 append 的真数组**：
-+#   `finished_players` —— 抵达终点的先后（原版就在按序 append）
-+#   `_mp8_dead_order`  —— 爆炸出局的先后（本 mod 新记，唯一新增的机制）
++# **The fix** (the project's established approach - use indices into the minigame's own existing order arrays as scores,
++# instead of ranking integer counts at the tally stage). Exploding Collar Race **already has two real arrays appended in order**.
++#   `finished_players` — order of reaching the finish (vanilla already appends in order)
++#   `_mp8_dead_order`  — order of getting blown up (newly recorded by this mod, the only added mechanism)
 +#
-+# 排法（D = 死亡人数，F = 完赛人数，D+F = 本轮人数 N）：
-+#   第 i 个**死**的     → i 分          （0 … D-1，早死垫底）
-+#   第 j 个**到终点**的 → D + (F-1-j)   （D … N-1，第一名拿 N-1）
-+#   → 满档 0~N-1，**不重不漏、无并列**，和 A 名次族同一把尺子。
-+#   再加**满血抵达 +1**（原版就有的技巧奖励，只有完赛者拿得到）→ 上限 N。
++# Ranking (D = number of deaths, F = number of finishers, D+F = players this round N)
++#   i-th to **die**     → i points        (0 … D-1, earliest deaths at the bottom)
++#   j-th to **finish**  → D + (F-1-j)     (D … N-1, first place gets N-1)
++#   → full range 0~N-1, **no repeats, no gaps, no ties**, measured with the same ruler as the A (placement) family.
++#   Plus **+1 for arriving at full health** (a skill bonus vanilla already has, only finishers can earn it) → max N.
 +#
-+# ⚠️ 中点 +1 **取消**：死者已经由死亡顺序排出名次了，它的作用被覆盖，
-+#    留着只会把 0~N-1 这个干净区间打乱。
-+# ⚠️ 这套**对所有人数生效**（4 人局的算分也会变），和残骸平台那次一样 ——
-+#    不按人数分两套规则，否则 4 人和 8 人变成两个游戏。
++# ⚠️ The midpoint +1 is **removed**. The dead are already ranked by death order, so its role is covered,
++#    and keeping it would only mess up the clean 0~N-1 range.
++# ⚠️ This **applies to every player count** (4-player match scoring changes too), same as was done for Junk Platform —
++#    no separate rule sets by player count, otherwise 4 and 8 players become two different games.
 +var _mp8_dead_order: Array[int] = []
 +
 +var mp8_player_count: int = 0
@@ -118,16 +118,16 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +var _mp8_edit_panel: Label = null
 +var _mp8_edit_canvas: CanvasLayer = null
 +var _mp8_tags: Array[Label3D] = []
-+var _mp8_layout_src: String = "原版 4 个"
-+# 出生点标记 → 这一局站在它上面的人（出生点是 shuffle 过的，只能这样记）
++var _mp8_layout_src: String = "vanilla 4"
++# Spawn point marker → the player standing on it this match (spawn points are shuffled, so this is the only way to track it)
 +var _mp8_owner: Dictionary = {}
 +
 +
  func _ready() -> void :
  	super._ready()
  
-+	# [MP8] 必须在 spawn_players() 之前把出生点补齐 —— 它是 `player_positions[counter]`
-+	# 直接按下标发人的，数组不够长就越界。_ready() 比 initialize() 早，稳。
++	# [MP8] Spawn points must be filled in before spawn_players() — it uses `player_positions[counter]`
++	# to place players directly by index, so an array that's too short goes out of bounds. _ready() runs before initialize(), so this is safe.
 +	_mp8_setup_spawns()
 +
  	camera_3d.set_multiplayer_authority(1)
@@ -142,9 +142,9 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
  
  		var player_presence: PlayerPresence = PlayerManager.player_presences[key]
  
-+		# [MP8] 上界校验：出生点没补够时宁可少生成一个人，也不要越界崩掉
++		# [MP8] Upper bound check - if there aren't enough spawn points, better to spawn one player fewer than crash out of bounds
 +		if counter >= player_positions.size():
-+			push_warning("[MP8] 雷区：只有 %d 个出生点，第 %d 个人没位置" % [
++			push_warning("[MP8] Exploding Collar Race: only %d spawn points, player %d has no spot" % [
 +				player_positions.size(), counter + 1
 +			])
 +			break
@@ -152,13 +152,13 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
  		var player_character = player_scene.instantiate()
  		players_node_parent.add_child(player_character, true)
  
-@@ -179,14 +309,536 @@ func spawn_players():
+@@ -179,14 +309,542 @@ func spawn_players():
  
  		player_scores[player_presence.network_id] = 0
  
-+		# [MP8] 记下"这个出生点这一局归谁"。出生点数组是 shuffle 过的，
-+		# 只能按**节点对象**记（shuffle 只重排数组，Node3D 对象本身还是那几个）。
-+		# 手调时挪某个点，就能把站在上面的人一起挪过去 —— 看得见才好摆。
++		# [MP8] Record "who this spawn point belongs to this match". The spawn point array is shuffled,
++		# so it can only be keyed by **node object** (shuffle only reorders the array, the Node3D objects themselves are still the same ones).
++		# When a point is moved during manual editing, the player standing on it moves along — easier to place when you can see it.
 +		_mp8_owner[player_positions[counter]] = player_character
 +		seated.append("%s@(%.2f,%.2f)" % [
 +			String(player_presence.network_name),
@@ -168,33 +168,33 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +
  		counter += 1
  
-+	print("[MP8] 雷区：%d 人就位（出生点来源：%s）—— %s" % [
++	print("[MP8] Exploding Collar Race: %d players in position (spawn point source: %s) — %s" % [
 +		counter, _mp8_layout_src, " | ".join(seated)
 +	])
 +
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 出生点：补齐 + 手调
++# [MP8] Spawn points - fill in + manual editing
 +# ═══════════════════════════════════════════════════════════════════════════
 +
 +func _mp8_setup_spawns() -> void :
 +
-+	var args := Array(OS.get_cmdline_args())
++	var args := NetworkManager.mp8_args()
 +	_mp8_no_expand = args.has("mp8noexpand")
 +	_mp8_edit_on = args.has("mp8mineedit")
 +	mp8_player_count = PlayerManager.player_presences.size()
 +
-+	print("[MP8] 雷区：运行时真值 —— 出生点 %d 个 / mine_distance %.2f / 探测 %.2f / 引爆 %.2f / 收割机延迟 %.1f；本局 %d 人" % [
++	print("[MP8] Exploding Collar Race: runtime values — spawn points %d / mine_distance %.2f / detection %.2f / detonation %.2f / harvester delay %.1f; %d players this match" % [
 +		player_spawn_positions.size(), mine_distance, mine_detection_threshold,
 +		mine_explosion_threshold, harvester_start_delay, mp8_player_count,
 +	])
 +
 +	if _mp8_no_expand:
-+		print("[MP8] 雷区：mp8noexpand，场地和出生点一个字不改（纯原版对照组，⚠️ 必须配 4 人）")
++		print("[MP8] Exploding Collar Race: mp8noexpand, venue and spawn points left completely unchanged (pure vanilla control group, ⚠️ must be used with 4 players)")
 +		return
 +
-+	# ≤4 人：**场地和出生点都一个字节不动**，与原版逐值一致
++	# ≤4 players - **venue and spawn points untouched down to the byte**, identical to vanilla value for value
 +	if mp8_player_count <= 4:
-+		print("[MP8] 雷区：%d 人，用原版场地与 4 个出生点，一个字不改" % mp8_player_count)
++		print("[MP8] Exploding Collar Race: %d players, using the vanilla venue and 4 spawn points, nothing changed" % mp8_player_count)
 +		return
 +
 +	_mp8_widen_field()
@@ -204,18 +204,18 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +
 +	if pts.is_empty():
 +		pts = _mp8_default_spawns(want)
-+		_mp8_layout_src = "内置默认（原版4 + 插4）"
++		_mp8_layout_src = "built-in default (vanilla 4 + 4 inserted)"
 +	else:
-+		_mp8_layout_src = "存盘文件 %s" % MP8_SPAWN_FILE
++		_mp8_layout_src = "save file %s" % MP8_SPAWN_FILE
 +
-+	# 少于所需就用默认补齐（宁可摆得糙，也不能少一个点 → 少点 = 少生成人）
++	# If there are fewer than needed, fill in from the defaults (rough placement beats a missing point → fewer points = fewer players spawned)
 +	while pts.size() < want:
 +		var fill: Array = _mp8_default_spawns(want)
 +		pts.append(fill[pts.size()])
 +
 +	_mp8_apply_spawns(pts)
 +
-+	print("[MP8] 雷区：出生点 4 → %d（%s）—— %s" % [
++	print("[MP8] Exploding Collar Race: spawn points 4 → %d (%s) — %s" % [
 +		player_spawn_positions.size(), _mp8_layout_src, _mp8_spawn_desc()
 +	])
 +
@@ -223,37 +223,37 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +		_mp8_edit_begin()
 +
 +
-+# [MP8] 整条走廊横向拉宽。命令行 `mp8minewide=<倍率>` 可改，默认 1.2。
++# [MP8] Widen the whole corridor sideways. Adjustable with the command line `mp8minewide=<factor>`, default 1.2.
 +#
-+# ⚠️ **每台机器都要跑**：这些都是各机本地的场景节点，不走网络同步
-+#    （和枪械工厂 _mp8_setup_field 每台都要跑是同一个理由）。
-+#    地雷位置是服务器算好后逐个 RPC 发的，所以只要**每台的墙都一样宽**就对得上。
++# ⚠️ **Must run on every machine**. These are all local scene nodes on each machine and aren't network synced
++#    (the same reason Manufacture Gun's _mp8_setup_field has to run on every machine).
++#    Mine positions are computed by the server and sent one by one over RPC, so as long as **the walls are equally wide on every machine**, everything lines up.
 +func _mp8_widen_field() -> void :
 +
 +	var forced: String = _mp8_arg("mp8minewide=")
 +	_mp8_wide = (clampf(float(forced), 1.0, 2.0) if forced.is_valid_float() else MP8_WIDE_DEFAULT)
 +
 +	if is_equal_approx(_mp8_wide, 1.0):
-+		print("[MP8] 雷区：拉宽倍率 1.0，场地不动")
++		print("[MP8] Exploding Collar Race: widen factor 1.0, venue unchanged")
 +		return
 +
-+	# ---- ① 能缩的缩（里面全是网格或 Box）----
++	# ---- ① Scale what can be scaled (contains only meshes or Box) ----
 +	var scaled := PackedStringArray()
 +	for path in MP8_WIDE_SCALE_NODES:
 +		var n: Node3D = get_node_or_null(path) as Node3D
 +		if n == null:
-+			push_warning("[MP8] 雷区：找不到 %s，这一块没拉宽（走廊会不对齐）" % path)
++			push_warning("[MP8] Exploding Collar Race: %s not found, this part wasn't widened (the corridor will be misaligned)" % path)
 +			continue
-+		# 只动 x，且**赋值不是累乘** —— 累乘会一局比一局更宽（T19 那个坑）
++		# Only touch x, and **assign rather than multiply** — multiplying would get wider every match (the T19 pitfall)
 +		n.scale = Vector3(_mp8_wide, n.scale.y, n.scale.z)
 +		scaled.append(path)
 +
-+	# ---- ② 有圆柱/球的只平移，绝不缩 ----
++	# ---- ② Anything with cylinders/spheres is only translated, never scaled ----
 +	var moved: int = 0
 +	for parent_path in MP8_WIDE_MOVE_PARENTS:
 +		var parent: Node = get_node_or_null(parent_path)
 +		if parent == null:
-+			push_warning("[MP8] 雷区：找不到 %s" % parent_path)
++			push_warning("[MP8] Exploding Collar Race: %s not found" % parent_path)
 +			continue
 +		for c in parent.get_children():
 +			if c is Node3D:
@@ -261,45 +261,45 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +				n3.position = Vector3(n3.position.x * _mp8_wide, n3.position.y, n3.position.z)
 +				moved += 1
 +
-+	# ---- ③ danger 牌子再往右挪开（用户 2026-08-16 要求）----
++	# ---- ③ Move the danger sign further right (user request 2026-08-16) ----
 +	var forced_sign: String = _mp8_arg("mp8minesign=")
 +	var shift: float = (float(forced_sign) if forced_sign.is_valid_float() else MP8_SIGN_SHIFT_DEFAULT)
-+	var sign_note := "没挪"
++	var sign_note := "not moved"
 +	if not is_equal_approx(shift, 0.0):
 +		var parts := PackedStringArray()
-+		# 视觉件在被缩放过的 Geometry 底下，局部位移会被父级 scale 放大，
-+		# 所以这里除掉倍率，保证视觉和碰撞挪的是**同样的世界距离**。
++		# The visual piece is under the scaled Geometry, so a local offset gets magnified by the parent's scale,
++		# so the factor is divided out here to make sure the visual and the collider move **the same world distance**.
 +		var vis: Node3D = get_node_or_null(MP8_SIGN_VISUAL) as Node3D
 +		if vis != null:
 +			vis.position.x += shift / _mp8_wide
-+			parts.append("视觉→%.2f" % vis.global_position.x)
++			parts.append("visual→%.2f" % vis.global_position.x)
 +		var col: Node3D = get_node_or_null(MP8_SIGN_COLLIDER) as Node3D
 +		if col != null:
 +			col.position.x += shift
-+			parts.append("碰撞→%.2f" % col.global_position.x)
-+		sign_note = "右移 %.1f 米（%s）" % [shift, ", ".join(parts)]
++			parts.append("collider→%.2f" % col.global_position.x)
++		sign_note = "moved right %.1f m (%s)" % [shift, ", ".join(parts)]
 +
-+	print("[MP8] 雷区：走廊拉宽 ×%.2f —— 墙内侧 %.2f~%.2f → %.2f~%.2f，地雷区宽 %.1f → %.1f" % [
++	print("[MP8] Exploding Collar Race: corridor widened ×%.2f — inner walls %.2f~%.2f → %.2f~%.2f, minefield width %.1f → %.1f" % [
 +		_mp8_wide, -8.06, 7.99, -8.06 * _mp8_wide, 7.99 * _mp8_wide,
 +		16.0, 16.0 * _mp8_wide
 +	])
-+	print("[MP8] 雷区：缩放 %d 个节点（%s）；平移 %d 个碰撞体（里面有圆柱/球，**不能缩**）；danger 牌子 %s" % [
++	print("[MP8] Exploding Collar Race: scaled %d nodes (%s); translated %d colliders (they contain cylinders/spheres, **can't be scaled**); danger sign %s" % [
 +		scaled.size(), ", ".join(scaled), moved, sign_note
 +	])
-+	print("[MP8] 雷区：收割机 KillArea 17.0 → %.1f 宽（走廊 %.1f，仍然横跨，绕不过去）" % [
++	print("[MP8] Exploding Collar Race: harvester KillArea 17.0 → %.1f wide (corridor %.1f, still spans it, no way around)" % [
 +		17.0 * _mp8_wide, 16.05 * _mp8_wide
 +	])
 +
 +
 +func _mp8_arg(prefix: String) -> String :
-+	for a in OS.get_cmdline_args():
++	for a in NetworkManager.mp8_args():
 +		if String(a).begins_with(prefix):
 +			return String(a).substr(prefix.length())
 +	return ""
 +
 +
-+# 默认布局：**原版 4 个逐字节保留**，在各自那一排（按 z 分前后两排）的 x 跨度内插新点。
-+# 原版就是 2×2：前排 z≈1.85 两个、后排 z≈7.43 两个。8 人 = 每排 4 个。
++# Default layout - **the 4 vanilla points are kept byte for byte**, and new points are inserted within the x span of their respective rows (split into front and back rows by z).
++# Vanilla is already a 2×2 grid, two in the front row at z≈1.85 and two in the back row at z≈7.43. 8 players = 4 per row.
 +func _mp8_default_spawns(want: int) -> Array :
 +
 +	var orig: Array = []
@@ -309,7 +309,7 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	if orig.is_empty():
 +		return []
 +
-+	# 按 z 分两排（原版前后排差 5.6 米，用中值切一刀就够）
++	# Split into two rows by z (vanilla's front and back rows are 5.6 m apart, so one cut at the middle value is enough)
 +	var zsum: float = 0.0
 +	for o in orig:
 +		zsum += o.y
@@ -323,7 +323,7 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	var need: int = want - orig.size()
 +	var r: int = 0
 +
-+	# 轮流往两排里插：每次挑那一排**当前最大的间隙**，插中点
++	# Take turns inserting into the two rows - each time pick that row's **current largest gap** and insert at its midpoint
 +	while need > 0:
 +		var row: Array = rows[r % 2]
 +		r += 1
@@ -354,10 +354,10 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	if player_spawn_positions.size() > 0 and is_instance_valid(player_spawn_positions[0]):
 +		parent = player_spawn_positions[0].get_parent() as Node3D
 +	if parent == null:
-+		push_warning("[MP8] 雷区：找不到出生点的父节点，出生点没补")
++		push_warning("[MP8] Exploding Collar Race: spawn point parent node not found, spawn points not filled in")
 +		return
 +
-+	# 原版那几个节点**继续用原来的对象**（只在 >4 人时才改它们的位置）；不够的新建
++	# The vanilla nodes **keep using the original objects** (their positions only change with >4 players). Missing ones are created new
 +	var arr: Array[Node3D] = []
 +	for i in pts.size():
 +		var p: Vector2 = _mp8_clamp(pts[i])
@@ -374,7 +374,7 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	player_spawn_positions = arr
 +
 +
-+# [MP8] x 的可摆范围**跟着走廊一起变宽**（z 不变，z 方向没拉伸）
++# [MP8] The allowed x range **widens along with the corridor** (z is unchanged, nothing is stretched along z)
 +func _mp8_clamp(p: Vector2) -> Vector2 :
 +	return Vector2(
 +		clampf(p.x, MP8_SPAWN_BOX_MIN.x * _mp8_wide, MP8_SPAWN_BOX_MAX.x * _mp8_wide),
@@ -393,11 +393,12 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +
 +func _mp8_load_spawns() -> Array :
 +
-+	if not FileAccess.file_exists(MP8_SPAWN_FILE):
++	# [MP8] Saved layout files are a dev-build editor feature. Release builds always use the built-in layout.
++	if not NetworkManager.MP8_DEV_TOOLS or not FileAccess.file_exists(MP8_SPAWN_FILE):
 +		return []
 +	var f := FileAccess.open(MP8_SPAWN_FILE, FileAccess.READ)
 +	if f == null:
-+		push_warning("[MP8] 雷区：打不开 %s（%d）" % [MP8_SPAWN_FILE, FileAccess.get_open_error()])
++		push_warning("[MP8] Exploding Collar Race: can't open %s (%d)" % [MP8_SPAWN_FILE, FileAccess.get_open_error()])
 +		return []
 +
 +	var rows: Array = []
@@ -409,12 +410,12 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +			continue
 +		var cols: PackedStringArray = line.split(",", false)
 +		if cols.size() < 2:
-+			push_warning("[MP8] 雷区：出生点文件第 %d 行不是 2 个数，跳过：%s" % [ln, line])
++			push_warning("[MP8] Exploding Collar Race: spawn file line %d isn't 2 numbers, skipping: %s" % [ln, line])
 +			continue
 +		var x: String = cols[0].strip_edges()
 +		var z: String = cols[1].strip_edges()
 +		if not (x.is_valid_float() and z.is_valid_float()):
-+			push_warning("[MP8] 雷区：出生点文件第 %d 行有非数字，跳过：%s" % [ln, line])
++			push_warning("[MP8] Exploding Collar Race: spawn file line %d has non-numeric values, skipping: %s" % [ln, line])
 +			continue
 +		rows.append(Vector2(float(x), float(z)))
 +	f.close()
@@ -425,27 +426,27 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +
 +	var f := FileAccess.open(MP8_SPAWN_FILE, FileAccess.WRITE)
 +	if f == null:
-+		push_warning("[MP8] 雷区：写不了 %s（%d）" % [MP8_SPAWN_FILE, FileAccess.get_open_error()])
++		push_warning("[MP8] Exploding Collar Race: can't write %s (%d)" % [MP8_SPAWN_FILE, FileAccess.get_open_error()])
 +		return false
 +
-+	f.store_line("# 雷区（mp8game=1）出生点 —— 每行 = x, z")
-+	f.store_line("# ⚠️ 只在 5 人及以上生效；≤4 人一律用原版那 4 个，一个字节不动。")
-+	f.store_line("# 场地：雷区占 x∈[-8,+8]、z∈[-90,-10]；出生点要待在雷区**之前**（z > -10），")
-+	f.store_line("#       且 z 不能到 +10（那儿是 KillArea，落后就死的那块，会一生下来就没）。")
-+	f.store_line("# 删掉这个文件 = 回到内置默认布局。")
-+	f.store_line("# 存于 %s" % Time.get_datetime_string_from_system())
++	f.store_line("# Exploding Collar Race (mp8game=1) spawn points — each line = x, z")
++	f.store_line("# ⚠️ Only applies with 5 or more players; with ≤4 players the vanilla 4 are always used, untouched down to the byte.")
++	f.store_line("# Venue: the minefield covers x∈[-8,+8], z∈[-90,-10]; spawn points must stay **before** the minefield (z > -10),")
++	f.store_line("#       and z can't reach +10 (that's the KillArea, the fall-behind-and-die zone, you'd die the moment you spawn).")
++	f.store_line("# Delete this file = go back to the built-in default layout.")
++	f.store_line("# Saved at %s" % Time.get_datetime_string_from_system())
 +	f.store_line("")
 +	for n in player_spawn_positions:
 +		if n != null and is_instance_valid(n):
 +			f.store_line("%.2f, %.2f" % [n.global_position.x, n.global_position.z])
 +	f.close()
 +
-+	print("[MP8] 雷区：出生点已存盘 → %s" % ProjectSettings.globalize_path(MP8_SPAWN_FILE))
-+	print("[MP8] 雷区：当前布局 —— %s" % _mp8_spawn_desc())
++	print("[MP8] Exploding Collar Race: spawn points saved → %s" % ProjectSettings.globalize_path(MP8_SPAWN_FILE))
++	print("[MP8] Exploding Collar Race: current layout — %s" % _mp8_spawn_desc())
 +	return true
 +
 +
-+# ---- 局内手调 ----
++# ---- In-match manual editing ----
 +
 +func _mp8_edit_begin() -> void :
 +
@@ -460,7 +461,7 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	_mp8_layer().add_child(lbl)
 +	_mp8_edit_panel = lbl
 +
-+	# 每个出生点头顶一个号码牌 —— Marker3D 本身是看不见的，不挂牌根本不知道在调哪个
++	# A number tag above each spawn point — Marker3D itself is invisible, so without tags there's no telling which one you're adjusting
 +	var f = load("res://fonts/Terminal F4.ttf")
 +	for i in player_spawn_positions.size():
 +		var n: Node3D = player_spawn_positions[i]
@@ -481,7 +482,7 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +
 +	_mp8_check_keys()
 +	_mp8_edit_refresh()
-+	print("[MP8] 雷区：出生点手调模式已开 —— %d 个点可调" % player_spawn_positions.size())
++	print("[MP8] Exploding Collar Race: spawn point manual edit mode on — %d adjustable points" % player_spawn_positions.size())
 +
 +
 +func _mp8_layer() -> CanvasLayer :
@@ -492,7 +493,7 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	return _mp8_edit_canvas
 +
 +
-+# ⚠️ 必须显式指定游戏自己的字体：默认主题字体字距是坏的（这是第四次踩）
++# ⚠️ The game's own font must be set explicitly. The default theme font has broken letter spacing (this is the fourth time we've hit this)
 +func _mp8_style(lbl: Label, color: Color) -> void :
 +	var f = load("res://fonts/Terminal F4.ttf")
 +	if f != null:
@@ -504,14 +505,14 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 +
 +
-+# 与其赌 I/J/K/L/M/N 没被占，不如开局把 InputMap 查一遍，撞了就报出来
++# Rather than betting that I/J/K/L/M/N are free, check the InputMap at startup and report any clashes
 +func _mp8_check_keys() -> void :
 +
 +	var mine: Dictionary = {
-+		KEY_1: "选1", KEY_2: "选2", KEY_3: "选3", KEY_4: "选4",
-+		KEY_5: "选5", KEY_6: "选6", KEY_7: "选7", KEY_8: "选8",
-+		KEY_I: "远", KEY_K: "近", KEY_J: "左", KEY_L: "右",
-+		KEY_M: "步长", KEY_N: "报告", KEY_0: "存盘", KEY_9: "复位",
++		KEY_1: "select 1", KEY_2: "select 2", KEY_3: "select 3", KEY_4: "select 4",
++		KEY_5: "select 5", KEY_6: "select 6", KEY_7: "select 7", KEY_8: "select 8",
++		KEY_I: "far", KEY_K: "near", KEY_J: "left", KEY_L: "right",
++		KEY_M: "step size", KEY_N: "report", KEY_0: "save", KEY_9: "reset",
 +	}
 +	var clash := PackedStringArray()
 +	for action in InputMap.get_actions():
@@ -525,9 +526,9 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +						OS.get_keycode_string(code), mine[code], String(action)
 +					])
 +	if clash.is_empty():
-+		print("[MP8] 雷区：手调按键与游戏 InputMap 无冲突（查了 %d 个动作）" % InputMap.get_actions().size())
++		print("[MP8] Exploding Collar Race: manual edit keys don't clash with the game's InputMap (checked %d actions)" % InputMap.get_actions().size())
 +	else:
-+		print("[MP8] 雷区：⚠️ 按键撞车 —— %s" % ", ".join(clash))
++		print("[MP8] Exploding Collar Race: ⚠️ key clash — %s" % ", ".join(clash))
 +
 +
 +func _unhandled_key_input(event: InputEvent) -> void :
@@ -549,8 +550,8 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +			_mp8_edit_refresh()
 +
 +		KEY_I, KEY_K, KEY_J, KEY_L:
-+			# 按**屏幕方向**推。相机朝 -Z 看，所以屏幕左右就是世界 x；
-+			# 但方向从相机基向量实时算，不写死 —— 相机哪天改了也不会反向。
++			# Move by **screen direction**. The camera looks toward -Z, so screen left/right is world x,
++			# but the direction is computed live from the camera basis vectors, not hardcoded — so it won't flip if the camera ever changes.
 +			var dir: Vector2 = _mp8_screen_axis(key.keycode)
 +			if dir == Vector2.ZERO:
 +				return
@@ -566,17 +567,17 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +			var ok: bool = _mp8_save_spawns()
 +			_mp8_edit_refresh()
 +			if _mp8_edit_panel != null:
-+				_mp8_edit_panel.text = ("【已存盘】下次开局自动用这套坐标\n" if ok
-+					else "【存盘失败】看日志\n") + _mp8_edit_panel.text
++				_mp8_edit_panel.text = ("[Saved] These coordinates will be used automatically from the next match\n" if ok
++					else "[Save failed] Check the log\n") + _mp8_edit_panel.text
 +
 +		KEY_9:
 +			var d: Array = _mp8_default_spawns(player_spawn_positions.size())
 +			for i in mini(d.size(), player_spawn_positions.size()):
 +				mp8_move_spawn_rpc.rpc(i, d[i])
-+			print("[MP8] 雷区：出生点已复位成内置默认（存盘文件没删，要彻底回退请删文件）")
++			print("[MP8] Exploding Collar Race: spawn points reset to the built-in defaults (the save file wasn't deleted, delete it to fully revert)")
 +
 +		KEY_N:
-+			print("[MP8] 雷区出生点报告：%s" % _mp8_spawn_desc())
++			print("[MP8] Exploding Collar Race spawn point report: %s" % _mp8_spawn_desc())
 +
 +		_:
 +			return
@@ -584,7 +585,7 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	get_viewport().set_input_as_handled()
 +
 +
-+# 屏幕方向 → 世界水平方向。返回 Vector2(dx, dz)。
++# Screen direction → world horizontal direction. Returns Vector2(dx, dz).
 +func _mp8_screen_axis(code: int) -> Vector2 :
 +
 +	var cam: Camera3D = get_viewport().get_camera_3d()
@@ -606,10 +607,15 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	return Vector2.ZERO
 +
 +
-+# [MP8] any_peer + call_local：8 台机器一起挪。
-+# 出生点本身只有服务器读，但**号码牌和站在上面的人**每台机器都要看得见，所以广播。
++# [MP8] any_peer + call_local - all 8 machines move it together.
++# Only the server reads the spawn points themselves, but **the number tags and the players standing on them** have to be visible on every machine, hence the broadcast.
 +@rpc("any_peer", "call_local", "reliable")
 +func mp8_move_spawn_rpc(slot: int, pos: Vector2) -> void :
++
++	if not NetworkManager.mp8_sender_is_host(multiplayer):
++		return
++	if not (NetworkManager.mp8_finite_v2(pos)):
++		return
 +
 +	if slot < 0 or slot >= player_spawn_positions.size():
 +		return
@@ -620,15 +626,15 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	var p: Vector2 = _mp8_clamp(pos)
 +	n.global_position = Vector3(p.x, n.global_position.y, p.y)
 +
-+	# 把站在这个点上的人一起挪过去 —— 看得见才好摆。
-+	# （出生点是 shuffle 分配的，所以按**节点对象**查，不能按下标。）
++	# Move the player standing on this point along with it — easier to place when you can see it.
++	# (Spawn points are assigned by shuffle, so look up by **node object**, not by index.)
 +	#
-+	# ⚠️ 两条都必须守住：
-+	#  ① 只有服务器动人。`_mp8_owner` 只在 spawn_players()（服务器）里填过，
-+	#     客户端那份是空的；而且**在广播 RPC 的处理函数里再发一次 RPC**，
-+	#     8 台机器会各广播一遍，直接变成风暴。
-+	#  ② 走原版的 `teleport_rpc` 而不是直接写 global_position ——
-+	#     直接写只在本机生效，别人看到的人还在原地。
++	# ⚠️ Both of these must hold.
++	#  ① Only the server moves players. `_mp8_owner` is only filled in spawn_players() (on the server),
++	#     so the client copy is empty. Also, **sending another RPC from inside a broadcast RPC handler**
++	#     means all 8 machines each broadcast it again, which turns straight into a storm.
++	#  ② Use vanilla's `teleport_rpc` instead of writing global_position directly —
++	#     writing it directly only takes effect locally, and everyone else still sees the player where they were.
 +	if multiplayer.is_server():
 +		var who = _mp8_owner.get(n)
 +		if who != null and is_instance_valid(who):
@@ -653,7 +659,7 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +	var n: Node3D = player_spawn_positions[_mp8_edit_sel]
 +	var cur := Vector2(n.global_position.x, n.global_position.z)
 +
-+	# 离最近的另一个出生点多远（太近会挤在一起）
++	# Distance to the nearest other spawn point (too close and players get crammed together)
 +	var gap: float = INF
 +	for i in player_spawn_positions.size():
 +		if i == _mp8_edit_sel:
@@ -664,24 +670,24 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +		gap = minf(gap, cur.distance_to(Vector2(o.global_position.x, o.global_position.z)))
 +
 +	_mp8_edit_panel.text = "\n".join([
-+		"【出生点手调】选中第 %d 个 / 共 %d   步长 %.1f 米   来源 %s" % [
++		"[Spawn edit] selected %d / %d total   step %.1f m   source %s" % [
 +			_mp8_edit_sel + 1, player_spawn_positions.size(),
 +			MP8_EDIT_STEPS[_mp8_edit_step_i], _mp8_layout_src],
-+		"位置 x=%.2f  z=%.2f      离最近的点 %.2f 米 %s" % [
-+			cur.x, cur.y, gap, ("✓" if gap >= 1.5 else "⚠挤")],
-+		"可摆范围 x∈[%.1f,%.1f] z∈[%.1f,%.1f]（走廊已拉宽 ×%.2f；z=-10 起是雷区，z=+10 是落后判死区）" % [
++		"position x=%.2f  z=%.2f      nearest point %.2f m %s" % [
++			cur.x, cur.y, gap, ("✓" if gap >= 1.5 else "⚠crowded")],
++		"allowed range x∈[%.1f,%.1f] z∈[%.1f,%.1f] (corridor widened ×%.2f; minefield starts at z=-10, z=+10 is the fall-behind death zone)" % [
 +			MP8_SPAWN_BOX_MIN.x * _mp8_wide, MP8_SPAWN_BOX_MAX.x * _mp8_wide,
 +			MP8_SPAWN_BOX_MIN.y, MP8_SPAWN_BOX_MAX.y, _mp8_wide],
-+		"1~8 选点   I/K 远近   J/L 左右   M 步长   0 存盘   9 复位   N 报告",
++		"1~8 select   I/K far/near   J/L left/right   M step   0 save   9 reset   N report",
 +	])
 +
 +
  func spawn_mines():
  	randomize()
  
-+	# [MP8] 地雷区必须跟着走廊一起拉宽，否则拉宽出来的那两条边上一颗雷都没有，
-+	# 变成"贴边跑就绝对安全"的免死通道，这一局就废了。
-+	# 宽度 ×倍率、**密度不变**（mine_distance 不动）→ 地雷数自然按面积多约 20%。
++	# [MP8] The minefield must widen along with the corridor, otherwise the two widened edge strips have no mines at all,
++	# turning into a free pass where "hugging the edge is totally safe", and the match is ruined.
++	# Width × factor, **density unchanged** (mine_distance untouched) → the mine count naturally grows with the area, about 20% more.
 +	var w: float = 16.0 * _mp8_wide
  	var polygon: PackedVector2Array = [
 -		Vector2(0.0, 0.0), Vector2(16.0, 0.0), 
@@ -691,75 +697,75 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
  	]
  
  	var points = PoissonDiscSampling.generate_points_for_polygon(
-@@ -199,8 +851,10 @@ func spawn_mines():
+@@ -199,8 +857,10 @@ func spawn_mines():
  		mine_instance.set_thresholds(mine_detection_threshold, mine_explosion_threshold)
  		mine_instance.set_multiplayer_authority(1, true)
  		mines_node_parent.add_child(mine_instance, true)
-+		# [MP8] 原版是 `-8.0 + p.x`（把 [0,16] 平移到 [-8,+8]）。
-+		# 拉宽后要平移到 [-8×倍率, +8×倍率]，所以偏移也乘同一个倍率。
++		# [MP8] Vanilla uses `-8.0 + p.x` (shifting [0,16] to [-8,+8]).
++		# After widening it has to shift to [-8×factor, +8×factor], so the offset is multiplied by the same factor.
  		mine_instance.global_position = Vector3(
 -			-8.0 + p.x, 0.0, -10.0 - p.y
 +			-8.0 * _mp8_wide + p.x, 0.0, -10.0 - p.y
  		)
  		mine_instance.set_active_rpc.rpc()
  		mine_instance.exploded.connect(_on_mine_exploded)
-@@ -221,6 +875,10 @@ func check_game_end():
+@@ -221,6 +881,10 @@ func check_game_end():
  	if not active_players.is_empty():
  		return
  
-+	# [MP8] 名次制结算 —— **必须在这里一次算清**，不能边跑边加。
-+	# 「第 j 个到终点」的 j 在中途根本拿不到最终值（猎鸭 T13 踩过同一条）。
++	# [MP8] Placement-based results — **must be computed all at once here**, not added up as the race goes.
++	# The j in "j-th to finish" simply can't have its final value mid-race (Duck Hunt T13 hit the same pitfall).
 +	_mp8_rank_scores()
 +
  	player_scores_finalized.emit(player_scores)
  
  	await get_tree().create_timer(2.0).timeout
-@@ -255,6 +913,19 @@ func remove_active_player_rpc(_network_id: int, remove_player_character: bool =
+@@ -255,6 +919,19 @@ func remove_active_player_rpc(_network_id: int, remove_player_character: bool =
  		player_characters.erase(_network_id)
  
  	if multiplayer.is_server():
 +
-+		# [MP8] T44 守卫：本局还没正式开始（有人卡在加载里，闸门未放行）。
-+		# `check_game_end()` 的判据是 `if not active_players.is_empty(): return`
-+		# —— 开局前 active_players 就是空的，条件为假，**直接穿过去结算**。
++		# [MP8] T44 guard - this match hasn't properly started yet (someone is stuck loading, the gate hasn't opened).
++		# `check_game_end()` checks `if not active_players.is_empty(): return`
++		# — before the start active_players is already empty, so the condition is false and it **falls straight through to results**.
 +		#
-+		# ⚠️ 守卫放在**这里**而不是 player_disconnected 里：本 RPC 有两个调用点
-+		#    （掉线一处、真正跑完/被炸一处），`check_game_end()` 只经由这一句到达，
-+		#    挡在这里两条路一次盖住。真死那条开局前根本走不到，所以没有行为改动。
-+		# 完整分析见 T44。
++		# ⚠️ The guard lives **here** rather than in player_disconnected. This RPC has two call sites
++		#    (one for disconnects, one for actually finishing or getting blown up), and `check_game_end()` is only reached through this line,
++		#    so blocking here covers both paths at once. The real-death path can't be reached before the start anyway, so behavior doesn't change.
++		# Full analysis in T44.
 +		if not is_all_player_loaded:
-+			print("[MP8] 雷区：%d 离场时本局还没开始，跳过收尾检查" % _network_id)
++			print("[MP8] Exploding Collar Race: %d left before this match started, skipping the end-of-match check" % _network_id)
 +			return
 +
  		check_game_end()
  
  
-@@ -275,8 +946,69 @@ func _on_countdown_expired():
+@@ -275,8 +952,69 @@ func _on_countdown_expired():
  
  	state_machine.transition_to_rpc.rpc(&"Play")
  
-+# [MP8] 名次制结算：把 player_scores **整个覆盖**掉。
++# [MP8] Placement-based results - **completely overwrite** player_scores.
 +#
-+# 覆盖而不是改原版那三处 `+= 1`，是因为原版是边跑边加的，
-+# 而名次必须等全场结束才知道。留着那些增量也无所谓 —— 这里会全部盖掉。
++# It overwrites instead of changing vanilla's three `+= 1` spots, because vanilla adds points as the race goes,
++# while placements are only known once everyone is done. Leaving those increments in is harmless — they all get overwritten here.
 +func _mp8_rank_scores() -> void :
 +
 +	var d: int = _mp8_dead_order.size()
 +	var f: int = finished_players.size()
 +	var rows := PackedStringArray()
 +
-+	# 先全部归零：既没跑完也没炸的（例如中途掉线）就是 0 分，
-+	# 不能让他保留原版边跑边加的零头。
++	# Zero everything first. Anyone who neither finished nor blew up (e.g. disconnected mid-match) gets 0,
++	# and must not keep the leftover points vanilla added along the way.
 +	for id in player_scores.keys():
 +		player_scores[id] = 0
 +
-+	# 死者：早死垫底
++	# The dead - earliest deaths at the bottom
 +	for i in d:
 +		var id: int = _mp8_dead_order[i]
 +		if player_scores.has(id):
 +			player_scores[id] = i
 +
-+	# 完赛者：接在死者上面，越早到越高；满血再 +1
++	# Finishers - ranked above the dead, earlier arrivals score higher, and full health gets +1 more
 +	for j in f:
 +		var p = finished_players[j]
 +		if p == null or not is_instance_valid(p):
@@ -772,13 +778,13 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +		if full:
 +			s += 1
 +		player_scores[id] = s
-+		rows.append("第%d名 %s %d分%s" % [
-+			j + 1, String(p.player_presence.network_name), s, ("(满血)" if full else "")
++		rows.append("#%d %s %d pts%s" % [
++			j + 1, String(p.player_presence.network_name), s, (" (full health)" if full else "")
 +		])
 +
-+	print("[MP8] 雷区结算（%d 人：完赛 %d / 阵亡 %d）—— %s%s" % [
++	print("[MP8] Exploding Collar Race results (%d players: finished %d / died %d) — %s%s" % [
 +		player_scores.size(), f, d, " | ".join(rows),
-+		("" if d == 0 else " || 阵亡（早→晚）：%s" % ", ".join(_mp8_dead_names()))
++		("" if d == 0 else " || died (early→late): %s" % ", ".join(_mp8_dead_names()))
 +	])
 +
 +
@@ -789,15 +795,15 @@ diff --git a/minigames/exploding_collar_race/scripts/exploding_collar_race.gd b/
 +		var nm: String = str(id)
 +		if player_characters.has(id) and is_instance_valid(player_characters[id]):
 +			nm = String(player_characters[id].player_presence.network_name)
-+		out.append("%s %d分" % [nm, i])
++		out.append("%s %d pts" % [nm, i])
 +	return out
 +
 +
  func _on_player_exploded(network_id):
  
-+	# [MP8] 记死亡先后 —— 名次制要用它给没跑完的人排序。
-+	# 两条死法（踩雷 _on_mine_exploded / 被收割机追上 _on_behind_harvester_body_entered）
-+	# 都走 explode_rpc → exploded → 这里，**单一出口，不会漏人**（已 grep 核对）。
++	# [MP8] Record the order of deaths — placement scoring uses it to rank players who didn't finish.
++	# Both ways to die (stepping on a mine _on_mine_exploded / getting caught by the harvester _on_behind_harvester_body_entered)
++	# go through explode_rpc → exploded → here, **a single exit, so nobody gets missed** (verified with grep).
 +	if not _mp8_dead_order.has(network_id):
 +		_mp8_dead_order.append(network_id)
 +

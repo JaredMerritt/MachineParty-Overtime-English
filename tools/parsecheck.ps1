@@ -1,32 +1,32 @@
-﻿# Machine Party 8 人 mod —— 补丁脚本的**运行时解析**冒烟检查
+﻿# Machine Party 8-player mod — **runtime parse** smoke check for patched scripts
 #
-# 用法：  powershell -ExecutionPolicy Bypass -File tools\parsecheck.ps1
-# 前置：  先跑过 tools\build.ps1（本脚本挂的是打好补丁的 PCK）
+# Usage   powershell -ExecutionPolicy Bypass -File tools\parsecheck.ps1
+# Run tools\build.ps1 first (this script mounts the patched PCK)
 #
-# ── 它解决什么问题 ─────────────────────────────────────────────
-# `build.ps1` 只保证 gdre 能把 .gd 编成 .gdc，**它不解析基类标识符**。
-# 2026-08-16 实测：`Minigame extends Node`（不是 Node3D），补丁里写了
-# `self.global_transform` —— 编译全绿、打包全绿，游戏一加载才炸：
+# ── What problem it solves ─────────────────────────────────────────────
+# `build.ps1` only guarantees gdre can compile .gd into .gdc. **It doesn't resolve base class identifiers**.
+# Found in testing on 2026-08-16. `Minigame extends Node` (not Node3D), and a patch used
+# `self.global_transform` — compile all green, packing all green, and it only blew up when the game loaded
 #     Parse Error: Identifier "global_transform" not declared in the current scope
-#     → Failed to load script → 节点没脚本 → @export 接不上 → 小游戏永远起不来
-# 表面症状是"卡在 SessionIntro"，看起来像人数/出生点问题，极其误导。
-# 那一轮白跑了 7 分钟。本脚本就是为了把这类错在 20 秒内挡下来。
+#     → Failed to load script → node has no script → @export can't connect → the minigame never starts
+# The visible symptom was "stuck in SessionIntro", which looks like a player count or spawn point problem. Very misleading.
+# That round wasted 7 minutes. This script exists to catch this class of error within 20 seconds.
 #
-# ── ⚠️ 它的能力边界（必须知道，否则会误判）────────────────────
-# 这个检查是**把源码喂给 GDScript.reload() 真编一遍**，而同名的类同时又从 PCK 里
-# 加载过一份，于是会冒出一批**与我们无关的噪音**，拿原版 src\ 跑基线同样会报：
-#   - "Cannot assign a value of type X as Y"（同一个类两个身份，类型对不上）
+# ── ⚠️ Its limits (you must know these or you'll misread the results) ────────────────────
+# This check **really compiles the source through GDScript.reload()**, while a class of the same name has also been
+# loaded from the PCK. That produces a batch of **noise unrelated to us**, which a baseline run on vanilla src\ reports too
+#   - "Cannot assign a value of type X as Y" (one class with two identities, so the types don't match)
 #   - "Node export is only supported in Node-derived classes ... inherits RefCounted"
-#   - "Compile Error: Identifier not found: GameManager"（autoload 没真的实例化）
+#   - "Compile Error: Identifier not found: GameManager" (the autoload wasn't really instantiated)
 #   - "class_name isn't allowed in built-in scripts"
-# 而且**报什么错跟扫描顺序有关**（前面编过的脚本会影响后面的）。
-# 所以：**不要把"零错误"当通过标准**，只看下面这一条高信号模式。
+# On top of that, **which errors appear depends on scan order** (scripts compiled earlier affect later ones).
+# So **don't treat "zero errors" as the pass criterion**. Only look at the one high-signal pattern below.
 #
-# ── 判据（唯一一条）──────────────────────────────────────────
-#   出现 `not declared in the current scope` = 真的写错了，必须改。
-#   其余的噪音一律忽略。
-# 想要更严的结论就跑基线对比：
-#   $env:MP8_CHECK_DIR="...\src"; 再跑一遍，只有"补丁报、原版不报"的才算我们的。
+# ── The criterion (just one) ──────────────────────────────────────────
+#   `not declared in the current scope` appearing = a real mistake that must be fixed.
+#   Ignore all other noise.
+# For a stricter verdict, run a baseline comparison
+#   Set $env:MP8_CHECK_DIR="...\src" and run it again. Only errors the patches report and vanilla doesn't are ours.
 
 $ErrorActionPreference = "Stop"
 
@@ -35,28 +35,33 @@ $godot = "C:\Program Files (x86)\Steam\steamapps\common\Godot Engine\godot.windo
 $probe = Join-Path $root "tools\probe"
 $pck   = Join-Path $root "game_test\Machine Party.pck"
 
+# tools\probe\parsecheck.gd is part of the author's local test bench and isn't published in this repository,
+# so this check only works where that probe script has been added by hand.
+if (-not (Test-Path (Join-Path $probe "parsecheck.gd"))) {
+    throw "tools\probe\parsecheck.gd isn't in this repository (it was never published), so this check can't run"
+}
 foreach ($needed in @($godot, $pck, (Join-Path $probe "parsecheck.gd"))) {
-    if (-not (Test-Path $needed)) { throw "找不到 $needed" }
+    if (-not (Test-Path $needed)) { throw "Cannot find $needed" }
 }
 
 $out = Join-Path $env:TEMP "mp8_parsecheck.out"
 $err = Join-Path $env:TEMP "mp8_parsecheck.err"
 
-Write-Host "挂 PCK 解析 patch\ 下所有 .gd ..." -ForegroundColor Cyan
+Write-Host "Mounting the PCK and parsing every .gd under patch\ ..." -ForegroundColor Cyan
 Start-Process $godot `
     -ArgumentList @("--headless", "--path", "`"$probe`"", "--script", "`"$probe\parsecheck.gd`"") `
     -NoNewWindow -Wait -RedirectStandardOutput $out -RedirectStandardError $err | Out-Null
 
-# stderr 里 "---- 文件名" 是分隔线，用它把错归到文件上。
+# In stderr, "---- <file name>" lines are separators, used to attribute errors to files.
 #
-# ⭐ 关键区分（不做这一步就全是噪音）：
-#   若某文件报了 `inherits "RefCounted"`，说明**它的基类没解析出来**，
-#   于是它后面所有 Node 成员（multiplayer / visible / global_transform …）
-#   都会连锁报"未声明" —— 这种文件的作用域错误**不可信，只能判为无法判定**。
-#   反之，基类正常解析的文件，它报的作用域错误就是**真错**。
-#   我们要抓的 `global_transform`（Minigame 是 Node 不是 Node3D）正属于后者。
-# `Steam` / `SteamMultiplayerPeer` 是 Steam GDExtension 的单例，headless 探针没加载，
-#   与补丁无关，单独滤掉。
+# ⭐ The key distinction (without this step it's all noise)
+#   If a file reports `inherits "RefCounted"`, **its base class didn't resolve**,
+#   so every Node member after it (multiplayer / visible / global_transform …)
+#   cascades into "not declared" — scope errors from such a file **can't be trusted and count as undetermined**.
+#   Conversely, in a file whose base class resolved normally, a reported scope error is **a real error**.
+#   The `global_transform` case we're after (Minigame is Node, not Node3D) is the latter kind.
+# `Steam` / `SteamMultiplayerPeer` are singletons from the Steam GDExtension, which the headless probe doesn't load.
+#   They have nothing to do with the patches and are filtered out separately.
 $lines = (Get-Content $err -Raw) -split "`r?`n"
 $current = "?"
 $scope = @{}
@@ -80,16 +85,16 @@ foreach ($f in $scope.Keys) {
 
 Write-Host ""
 if ($real.Count -gt 0) {
-    Write-Host "❌ 真作用域错误 —— 这个 PCK 加载会失败，别拿去跑：" -ForegroundColor Red
+    Write-Host "❌ Real scope errors — this PCK will fail to load, don't run it:" -ForegroundColor Red
     foreach ($f in $real) {
         Write-Host ("   {0}: {1}" -f $f, ($scope[$f] -join ", ")) -ForegroundColor Red
     }
     exit 1
 }
 
-Write-Host "✅ 基类能正常解析的脚本里，没有作用域错误。" -ForegroundColor Green
+Write-Host "✅ No scope errors in scripts whose base class resolved normally." -ForegroundColor Green
 if ($unknown.Count -gt 0) {
-    Write-Host ("   无法判定（基类在探针里没解析出来，属探针噪音）：{0}" -f ($unknown -join ", ")) -ForegroundColor DarkGray
+    Write-Host ("   Undetermined (base class didn't resolve in the probe, probe noise): {0}" -f ($unknown -join ", ")) -ForegroundColor DarkGray
 }
-Write-Host "   这不等于零风险，能力边界见本脚本顶部。" -ForegroundColor DarkGray
+Write-Host "   This doesn't mean zero risk. See the top of this script for its limits." -ForegroundColor DarkGray
 exit 0

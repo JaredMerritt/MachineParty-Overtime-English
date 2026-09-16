@@ -1,35 +1,35 @@
 # ============================================================================
-#  Machine Party 8 人 mod（公开仓库）—— 边界
+#  Machine Party 8-player mod (public repo) — boundaries
 #
-#  ⚠️ 本文件保护的是**贡献者**：在这个仓库里构建时会产生游戏自己的源码
-#  （解包出来的 src\ 和打完补丁的 patch\）。那些**绝不能提交**。
+#  ⚠️ This file protects **contributors**. Building in this repo produces the game's own source code
+#  (the unpacked src\ and the patched patch\). Those must **never be committed**.
 #
-#  项目红线：只服务正版；不分发游戏原始资产。
+#  Project red lines. Serve legitimate copies only, and never redistribute original game assets.
 # ============================================================================
 
-# ---- 构建时产生的游戏源码：绝对不能提交 -------------------------------------
-# src\   = 你用自己那份游戏解包出来的原版脚本（游戏的源代码）
-# patch\ = 打完补丁的完整脚本（同样含游戏源码）
-# 仓库里公开的只有 patches\ 里的差异补丁，这两个目录是本地中间产物。
+# ---- Game source produced during builds, never commit ------------------------
+# src\   = vanilla scripts you unpacked from your own copy of the game (the game's source code)
+# patch\ = fully patched scripts (also contain game source)
+# Only the diff patches in patches\ are public. These two folders are local intermediates.
 /src/
 /patch/
 
-# ---- 构建产物 ---------------------------------------------------------------
+# ---- Build outputs ------------------------------------------------------------
 /patch_gdc/
 /dist/
 *.gdc
 
-# ---- 游戏本体：任何形式都不许进 ---------------------------------------------
+# ---- The game itself, never in any form ---------------------------------------
 *.pck
 *.exe
 /game/
 /game_test/
 
-# ---- 第三方工具二进制：docs\BUILD.md 里给下载链接，不转载 --------------------
+# ---- Third-party tool binaries. docs\BUILD.md links to them, no rehosting -------
 /tools/gdre/
 *.zip
 
-# ---- 杂项 -------------------------------------------------------------------
+# ---- Misc ---------------------------------------------------------------------
 *.log
 *.tmp
 Thumbs.db

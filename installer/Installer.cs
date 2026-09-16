@@ -1,19 +1,19 @@
-// Machine Party 8 人 mod —— 安装器 / 启动器
+// Machine Party 8-player mod — installer / launcher
 //
-// 同一份源码编出两个 exe（见 tools\build_installer.ps1）：
-//   mp8_install.exe    控制台版，命令行参数齐全
-//   mp8_launcher.exe   窗口版（/define:GUI /target:winexe），双击即用
-// 补丁字节码全部**内嵌**，两个都不需要装任何运行库、不需要下别的工具。
+// The same source builds two exes (see tools\build_installer.ps1)
+//   mp8_install.exe    console version, with the full set of command-line arguments
+//   mp8_launcher.exe   windowed version (/define:GUI /target:winexe), just double-click to use
+// All patch bytecode is **embedded**, so neither one needs any runtime installed or any other tool downloaded.
 //
-// 它不含、也不分发任何游戏原始资产：内嵌的只有 mod 自己改过的那些 .gdc。
+// It doesn't contain or distribute any original game assets. The only embedded files are the .gdc files the mod itself changed.
 //
-// ── 还原是怎么做到只存几 KB 的 ───────────────────────────────────────
-// 打补丁的做法是「把新内容追加到 PCK 末尾 + 把索引里那一条指过去」，
-// **原文件的字节一个都没被覆盖**，还老老实实躺在包中间。
-// 所以还原不需要 605 MB 的整包备份，只要把索引那几个字段写回去、
-// 再把文件截断回原长度就行 —— 备份文件因此只有几 KB，
-// 而且还原完可以直接算 SHA256 跟原版指纹比对，**能证明是逐字节精确的**。
-// （旧版本那种 605 MB 整包备份仍然认，见 TryLegacyBackup。）
+// ── How restoring only needs to store a few KB ───────────────────────────────────────
+// Patching works by "appending the new content to the end of the PCK + pointing that index entry at it",
+// so **not a single byte of the original file is overwritten**, and it all still sits there in the middle of the pack.
+// That means restoring doesn't need a 605 MB backup of the whole pack. It just writes those few index fields back
+// and truncates the file back to its original length — which is why the backup file is only a few KB,
+// and after restoring, a SHA256 can be computed and compared with the vanilla fingerprint, **proving it's byte-for-byte exact**.
+// (The old-style 605 MB whole-pack backup is still recognised, see the legacy backup branches in Install and Uninstall.)
 
 using System;
 using System.Collections.Generic;
@@ -32,7 +32,7 @@ using System.Windows.Forms;
 #endif
 
 // ═════════════════════════════════════════════════════════════════════════
-// 双语文案
+// Bilingual text
 // ═════════════════════════════════════════════════════════════════════════
 static class L
 {
@@ -44,41 +44,41 @@ static class L
         catch { Zh = true; }
     }
 
-    // 中英文就近写在调用处，不搞 key 表 —— 文案改动时不会漏掉另一边
+    // Chinese and English are written side by side at the call site with no key table — so a text change can't miss the other language
     public static string T(string zh, string en) { return Zh ? zh : en; }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// 核心逻辑（控制台版与窗口版共用）
+// Core logic (shared by the console and windowed versions)
 // ═════════════════════════════════════════════════════════════════════════
 static class Core
 {
-    // ── 本 mod 支持的游戏版本（原版 PCK 的指纹）────────────────────────
-    // 换游戏版本必须同时更新这三行，否则会把新版本的包按旧补丁打坏。
+    // ── Game version this mod supports (fingerprint of the vanilla PCK) ────────────────────────
+    // Switching game versions means updating these three lines together, or a new version's pack gets broken by the old patches.
     public const string GameVersion = "v2.1.2";
     public const string VanillaSha  = "326CC3988D3AC554D1F288BED89B1F89D450F78EC9D4470F88558975753DFA8E";
     public const long   VanillaSize = 634798100L;
 
-    // ── 安装器自己的发布号（与 mod 版本是两件事）────────────────────────
-    // ModTag()（来自 network_manager.gd 的 MP8_VERSION_TAG）= 打进 pck 的 mod 版本，
-    //   它决定谁能跟谁联机，一改就是所有人都得重装；
-    // ReleaseNum = 这个 exe 自己的发布号，不进 pck、不进联机握手串，只是标识。
-    // 1.3.1 就是「只修安装器」的一次发布：mod 仍是 overtime-1.3，pck 字节一个没变，
-    // 已装 1.3 的人不用动，1.3 与 1.3.1 的人照样同房。
-    // 它同时决定 dist\ 下的输出目录名与发布包名（见 tools\build_installer.ps1），
-    // 免得重建时把已经发出去的 dist\overtime-1.3\ 连 zip 一起覆盖掉。
-    public const string ReleaseNum = "1.6";
+    // ── The installer's own release number (a separate thing from the mod version) ────────────────────────
+    // ModTag() (from MP8_VERSION_TAG in network_manager.gd) = the mod version built into the pck.
+    //   It decides who can play online with whom, and changing it means everyone has to reinstall.
+    // ReleaseNum = this exe's own release number. It doesn't go into the pck or the multiplayer handshake string, it's only a label.
+    // 1.3.1 was an "installer-only fix" release. The mod was still overtime-1.3 and not a single pck byte changed,
+    // so people with 1.3 installed didn't need to do anything, and 1.3 and 1.3.1 players can still share a lobby.
+    // It also decides the output folder name under dist\ and the release package name (see tools\build_installer.ps1),
+    // so a rebuild doesn't overwrite the already-released dist\overtime-1.3\ along with its zip.
+    public const string ReleaseNum = "1.7-en";
 
     public const string AppId   = "4108000";
     public const string GameRel = @"steamapps\common\party project\Machine Party_Windows";
     public const string PckName = "Machine Party.pck";
-    public const string BakName = "Machine Party.pck.vanilla";   // 旧版整包备份（仍兼容）
-    public const string ResName    = "overtime_restore.dat";           // 小体积还原数据
-    // 0.9 之前叫 mp8_restore.dat。已经装过旧版的机器上还是那个名字，
-    // 所以读的时候两个名字都认，写只写新名。
+    public const string BakName = "Machine Party.pck.vanilla";   // Old-style whole-pack backup (still supported)
+    public const string ResName    = "overtime_restore.dat";           // Small restore data
+    // Before 0.9 it was called mp8_restore.dat. Machines that installed an old version still have that name,
+    // so reading accepts both names, but writing only uses the new one.
     public const string OldResName = "mp8_restore.dat";
 
-    // 现场已有的还原数据在哪（新名优先）。没有就返回空串。
+    // Where the existing restore data is (new name first). Returns an empty string if there isn't any.
     public static string FindRes(string gameDir)
     {
         string a = Path.Combine(gameDir, ResName);
@@ -91,7 +91,7 @@ static class Core
     const uint  ResMagic  = 0x3852504Du;   // "MP8R"
     const uint  ResFormat = 1u;
 
-    // ── 日志 ───────────────────────────────────────────────────────────
+    // ── Log ───────────────────────────────────────────────────────────
     static readonly List<string> logBuf = new List<string>();
     public static string LogPath
     {
@@ -105,27 +105,27 @@ static class Core
 
     public static void FlushLog()
     {
-        // 缓冲空就别写：否则每按一次「安装日志」都往文件里插一个空段落头
+        // Don't write if the buffer is empty. Otherwise every press of "Install log" inserts an empty section header into the file
         if (logBuf.Count == 0) return;
         try
         {
             var sb = new StringBuilder();
             sb.AppendLine("──── " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") +
-                          "  mod " + ModTag() + "  安装器 " + ReleaseNum +
-                          "  游戏 " + GameVersion + " ────");
+                          "  mod " + ModTag() + "  installer " + ReleaseNum +
+                          "  game " + GameVersion + " ────");
             foreach (string s in logBuf) sb.AppendLine(s);
             File.AppendAllText(LogPath, sb.ToString(), Encoding.UTF8);
-            // 写出去就清掉。1.3 少了这一句：「安装日志」按钮 flush 一次、关窗再
-            // flush 一次，同一批行被原样写进文件两遍 —— 玩家看到的是一整屏
-            // 完全相同的行，反倒以为自己的日志坏了。
+            // Clear it once written out. 1.3 was missing this line. The "Install log" button flushed once, closing the window
+            // flushed again, and the same batch of lines got written to the file twice — players saw a whole screen of
+            // identical lines and assumed their log was broken.
             logBuf.Clear();
         }
         catch { }
     }
 
-    // ── 找游戏：注册表拿 Steam 根目录 → libraryfolders.vdf 拿所有库盘 ──
-    // 返回**所有**命中的副本：有人装了多份（多库盘、家庭共享），
-    // 只取第一个会打错包，让上层去问用户。
+    // ── Finding the game. The registry gives the Steam root → libraryfolders.vdf gives every library drive ──
+    // Returns **every** matching copy. Some people have several installs (multiple library drives, family sharing),
+    // and just taking the first one would patch the wrong pack, so the caller asks the user.
     public static List<string> FindGameDirs()
     {
         var roots = new List<string>();
@@ -179,32 +179,32 @@ static class Core
         return found;
     }
 
-    // ── 「现在能不能动这个包」───────────────────────────────────────────
+    // ── "Can we touch this pack right now" ───────────────────────────────────────────
     //
-    // 1.3 之前这里只问一句：进程列表里有没有叫 "Machine Party" 的进程。
-    // 那个判据错在只比名字 —— 不看路径、不看是不是当前选中的这个游戏目录。
-    // 线上真出了事：有玩家机器上常驻一个同名进程（退不干净的僵尸、崩溃后被
-    // WerFault 挂住、或者别处一个同名 exe），于是被永久拦在门外，重启电脑、
-    // 重装游戏全都没用 —— 这两样都动不了「进程叫什么名字」这件事 ——
-    // 而弹窗一个线索都不给。
+    // Before 1.3 this only asked one thing, whether the process list had a process named "Machine Party".
+    // That test was wrong because it only compared the name — it ignored the path and whether it was the currently selected game folder.
+    // It really went wrong in the wild. One player's machine had a same-named process that never went away (a zombie that didn't exit cleanly, one held by
+    // WerFault after a crash, or some other same-named exe elsewhere), so they were permanently locked out. Rebooting the PC
+    // and reinstalling the game were both useless — neither of those changes "what the process is named" —
+    // and the popup gave no clue at all.
     //
-    // 现在拆成两条判据，各管一段：
-    //   ① pck 能不能用 FileShare.None 独占打开 —— 权威。直接问文件系统
-    //      「有没有人占着这个文件」，管它进程叫什么名字；
-    //   ② 同名进程**且**其 exe 路径就落在这个游戏目录里 —— 补 ① 的漏：
-    //      Godot 的 FileAccessPack 是「读一个资源开一次句柄」，游戏停在主菜单
-    //      发呆时可能一个 pck 句柄都不持有，那时 ① 探不出来。
-    // 路径拿不到、或路径在别处的同名进程一律**不拦**，只记进日志 ——
-    // 那正是 1.3 把玩家锁死的那一支。
+    // It's now split into two tests, each covering its own part
+    //   ① Can the pck be opened exclusively with FileShare.None — authoritative. It asks the file system directly
+    //      "is anyone holding this file", no matter what the process is called.
+    //   ② A same-named process **and** its exe path is inside this game folder — this covers the gap in ①.
+    //      Godot's FileAccessPack "opens a handle each time it reads a resource", so a game idling on the main menu
+    //      may not hold a single pck handle, and ① can't detect it then.
+    // Same-named processes whose path can't be read, or whose path is somewhere else, are **never blocked**, only logged —
+    // that's exactly the branch where 1.3 locked players out.
 
     public sealed class Holder
     {
         public int    Pid;
-        public string ExePath = "";   // 取不到就是空串（权限 / 位数不匹配）
-        public bool   InGameDir;      // 路径确认落在当前这个游戏目录里
+        public string ExePath = "";   // Empty string if it can't be read (permissions / bitness mismatch)
+        public bool   InGameDir;      // Path confirmed to be inside the current game folder
     }
 
-    // 同名进程一览。只用来解释「为什么拦你」，不单独作为判据。
+    // List of same-named processes. Only used to explain "why you're blocked", never used as a test on its own.
     public static List<Holder> FindGameProcesses(string gameDir)
     {
         var list = new List<Holder>();
@@ -220,8 +220,8 @@ static class Core
         {
             var h = new Holder();
             try { h.Pid = p.Id; } catch { h.Pid = -1; }
-            // MainModule 会因为权限或 32/64 位不匹配抛异常。抛了就当路径未知，
-            // 而路径未知**不拦人**（见上面那段）。
+            // MainModule throws on permission or 32/64-bit mismatch. If it throws, treat the path as unknown,
+            // and an unknown path **doesn't block anyone** (see the section above).
             try { h.ExePath = p.MainModule.FileName; } catch { h.ExePath = ""; }
             h.InGameDir = root.Length > 0 && h.ExePath.Length > 0 &&
                           h.ExePath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
@@ -231,38 +231,38 @@ static class Core
         return list;
     }
 
-    // 能动 → 返回 null；不能动 → 返回该原样显示给玩家的原因。
+    // OK to touch → returns null. Not OK → returns the reason to show the player as-is.
     public static string BusyReason(string gameDir)
     {
-        // ② 先查进程：命中时这条的文案比 ① 有用得多（能指名道姓报 PID 和路径）
+        // ② Check processes first. When this one hits, its message is far more useful than ①'s (it can name the exact PID and path)
         var mine = new List<Holder>();
         foreach (var h in FindGameProcesses(gameDir))
         {
             if (h.InGameDir) mine.Add(h);
-            else Log(string.Format("同名进程，不拦（路径{0}）：PID {1}  {2}",
-                                   h.ExePath.Length == 0 ? "取不到" : "不在本目录",
+            else Log(string.Format("Same-named process, not blocking (path {0}): PID {1}  {2}",
+                                   h.ExePath.Length == 0 ? "unreadable" : "not in this folder",
                                    h.Pid, h.ExePath.Length == 0 ? "-" : h.ExePath));
         }
         if (mine.Count > 0)
         {
             var sb = new StringBuilder();
-            sb.Append(L.T("游戏正在运行，先完全退出。\n\n占用它的进程：\n",
+            sb.Append(L.T("The game is running, fully exit it first.\n\nProcesses holding it:\n",
                           "The game is running. Fully exit it first.\n\nProcesses:\n"));
             foreach (var h in mine)
             {
                 sb.AppendLine("    PID " + h.Pid + "    " + h.ExePath);
-                Log("拦下：PID " + h.Pid + "  " + h.ExePath);
+                Log("Blocked: PID " + h.Pid + "  " + h.ExePath);
             }
-            sb.Append(L.T("\n窗口已经关了还报这个，就是进程没退干净：\n" +
-                          "任务管理器 →「详细信息」→ 找到上面这个 PID → 结束任务。",
+            sb.Append(L.T("\nIf you still get this after the window is closed, the process didn't exit cleanly:\n" +
+                          "Task Manager → 'Details' → find the PID above → End task.",
                           "\nIf the window is already closed, the process did not exit:\n" +
                           "Task Manager -> Details -> find that PID -> End task."));
             return sb.ToString();
         }
 
-        // ① 再问文件系统。杀软扫描、Steam 校验会瞬时占一下，给几次重试再判死。
+        // ① Then ask the file system. Antivirus scans and Steam verification hold it briefly, so retry a few times before giving up.
         string pck = Path.Combine(gameDir, PckName);
-        if (!File.Exists(pck)) return null;      // 包都不在，让后面的流程去报这个错
+        if (!File.Exists(pck)) return null;      // The pack isn't even there, so let the later steps report that error
         for (int i = 0; i < 5; i++)
         {
             try
@@ -272,18 +272,18 @@ static class Core
             }
             catch (UnauthorizedAccessException)
             {
-                // 权限不是占用，交给 PreflightWritable 去报 —— 它那条文案更准
+                // A permission problem isn't a lock, so leave it to PreflightWritable to report — its message is more accurate
                 return null;
             }
             catch (IOException) { }
-            // using System.Threading 只在 GUI 分支里，控制台版编不到，这里写全名
+            // using System.Threading is only in the GUI branch and the console version doesn't compile it in, so the full name is written here
             if (i < 4) System.Threading.Thread.Sleep(200);
         }
-        Log("pck 独占打开失败：" + pck);
+        Log("Exclusive pck open failed: " + pck);
         return L.T(
-            "数据包正被占用，现在动不了。\n\n" +
-            "常见原因：游戏没退干净；Steam 正在更新或校验这个游戏；杀毒软件正在扫描它。\n" +
-            "处理：完全退出游戏和 Steam，等几秒再试；仍然不行就重启一次电脑再来。",
+            "The PCK is in use and can't be changed right now.\n\n" +
+            "Common causes: the game didn't exit cleanly; Steam is updating or verifying this game; antivirus is scanning it.\n" +
+            "What to do: fully exit the game and Steam, wait a few seconds and try again. If that still doesn't work, restart your PC once and try again.",
             "The PCK is locked by another process.\n\n" +
             "Usual causes: the game did not exit cleanly; Steam is updating or verifying it; " +
             "an antivirus is scanning it.\n" +
@@ -309,25 +309,25 @@ static class Core
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // PCK 结构
+    // PCK structure
     // ═══════════════════════════════════════════════════════════════════
     //
-    // Godot 4.5 的 PCK（格式版本 3）布局 —— 拿原装包实测出来的，不是抄文档：
+    // Godot 4.5 PCK (format version 3) layout — measured from a stock pack, not copied from the docs
     //
     //   +0   "GDPC"
-    //   +4   格式版本 = 3
-    //   +8   +12  +16   引擎版本 4 / 5 / 2
-    //   +20  pack_flags（位 0 = 目录加密，位 1 = 偏移相对 file_base）
-    //   +24  file_base (u64) = 128 ← 文件数据从这里开始
-    //   +32  dir_offset(u64)       ← **索引在文件末尾**（Godot 4.4+ 改的，不在开头）
-    //   …    保留区，到 128 为止
-    //   128  文件数据……
-    //   dir_offset:  u32 文件数，然后每条：
-    //                u32 路径长(补零对齐) + 路径 + u64 偏移 + u64 大小 + md5[16] + u32 标志
+    //   +4   format version = 3
+    //   +8   +12  +16   engine version 4 / 5 / 2
+    //   +20  pack_flags (bit 0 = encrypted directory, bit 1 = offsets relative to file_base)
+    //   +24  file_base (u64) = 128 ← file data starts here
+    //   +32  dir_offset(u64)       ← **the index is at the end of the file** (changed in Godot 4.4+, it's not at the start)
+    //   …    reserved area, up to 128
+    //   128  file data…
+    //   dir_offset   u32 file count, then for each entry
+    //                u32 path length (zero-padded for alignment) + path + u64 offset + u64 size + md5[16] + u32 flags
 
     public class PckEntry
     {
-        public long   FieldPos;   // 索引里「偏移」字段的绝对位置，后面三项紧随其后
+        public long   FieldPos;   // Absolute position of the "offset" field in the index, with the other three fields right after it
         public ulong  Offset;
         public ulong  Size;
         public byte[] Md5;
@@ -346,15 +346,15 @@ static class Core
         fs.Position = 0;
 
         if (br.ReadUInt32() != 0x43504447u)
-            throw new Exception(L.T("不是 PCK 文件（缺 GDPC 标记）", "Not a PCK file (missing GDPC magic)"));
+            throw new Exception(L.T("Not a PCK file (missing the GDPC marker)", "Not a PCK file (missing GDPC magic)"));
         uint ver = br.ReadUInt32();
         if (ver != 3)
-            throw new Exception(L.T("PCK 格式版本是 " + ver + "，本程序只认 3（Godot 4.4+）",
+            throw new Exception(L.T("PCK format version is " + ver + ", this program only accepts 3 (Godot 4.4+)",
                                     "PCK format version is " + ver + ", this tool only supports 3 (Godot 4.4+)"));
         br.ReadUInt32(); br.ReadUInt32(); br.ReadUInt32();
         uint packFlags = br.ReadUInt32();
         if ((packFlags & 1) != 0)
-            throw new Exception(L.T("这个 PCK 的目录是加密的，改不了", "This PCK has an encrypted directory"));
+            throw new Exception(L.T("This PCK's directory is encrypted and can't be modified", "This PCK has an encrypted directory"));
 
         var idx = new PckIndex();
         idx.FileBase = br.ReadUInt64();
@@ -372,25 +372,25 @@ static class Core
             e.Offset = br.ReadUInt64();
             e.Size   = br.ReadUInt64();
             e.Md5    = br.ReadBytes(16);
-            br.ReadUInt32();                       // 标志
+            br.ReadUInt32();                       // flags
             idx.Entries[path] = e;
         }
         return idx;
     }
 
-    // 内嵌资源：mp8.manifest 一行 "<序号>|<res:// 路径>"，内容在 mp8.<序号>
+    // Embedded resources. mp8.manifest has one line per file, "<index>|<res:// path>", and the content is in mp8.<index>
     public static SortedDictionary<string, byte[]> LoadEmbedded()
     {
         var asm = Assembly.GetExecutingAssembly();
-        // ⚠️ 用 SortedDictionary 而不是 Dictionary：写入顺序决定追加顺序，
-        //    进而决定产物字节。定死顺序才能「同样的输入产出同样的包」。
+        // ⚠️ Use SortedDictionary, not Dictionary. The write order decides the append order,
+        //    which in turn decides the output bytes. Only a fixed order gives "the same input produces the same pack".
         var map = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
 
         string manifest;
         using (var s = asm.GetManifestResourceStream("mp8.manifest"))
         {
             if (s == null)
-                throw new Exception(L.T("这个 exe 里没有内嵌补丁（打包时漏了）",
+                throw new Exception(L.T("This exe has no embedded patches (they were left out when packaging)",
                                         "This exe has no embedded patches (packaging error)"));
             using (var r = new StreamReader(s, Encoding.UTF8)) manifest = r.ReadToEnd();
         }
@@ -403,7 +403,7 @@ static class Core
             if (bar < 0) throw new Exception("bad manifest line: " + line);
             string id = line.Substring(0, bar);
             string path = line.Substring(bar + 1).Trim();
-            if (path.StartsWith("res://")) path = path.Substring(6);   // PCK 索引里不带 res://
+            if (path.StartsWith("res://")) path = path.Substring(6);   // PCK index entries don't include res://
 
             using (var s = asm.GetManifestResourceStream("mp8." + id))
             {
@@ -430,7 +430,7 @@ static class Core
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 当前状态
+    // Current state
     // ═══════════════════════════════════════════════════════════════════
     public enum Kind { Missing, Vanilla, OursInstalled, OldVersion, Unknown }
 
@@ -442,7 +442,7 @@ static class Core
         public long   Length;
         public bool   HasRestore;
         public bool   HasLegacy;
-        public string InstalledTag = "";   // 还原数据里记的 mod 版本
+        public string InstalledTag = "";   // The mod version recorded in the restore data
         public string Note = "";
 
         public bool CanUninstall { get { return HasRestore || HasLegacy; } }
@@ -473,8 +473,8 @@ static class Core
             {
                 var idx = ReadIndex(fs);
 
-                // 判「装的是不是我们这一版」：不算整包哈希（635 MB 要十几秒），
-                // 只比索引里记的 md5 与内嵌补丁的 md5 —— 一样就是我们写进去的。
+                // Deciding "is our version the one installed" doesn't hash the whole pack (635 MB takes over ten seconds).
+                // It only compares the md5 recorded in the index with the embedded patches' md5 — if they match, we wrote it.
                 int hit = 0, total = 0;
                 bool allPresent = true;
                 foreach (var kv in patches)
@@ -488,30 +488,30 @@ static class Core
                 if (!allPresent)
                 {
                     st.Kind = Kind.Unknown;
-                    st.Note = L.T("这个包里找不到本 mod 要改的文件 —— 游戏版本多半不是 " + GameVersion,
+                    st.Note = L.T("Can't find the files this mod changes in this pack — the game version is most likely not " + GameVersion,
                                   "Files this mod patches are absent — the game is probably not " + GameVersion);
                 }
                 else if (hit == total)   st.Kind = Kind.OursInstalled;
                 else if (st.InstalledTag.Length > 0 && st.InstalledTag != ModTag())
                 {
-                    // 🩸 装着**别的版本**的 MP8。不这么判的话会掉进下面那条
-                    //    "只有 N/47 个补丁在位、上次安装可能失败了" —— 既吓人又是错的，
-                    //    而升级恰恰是最常见的路径（每次发新版所有老用户都会走到这里）。
+                    // 🩸 A **different version** of MP8 is installed. Without this check it would fall into the branch below,
+                    //    "only N/47 patches in place, the last install may have failed" — both alarming and wrong,
+                    //    and upgrading is exactly the most common path (every new release sends all existing users through here).
                     st.Kind = Kind.OldVersion;
-                    st.Note = L.T("装的是 Overtime " + st.InstalledTag + "，本程序是 " + ModTag() + "。直接装即可升级。",
+                    st.Note = L.T("Overtime " + st.InstalledTag + " is installed, and this program is " + ModTag() + ". Just install to upgrade.",
                                   "Overtime " + st.InstalledTag + " is installed; this program is " + ModTag() + ". Installing upgrades it.");
                 }
                 else if (hit > 0)
                 {
                     st.Kind = Kind.Unknown;
-                    st.Note = L.T("只有 " + hit + "/" + total + " 个补丁在位 —— 上次安装可能中途失败了",
+                    st.Note = L.T("Only " + hit + "/" + total + " patches are in place — the last install may have failed partway through",
                                   "Only " + hit + "/" + total + " patches present — a previous install may have failed");
                 }
                 else if (st.Length == VanillaSize) st.Kind = Kind.Vanilla;
                 else
                 {
                     st.Kind = Kind.Unknown;
-                    st.Note = L.T("既不是原版也不是本 mod（装过别的 mod？游戏更新了？）",
+                    st.Note = L.T("Neither vanilla nor this mod (installed another mod? game updated?)",
                                   "Neither vanilla nor this mod (another mod? game updated?)");
                 }
             }
@@ -525,17 +525,17 @@ static class Core
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 还原数据（几 KB）
+    // Restore data (a few KB)
     // ═══════════════════════════════════════════════════════════════════
     class RestoreData
     {
-        public long   OrigLength;      // 打补丁之前的文件长度
-        public long   PatchedLength;   // 打完之后的文件长度
-        public string BaseSha;         // 打补丁之前那份包的指纹；没校验过则为空
+        public long   OrigLength;      // File length before patching
+        public long   PatchedLength;   // File length after patching
+        public string BaseSha;         // Fingerprint of the pack before patching. Empty if it wasn't verified
         public string GameVer;
         public string ModTag;
         public Dictionary<string, PckEntry> Orig = new Dictionary<string, PckEntry>();
-        // 我们写进去的值。还原之前拿它跟现场比对，确认「这份包正是我改过的那一份」。
+        // The values we wrote. Before restoring, compare them with what's on disk to confirm "this pack is exactly the one I modified".
         public Dictionary<string, PckEntry> Made = new Dictionary<string, PckEntry>();
     }
 
@@ -568,10 +568,10 @@ static class Core
         using (var br = new BinaryReader(fs, Encoding.UTF8))
         {
             if (br.ReadUInt32() != ResMagic)
-                throw new Exception(L.T("还原数据文件损坏（标记不对）", "Restore data corrupt (bad magic)"));
+                throw new Exception(L.T("Restore data file is corrupt (wrong marker)", "Restore data corrupt (bad magic)"));
             uint fmt = br.ReadUInt32();
             if (fmt != ResFormat)
-                throw new Exception(L.T("还原数据的格式版本是 " + fmt + "，本程序不认",
+                throw new Exception(L.T("Restore data format version is " + fmt + ", which this program doesn't recognise",
                                         "Restore data format " + fmt + " is not supported"));
             var d = new RestoreData();
             d.OrigLength    = br.ReadInt64();
@@ -595,13 +595,13 @@ static class Core
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 打补丁 / 还原
+    // Patching / restoring
     // ═══════════════════════════════════════════════════════════════════
     //
-    // 改法：**追加 + 改索引**，不重写整个包。
-    //   1. 新内容写到文件末尾（索引后面也无所谓 —— 引擎只按索引里的偏移去 seek）；
-    //   2. 把那一条索引的 偏移/大小/md5 原地改掉。
-    // 于是 635 MB 的包只写进去 ~640 KB，秒级完成。
+    // The method is **append + edit the index**, without rewriting the whole pack.
+    //   1. Write the new content to the end of the file (after the index is fine too — the engine only seeks by the offsets in the index).
+    //   2. Change that index entry's offset/size/md5 in place.
+    // So only ~640 KB gets written into the 635 MB pack, and it's done in seconds.
     static int PatchPck(string pckPath, SortedDictionary<string, byte[]> patches, RestoreData rec)
     {
         int replaced = 0;
@@ -613,11 +613,11 @@ static class Core
             var missing = new List<string>();
             foreach (var kv in patches) if (!idx.Entries.ContainsKey(kv.Key)) missing.Add(kv.Key);
             if (missing.Count > 0)
-                throw new Exception(L.T("这些补丁在游戏包里找不到对应文件（游戏版本不对？）：\n  ",
+                throw new Exception(L.T("These patches have no matching file in the game pack (wrong game version?):\n  ",
                                         "These patches have no counterpart in the game (wrong version?):\n  ")
                                     + string.Join("\n  ", missing.ToArray()));
 
-            // 先把「改之前的索引字段」原样记下来 —— 这就是还原的全部所需
+            // First record the "index fields before the change" exactly as they are — that's everything restoring needs
             rec.OrigLength = fs.Length;
             foreach (var kv in patches)
             {
@@ -627,7 +627,7 @@ static class Core
                 rec.Orig[kv.Key] = copy;
             }
 
-            foreach (var kv in patches)      // SortedDictionary：顺序确定，产物可复现
+            foreach (var kv in patches)      // SortedDictionary gives a fixed order, so the output is reproducible
             {
                 byte[] data = kv.Value;
                 fs.Position = fs.Length;
@@ -652,12 +652,12 @@ static class Core
         return replaced;
     }
 
-    // 「现在这份包，正是我当初改过的那一份吗？」
+    // "Is the pack right now exactly the one I modified back then?"
     //
-    // 🩸 这道闸门不能省。还原的做法是把索引字段写回记录下来的旧值 + 截断到旧长度 ——
-    //    一旦文件已经不是当初那份（最常见：**Steam 更新了游戏**，或用户点了
-    //    「验证游戏文件的完整性」），把旧偏移写进新包的索引就是**当场写坏它**。
-    //    所以还原之前必须逐条证明现场与记录一致。
+    // 🩸 This gate can't be skipped. Restoring writes the recorded old values back into the index fields + truncates to the old length —
+    //    once the file is no longer the original one (most commonly **Steam updated the game**, or the user clicked
+    //    "Verify integrity of game files"), writing old offsets into the new pack's index **corrupts it on the spot**.
+    //    So before restoring, every entry has to prove that what's on disk matches the record.
     static bool RestoreApplies(string pckPath, RestoreData d, out string why)
     {
         why = null;
@@ -666,8 +666,8 @@ static class Core
             var fi = new FileInfo(pckPath);
             if (fi.Length != d.PatchedLength)
             {
-                why = L.T("数据包长度变了（记录 " + d.PatchedLength.ToString("N0") +
-                          "，现在 " + fi.Length.ToString("N0") + "）",
+                why = L.T("PCK length changed (recorded " + d.PatchedLength.ToString("N0") +
+                          ", now " + fi.Length.ToString("N0") + ")",
                           "PCK length changed (recorded " + d.PatchedLength.ToString("N0") +
                           ", now " + fi.Length.ToString("N0") + ")");
                 return false;
@@ -681,13 +681,13 @@ static class Core
                     PckEntry cur;
                     if (!idx.Entries.TryGetValue(kv.Key, out cur))
                     {
-                        why = L.T("数据包里已经没有 " + kv.Key, "The PCK no longer contains " + kv.Key);
+                        why = L.T("The PCK no longer contains " + kv.Key, "The PCK no longer contains " + kv.Key);
                         return false;
                     }
                     if (cur.Offset != kv.Value.Offset || cur.Size != kv.Value.Size ||
                         !SameBytes(cur.Md5, kv.Value.Md5))
                     {
-                        why = L.T("索引对不上（" + kv.Key + "）", "Index mismatch (" + kv.Key + ")");
+                        why = L.T("Index mismatch (" + kv.Key + ")", "Index mismatch (" + kv.Key + ")");
                         return false;
                     }
                 }
@@ -697,8 +697,8 @@ static class Core
         catch (Exception ex) { why = ex.Message; return false; }
     }
 
-    // 打完之后把索引重新读一遍，核对每条的 md5 都是我们刚写的那份。
-    // 便宜的保险：写了一半断电/磁盘满，这里就能当场发现。
+    // After patching, read the index again and check that every entry's md5 is the one we just wrote.
+    // A cheap safety net. If the power goes out halfway through writing or the disk fills up, it gets caught right here.
     static void VerifyPatched(string pckPath, SortedDictionary<string, byte[]> patches)
     {
         using (var fs = new FileStream(pckPath, FileMode.Open, FileAccess.Read))
@@ -713,21 +713,21 @@ static class Core
                 if (e.Size != (ulong)kv.Value.Length) bad.Add(kv.Key);
             }
             if (bad.Count > 0)
-                throw new Exception(L.T("写入自检没过（" + bad.Count + " 条对不上）",
+                throw new Exception(L.T("Post-write self-check failed (" + bad.Count + " entries don't match)",
                                         "Post-write verification failed (" + bad.Count + " entries)"));
         }
     }
 
-    // 还原：把索引字段写回去 + 截断掉我们追加的那一段。
-    // 原文件的字节从来没被覆盖过，所以这样就是**逐字节**回到打补丁之前。
+    // Restoring means writing the index fields back + truncating the section we appended.
+    // The original file's bytes were never overwritten, so this returns it **byte for byte** to how it was before patching.
     static void ApplyRestore(string pckPath, RestoreData d)
     {
         string why;
         if (!RestoreApplies(pckPath, d, out why))
             throw new Exception(L.T(
-                "还原数据跟当前的游戏数据包对不上，**没有动你的文件**。\n  " + why + "\n" +
-                "多半是 Steam 更新了游戏，或者你点过「验证游戏文件的完整性」——\n" +
-                "那样游戏已经是原版了，把 " + ResName + " 删掉即可。",
+                "The restore data doesn't match the current game PCK, **your files were not touched**.\n  " + why + "\n" +
+                "Most likely Steam updated the game, or you clicked 'Verify integrity of game files' —\n" +
+                "in which case the game is already vanilla, just delete " + ResName + ".",
                 "The restore data does not match the current PCK. Nothing was changed.\n  " + why + "\n" +
                 "Most likely Steam updated the game, or you ran \"Verify integrity of game files\" —\n" +
                 "in that case the game is already vanilla; just delete " + ResName + "."));
@@ -738,31 +738,31 @@ static class Core
             var bw = new BinaryWriter(fs);
             foreach (var kv in d.Orig)
             {
-                var e = idx.Entries[kv.Key];       // RestoreApplies 已保证存在
+                var e = idx.Entries[kv.Key];       // RestoreApplies already guarantees it exists
                 fs.Position = e.FieldPos;
                 bw.Write(kv.Value.Offset);
                 bw.Write(kv.Value.Size);
                 bw.Write(kv.Value.Md5);
             }
             bw.Flush();
-            fs.SetLength(d.OrigLength);      // 砍掉追加的那一段
+            fs.SetLength(d.OrigLength);      // Cut off the appended section
         }
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 对外动作
+    // Public actions
     // ═══════════════════════════════════════════════════════════════════
     public static void Install(string gameDir, bool force, Action<string> say)
     {
         string live = Path.Combine(gameDir, PckName);
-        string res  = Path.Combine(gameDir, ResName);   // 写：永远用新名
-        string cur  = FindRes(gameDir);                 // 读：现场那个（可能是旧名）
+        string res  = Path.Combine(gameDir, ResName);   // For writing, always use the new name
+        string cur  = FindRes(gameDir);                 // For reading, whatever is on disk (may be the old name)
         string bak  = Path.Combine(gameDir, BakName);
 
         PreflightWritable(gameDir, live);
 
-        // 已经装过 → 先原样还原回去，再从干净的包重打。
-        // 不这么做的话补丁会一层层叠上去，包越来越大。
+        // Already installed → first restore it exactly, then patch again from the clean pack.
+        // Otherwise the patches would pile up layer on layer and the pack would keep growing.
         if (cur.Length > 0)
         {
             RestoreData old = null;
@@ -771,41 +771,41 @@ static class Core
 
             if (old != null && RestoreApplies(live, old, out why))
             {
-                say(L.T("[1/4] 先还原上一次的安装…", "[1/4] Reverting the previous install first..."));
+                say(L.T("[1/4] Restoring the previous install first…", "[1/4] Reverting the previous install first..."));
                 ApplyRestore(live, old);
                 File.Delete(cur);
             }
             else
             {
-                // 现场跟记录对不上（Steam 更新、或用户点过「验证游戏文件的完整性」）。
-                // 拿它去改包会写坏文件，所以只忽略、不使用；
-                // 当前这份包到底能不能装，交给下面那道原版校验判。
-                say(L.T("[1/4] 上次的还原数据跟当前数据包对不上，已忽略（" + why + "）",
+                // What's on disk doesn't match the record (a Steam update, or the user clicked "Verify integrity of game files").
+                // Using it to modify the pack would corrupt the file, so it's only ignored, never used.
+                // Whether this pack can actually be installed is decided by the vanilla check below.
+                say(L.T("[1/4] The previous restore data doesn't match the current PCK, ignored (" + why + ")",
                         "[1/4] Stale restore data ignored (" + why + ")"));
             }
         }
         else if (File.Exists(bak))
         {
-            // 旧版的 605 MB 整包备份：**必须验哈希**。
-            // 🩸 老版本安装器在这里只判存在、不验内容 —— 游戏更新之后重装，
-            //    会把旧版本的数据包盖到新游戏上。这条就是修那个 bug。
-            say(L.T("[1/4] 发现旧版整包备份，校验中（约十几秒）…",
+            // Old-style 605 MB whole-pack backup. **Its hash must be verified**.
+            // 🩸 Old installers only checked that it existed here, not its contents — reinstalling after a game update
+            //    would put the old version's pack over the new game. This is the fix for that bug.
+            say(L.T("[1/4] Found an old-style whole-pack backup, verifying (takes ten-plus seconds)…",
                     "[1/4] Found a legacy full backup, verifying (~15s)..."));
             string bs = Sha256(bak);
             if (bs != VanillaSha)
                 throw new Exception(L.T(
-                    "旧版备份 " + BakName + " 不是本 mod 认识的原版，**没有动你的文件**。\n" +
-                    "  多半是游戏更新过、而那份备份还是旧版本的。\n" +
-                    "  处理：把它删掉，然后用 Steam「验证游戏文件的完整性」拿回当前版本的原版。",
+                    "Old backup " + BakName + " isn't a vanilla build this mod recognises, **your files were not touched**.\n" +
+                    "  Most likely the game was updated and that backup is still from the old version.\n" +
+                    "  What to do: delete it, then use Steam's 'Verify integrity of game files' to get the current vanilla version back.",
                     "Legacy backup " + BakName + " is not the vanilla build this mod knows. Nothing was changed.\n" +
                     "  Most likely the game updated while that backup is from an older version.\n" +
                     "  Fix: delete it, then use Steam's \"Verify integrity of game files\"."));
             File.Copy(bak, live, true);
-            say(L.T("      ✓ 已从旧备份还原到原版", "      OK, restored to vanilla from the legacy backup"));
+            say(L.T("      ✓ Restored to vanilla from the old backup", "      OK, restored to vanilla from the legacy backup"));
         }
 
-        // 现在这份包应该是干净原版了，验一下
-        say(L.T("[2/4] 校验当前数据包是不是原版（约十几秒）…",
+        // The pack should be clean vanilla now, so verify it
+        say(L.T("[2/4] Checking whether the current PCK is vanilla (takes ten-plus seconds)…",
                 "[2/4] Verifying the current PCK is vanilla (~15s)..."));
         long sz = new FileInfo(live).Length;
         string sha = Sha256(live);
@@ -815,14 +815,14 @@ static class Core
         {
             if (!force)
                 throw new Exception(L.T(
-                    "当前数据包跟本 mod 认识的原版对不上，**没有动它**。\n" +
-                    "  期望：" + VanillaSha + "（" + GameVersion + "，" + VanillaSize.ToString("N0") + " 字节）\n" +
-                    "  实际：" + sha + "（" + sz.ToString("N0") + " 字节）\n" +
-                    "常见原因：\n" +
-                    "  1. 游戏更新了 —— 要等 mod 出适配新版本的版本，硬装会坏；\n" +
-                    "  2. 已经装过别的 mod。\n" +
-                    "补救：Steam → 右键游戏 → 属性 → 已安装的文件 → 验证游戏文件的完整性。\n" +
-                    "确定要继续可以加 --force。",
+                    "The current PCK doesn't match the vanilla build this mod recognises, **it was not touched**.\n" +
+                    "  Expected: " + VanillaSha + " (" + GameVersion + ", " + VanillaSize.ToString("N0") + " bytes)\n" +
+                    "  Actual:   " + sha + " (" + sz.ToString("N0") + " bytes)\n" +
+                    "Common causes:\n" +
+                    "  1. The game was updated — you need to wait for a mod release that supports the new version, forcing the install will break it;\n" +
+                    "  2. Another mod is already installed.\n" +
+                    "To fix it: Steam → right-click the game → Properties → Installed Files → Verify integrity of game files.\n" +
+                    "If you're sure you want to continue, add --force.",
                     "The current PCK does not match the vanilla build this mod knows. Nothing was changed.\n" +
                     "  Expected: " + VanillaSha + " (" + GameVersion + ", " + VanillaSize.ToString("N0") + " bytes)\n" +
                     "  Actual:   " + sha + " (" + sz.ToString("N0") + " bytes)\n" +
@@ -831,17 +831,17 @@ static class Core
                     "  2. Another mod is already installed.\n" +
                     "Fix: Steam -> right click the game -> Properties -> Installed Files -> Verify integrity.\n" +
                     "Use --force to proceed anyway."));
-            say(L.T("      ⚠ 校验没过，但你加了 --force，继续。",
+            say(L.T("      ⚠ Verification failed, but you passed --force, so continuing.",
                     "      WARNING: verification failed but --force was given, continuing."));
         }
-        else say(L.T("      ✓ 是原版 " + GameVersion, "      OK, vanilla " + GameVersion));
+        else say(L.T("      ✓ It's vanilla " + GameVersion, "      OK, vanilla " + GameVersion));
 
         var patches = LoadEmbedded();
-        say(L.T("[3/4] 写入 " + patches.Count + " 个补丁…",
+        say(L.T("[3/4] Writing " + patches.Count + " patches…",
                 "[3/4] Writing " + patches.Count + " patches..."));
 
         var rec = new RestoreData();
-        rec.BaseSha = verified ? VanillaSha : null;   // 没验过就不承诺还原后等于原版
+        rec.BaseSha = verified ? VanillaSha : null;   // If it wasn't verified, don't promise that restoring gives vanilla
         rec.GameVer = GameVersion;
         rec.ModTag  = ModTag();
 
@@ -849,26 +849,27 @@ static class Core
         int n = PatchPck(live, patches, rec);
         sw.Stop();
 
-        // 还原数据必须在打完之后落盘：中途失败的话文件里没有半份还原数据，
-        // 重跑一次会当成「没装过」，从原包重打，天然自洽。
+        // The restore data is written to disk after patching, so a failed install never leaves half-written restore data.
+        // If patching is interrupted partway (power loss, crash), the PCK is left partly patched with no restore data.
+        // Running again then fails the vanilla SHA256 check, and Steam's "Verify integrity of game files" brings back the original.
         WriteRestore(res, rec);
 
-        say(L.T("[4/4] 写入自检…", "[4/4] Verifying what was written..."));
+        say(L.T("[4/4] Self-checking what was written…", "[4/4] Verifying what was written..."));
         VerifyPatched(live, patches);
 
         say("");
-        say(L.T("✓ 装好了：" + n + " 个文件已替换，用时 " + sw.Elapsed.TotalSeconds.ToString("0.0") + " 秒",
+        say(L.T("✓ Installed: " + n + " files replaced, took " + sw.Elapsed.TotalSeconds.ToString("0.0") + " seconds",
                 "Done: " + n + " files replaced in " + sw.Elapsed.TotalSeconds.ToString("0.0") + "s"));
 
         if (File.Exists(bak))
-            say(L.T("提示：现在还原只需要 " + ResName + "（几 KB），那份 605 MB 的 " + BakName + " 可以删了。",
+            say(L.T("Tip: restoring now only needs " + ResName + " (a few KB), so the 605 MB " + BakName + " can be deleted.",
                     "Note: reverting now only needs " + ResName + " (a few KB); the 605 MB " + BakName + " can be deleted."));
     }
 
     public static void Uninstall(string gameDir, Action<string> say)
     {
         string live = Path.Combine(gameDir, PckName);
-        string res  = FindRes(gameDir);                // 可能是旧名 mp8_restore.dat
+        string res  = FindRes(gameDir);                // May be the old name mp8_restore.dat
         string bak  = Path.Combine(gameDir, BakName);
 
         PreflightWritable(gameDir, live);
@@ -879,30 +880,30 @@ static class Core
             RestoreData d = null;
             try { d = ReadRestore(res); } catch (Exception ex) { stale = ex.Message; }
 
-            // 对不上就别硬来 —— 下面还有整包备份那条路，实在不行让 Steam 修
+            // If it doesn't match, don't force it — there's still the whole-pack backup route below, and failing that, let Steam repair it
             if (d != null && !RestoreApplies(live, d, out stale)) d = null;
 
             if (d != null)
             {
-                say(L.T("正在还原原版…", "Restoring vanilla..."));
+                say(L.T("Restoring vanilla…", "Restoring vanilla..."));
                 ApplyRestore(live, d);
 
                 if (!string.IsNullOrEmpty(d.BaseSha))
                 {
-                    say(L.T("校验还原结果（约十几秒）…", "Verifying the restored file (~15s)..."));
+                    say(L.T("Verifying the restore result (takes ten-plus seconds)…", "Verifying the restored file (~15s)..."));
                     string sha = Sha256(live);
                     if (sha != d.BaseSha)
                         throw new Exception(L.T(
-                            "还原完的数据包跟原版指纹对不上：\n  期望 " + d.BaseSha + "\n  实际 " + sha +
-                            "\n用 Steam「验证游戏文件的完整性」可以拿回原版。",
+                            "The restored PCK doesn't match the vanilla fingerprint:\n  expected " + d.BaseSha + "\n  actual " + sha +
+                            "\nUse Steam's 'Verify integrity of game files' to get vanilla back.",
                             "The restored PCK does not match the vanilla fingerprint:\n  expected " + d.BaseSha +
                             "\n  actual   " + sha + "\nUse Steam's \"Verify integrity of game files\" to recover."));
-                    say(L.T("      ✓ 逐字节等于原版 " + GameVersion,
+                    say(L.T("      ✓ Byte-for-byte identical to vanilla " + GameVersion,
                             "      OK, byte-for-byte identical to vanilla " + GameVersion));
                 }
                 File.Delete(res);
                 say("");
-                say(L.T("✓ 已还原成原版，现在可以跟没装 mod 的朋友一起玩了。",
+                say(L.T("✓ Restored to vanilla, you can now play with friends who don't have the mod.",
                         "Reverted to vanilla. You can play with unmodded friends now."));
                 return;
             }
@@ -910,43 +911,43 @@ static class Core
 
         if (File.Exists(bak))
         {
-            say(L.T("用旧版整包备份还原，先校验（约十几秒）…",
+            say(L.T("Restoring from the old-style whole-pack backup, verifying first (takes ten-plus seconds)…",
                     "Restoring from the legacy full backup, verifying first (~15s)..."));
             if (Sha256(bak) != VanillaSha)
                 throw new Exception(L.T(
-                    "旧版备份不是本 mod 认识的原版，**没有动你的文件**。\n" +
-                    "用 Steam「验证游戏文件的完整性」拿回原版。",
+                    "The old backup isn't a vanilla build this mod recognises, **your files were not touched**.\n" +
+                    "Use Steam's 'Verify integrity of game files' to get vanilla back.",
                     "The legacy backup is not the vanilla build this mod knows. Nothing was changed.\n" +
                     "Use Steam's \"Verify integrity of game files\"."));
             File.Copy(bak, live, true);
             say("");
-            say(L.T("✓ 已还原成原版。", "Reverted to vanilla."));
+            say(L.T("✓ Restored to vanilla.", "Reverted to vanilla."));
             return;
         }
 
-        // 走到这儿没有可用的还原手段。先看看是不是根本不用还原 ——
-        // 用户点过 Steam「验证游戏文件的完整性」之后就是这个状态：包已经是原版，
-        // 只剩一个用不上的 mp8_restore.dat。这种情况该报喜，不该报错。
+        // Reaching here means there's no usable way to restore. First check whether a restore is even needed —
+        // this is the state right after the user clicks Steam's "Verify integrity of game files". The pack is already vanilla,
+        // with just an unusable mp8_restore.dat left over. That case deserves good news, not an error.
         var now = Detect(gameDir);
         if (now.Kind == Kind.Vanilla)
         {
             if (res.Length > 0) { try { File.Delete(res); } catch { } }
-            say(L.T("✓ 当前已经是原版了，不用还原（顺手清掉了用不上的还原数据）。",
+            say(L.T("✓ It's already vanilla, no restore needed (cleared out the unusable restore data while at it).",
                     "Already vanilla, nothing to revert (removed the stale restore data)."));
             return;
         }
 
         throw new Exception(L.T(
-            "没有可用的还原手段 —— 没法自己还原。\n" +
-            (stale != null ? "  还原数据用不了：" + stale + "\n" : "  找不到还原数据（" + ResName + "），也没有旧版备份。\n") +
-            "补救：Steam → 右键游戏 → 属性 → 已安装的文件 → 验证游戏文件的完整性，\n" +
-            "Steam 会重新下载原版（约 600 MB）。",
+            "No usable way to restore — it can't be restored automatically.\n" +
+            (stale != null ? "  Restore data can't be used: " + stale + "\n" : "  Can't find restore data (" + ResName + "), and there's no old backup either.\n") +
+            "To fix it: Steam → right-click the game → Properties → Installed Files → Verify integrity of game files,\n" +
+            "and Steam will download vanilla again (about 600 MB).",
             "No usable way to revert.\n" +
             (stale != null ? "  Restore data unusable: " + stale + "\n" : "  No restore data (" + ResName + ") and no legacy backup.\n") +
             "Fix: Steam -> right click the game -> Properties -> Installed Files -> Verify integrity of game files."));
     }
 
-    // 写得进去吗、地方够吗 —— 提前问清楚，别写到一半才炸
+    // Can we write to it, and is there enough space — ask up front instead of blowing up halfway through writing
     static void PreflightWritable(string gameDir, string live)
     {
         try
@@ -956,9 +957,9 @@ static class Core
         catch (UnauthorizedAccessException)
         {
             throw new Exception(L.T(
-                "没有写入权限：" + gameDir + "\n" +
-                "游戏装在受保护的目录里（比如 Program Files）。\n" +
-                "处理：右键本程序 →「以管理员身份运行」。",
+                "No write permission: " + gameDir + "\n" +
+                "The game is installed in a protected folder (such as Program Files).\n" +
+                "What to do: right-click this program → 'Run as administrator'.",
                 "No write permission: " + gameDir + "\n" +
                 "The game lives in a protected folder (e.g. Program Files).\n" +
                 "Fix: right click this program -> Run as administrator."));
@@ -966,8 +967,8 @@ static class Core
         catch (IOException)
         {
             throw new Exception(L.T(
-                "数据包被占用，动不了。\n" +
-                "处理：完全退出游戏；Steam 若正在更新或校验这个游戏，等它做完；必要时退出 Steam。",
+                "The PCK is in use and can't be changed.\n" +
+                "What to do: fully exit the game. If Steam is updating or verifying this game, wait for it to finish. Exit Steam if necessary.",
                 "The PCK is locked by another process.\n" +
                 "Fix: fully exit the game; if Steam is updating or validating it, wait; exit Steam if needed."));
         }
@@ -975,24 +976,24 @@ static class Core
         try
         {
             var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(gameDir)));
-            // 追加量 ~1 MB，留 200 MB 余量足够；旧版整包备份那条路才需要 605 MB
+            // The append is ~1 MB, so a 200 MB margin is plenty. Only the old whole-pack backup route needs 605 MB
             if (drive.AvailableFreeSpace < 200L * 1024 * 1024)
                 throw new Exception(L.T(
-                    "磁盘剩余空间不足 200 MB（" + drive.Name + "），先腾点地方再来。",
+                    "Low disk space, less than 200 MB free (" + drive.Name + "), free up some space and try again.",
                     "Less than 200 MB free on " + drive.Name + ". Free up some space first."));
         }
         catch (Exception ex)
         {
-            if (ex.Message.StartsWith("磁盘") || ex.Message.StartsWith("Less than")) throw;
-            // 取不到盘符信息就算了，不因为查不了空间而拦住安装
+            if (ex.Message.StartsWith("Low disk space") || ex.Message.StartsWith("Less than")) throw;
+            // If the drive info can't be read, never mind. Don't block the install just because free space can't be checked
         }
     }
 
-    // 免费声明。放在 Core 里，保证控制台版与窗口版一字不差。
-    // 起因：社区里有人把同类 mod 闭源收费卖，本 mod 是免费替代品。
+    // Free-of-charge notice. It lives in Core so the console and windowed versions match word for word.
+    // The reason is that someone in the community was selling a similar mod as closed source for money, and this mod is the free alternative.
     public static string FreeNotice()
     {
-        return L.T("本 mod 完全免费。如果你为它花过钱，说明你被骗了。",
+        return L.T("This mod is completely free. If you paid for it, you've been scammed.",
                    "This mod is completely FREE. If you paid for it, you were scammed.");
     }
 
@@ -1001,20 +1002,20 @@ static class Core
         try { Process.Start("steam://validate/" + AppId); } catch { }
     }
 
-    // ── 游戏自己的日志目录（Godot 写的，不是本安装器写的那份）────────────────
+    // ── The game's own log folder (written by Godot, not the one this installer writes) ────────────────
     //
-    // 排 mod 的 bug 要的是这一份。T45 那次碎骨者黑屏就卡在拿不到房主机器上的
-    // godot.log —— 让每个玩家都能两下点开自己的日志目录，就是为了堵这个缺口。
+    // This is the one needed to track down mod bugs. The T45 Spine Breaker black screen investigation got stuck because we couldn't get the host machine's
+    // godot.log — letting every player open their own log folder in two clicks is meant to close that gap.
     //
-    // ⚠️⚠️ 这里**刻意只开文件夹，不复制、不打包、不上传**，这条别改：
-    //   本 exe 未签名，而「读用户目录下的文件 → 打包 → 往外发」正是 infostealer
-    //   的行为签名。只调 explorer 打开一个目录，杀软画像一点不动。
-    //   **本文件至今零网络调用（grep 不到 System.Net / HttpClient / Socket），
-    //   别在这里开第一处。** 用户自己把文件拖出来即可。
+    // ⚠️⚠️ This **deliberately only opens the folder. No copying, no packaging, no uploading**. Don't change that.
+    //   This exe is unsigned, and "read files in the user folder → package them → send them out" is exactly an infostealer's
+    //   behaviour signature. Only calling explorer to open a folder leaves the antivirus profile completely unchanged.
+    //   **To date this file makes zero network calls (grep finds no System.Net / HttpClient / Socket),
+    //   so don't add the first one here.** Users can drag the file out themselves.
     //
-    // /select 会顺带把 godot.log 选中：目录里还躺着几个轮换的 godot<日期>.log，
-    // 不指一下用户不知道该拿哪个（而且 godot.log 才是当前这次的）。
-    // 文件不在就退回只开目录；目录也不在（游戏还没启动过）就返回 false，由界面提示。
+    // /select also highlights godot.log. The folder also holds several rotated godot<date>.log files,
+    // and without pointing to it users won't know which one to grab (and godot.log is the current session's).
+    // If the file isn't there, fall back to just opening the folder. If the folder isn't there either (game never launched), return false and let the UI say so.
     public static string GameLogDir
     {
         get
@@ -1055,7 +1056,7 @@ static class Core
 
 #if !GUI
 // ═════════════════════════════════════════════════════════════════════════
-// 控制台版
+// Console version
 // ═════════════════════════════════════════════════════════════════════════
 static class Installer
 {
@@ -1083,28 +1084,28 @@ static class Installer
         }
 
         try { Console.OutputEncoding = Encoding.UTF8; } catch { }
-        Line(L.T("Machine Party-Overtime（8 人联机 + 全面重平衡）",
+        Line(L.T("Machine Party-Overtime (8-player online + full rebalance)",
                  "Machine Party-Overtime - 8 players & rebalance"), ConsoleColor.Green);
-        Console.WriteLine(L.T("适用游戏版本：", "Target game version: ") + Core.GameVersion +
-                          L.T("        mod 版本：", "        mod version: ") + Core.ModTag() +
-                          L.T("        安装器：", "        installer: ") + Core.ReleaseNum);
+        Console.WriteLine(L.T("Supported game version: ", "Target game version: ") + Core.GameVersion +
+                          L.T("        mod version: ", "        mod version: ") + Core.ModTag() +
+                          L.T("        installer: ", "        installer: ") + Core.ReleaseNum);
         Console.WriteLine();
 
         try
         {
-            if (validate) { Core.OpenSteamValidate(); Console.WriteLine(L.T("已请求 Steam 校验游戏文件。", "Asked Steam to verify game files.")); return Done(0); }
+            if (validate) { Core.OpenSteamValidate(); Console.WriteLine(L.T("Requested a Steam verification of the game files.", "Asked Steam to verify game files.")); return Done(0); }
 
             if (gameDir == null) gameDir = PickGameDir();
             if (gameDir == null || !File.Exists(Path.Combine(gameDir, Core.PckName)))
                 return Fail(L.T(
-                    "没找到 Machine Party 的安装目录。\n用 --game 手动指定，例如：\n" +
+                    "Couldn't find the Machine Party install folder.\nUse --game to specify it manually, for example:\n" +
                     "  mp8_install.exe --game \"D:\\Steam\\" + Core.GameRel + "\"\n" +
-                    "（Steam 里右键游戏 → 管理 → 浏览本地文件，打开的就是那个目录）",
+                    "(In Steam, right-click the game → Manage → Browse local files, and the folder that opens is the one)",
                     "Could not find the Machine Party install folder.\nSpecify it with --game, e.g.\n" +
                     "  mp8_install.exe --game \"D:\\Steam\\" + Core.GameRel + "\"\n" +
                     "(In Steam: right click the game -> Manage -> Browse local files.)"));
 
-            Console.WriteLine(L.T("游戏目录：", "Game folder: ") + gameDir);
+            Console.WriteLine(L.T("Game folder: ", "Game folder: ") + gameDir);
             Core.Log("gameDir=" + gameDir);
             Console.WriteLine();
 
@@ -1119,21 +1120,21 @@ static class Installer
             if (!uninstall)
             {
                 Console.WriteLine();
-                Warn(L.T("接下来：", "Next:"));
+                Warn(L.T("Next steps:", "Next:"));
                 Console.WriteLine(L.T(
-                    "  · 从 Steam 正常启动游戏，主菜单右下角版本号带 +" + Core.ModTag() + " 就是装上了。",
+                    "  · Launch the game from Steam as usual. If the version number in the bottom right of the main menu has +" + Core.ModTag() + ", it's installed.",
                     "  - Launch the game from Steam; the version in the bottom right of the main menu ends with +" + Core.ModTag() + "."));
                 Console.WriteLine(L.T(
-                    "  · **一起玩的人必须都装同一版**：版本对不上会被房主直接拒绝进房。",
+                    "  · **Everyone playing together must install the same version**. With a version mismatch the host rejects them from the lobby outright.",
                     "  - EVERYONE in the lobby must install the SAME version, or the host will refuse them."));
                 Console.WriteLine(L.T(
-                    "  · 想回原版：本程序加 --uninstall 参数再跑一次。",
+                    "  · To go back to vanilla, run this program again with the --uninstall argument.",
                     "  - To revert: run this program again with --uninstall."));
                 Console.WriteLine();
-                Warn(L.T("⚠ Steam 更新游戏、或点了「验证游戏文件的完整性」，都会把 mod 冲掉；重跑本程序即可。",
+                Warn(L.T("⚠ A Steam game update, or clicking 'Verify integrity of game files', will wipe the mod. Just run this program again.",
                          "Steam updating the game (or verifying its files) removes the mod; just run this again."));
 
-                // 免费声明放在最后一行 —— 装完之后视线停在这里
+                // The free notice goes on the very last line — that's where the eye rests after installing
                 Console.WriteLine();
                 Line(Core.FreeNotice(), ConsoleColor.Red);
             }
@@ -1143,22 +1144,22 @@ static class Installer
         {
             Core.Log("ERROR " + ex);
             return Fail(ex.Message + L.T(
-                "\n\n（完整日志：" + Core.LogPath + "）",
+                "\n\n(Full log: " + Core.LogPath + ")",
                 "\n\n(Full log: " + Core.LogPath + ")"));
         }
     }
 
-    // 找到多份就让用户挑，别默默用第一个
+    // If several copies are found, let the user choose instead of silently using the first one
     static string PickGameDir()
     {
         var dirs = Core.FindGameDirs();
         if (dirs.Count == 0) return null;
         if (dirs.Count == 1) return dirs[0];
 
-        Warn(L.T("找到 " + dirs.Count + " 份游戏安装，选一个：",
+        Warn(L.T("Found " + dirs.Count + " game installs, pick one:",
                  "Found " + dirs.Count + " installs, pick one:"));
         for (int i = 0; i < dirs.Count; i++) Console.WriteLine("  " + (i + 1) + ") " + dirs[i]);
-        Console.Write(L.T("输入序号：", "Number: "));
+        Console.Write(L.T("Enter the number: ", "Number: "));
         string s = Console.ReadLine();
         int n;
         if (int.TryParse(s == null ? "" : s.Trim(), out n) && n >= 1 && n <= dirs.Count) return dirs[n - 1];
@@ -1168,29 +1169,29 @@ static class Installer
     static void PrintStatus(string gameDir)
     {
         var st = Core.Detect(gameDir);
-        Console.WriteLine(L.T("数据包：", "PCK:      ") + st.PckPath);
-        Console.WriteLine(L.T("大小：  ", "Size:     ") + st.Length.ToString("N0"));
+        Console.WriteLine(L.T("PCK:      ", "PCK:      ") + st.PckPath);
+        Console.WriteLine(L.T("Size:     ", "Size:     ") + st.Length.ToString("N0"));
         switch (st.Kind)
         {
             case Core.Kind.Vanilla:
-                Line(L.T("状态：  原版（没装 mod）", "State:    vanilla (mod not installed)"), ConsoleColor.Gray); break;
+                Line(L.T("State:    vanilla (no mod installed)", "State:    vanilla (mod not installed)"), ConsoleColor.Gray); break;
             case Core.Kind.OursInstalled:
-                Line(L.T("状态：  已装 Overtime " + Core.ModTag(), "State:    Overtime " + Core.ModTag() + " installed"), ConsoleColor.Green); break;
+                Line(L.T("State:    Overtime installed " + Core.ModTag(), "State:    Overtime " + Core.ModTag() + " installed"), ConsoleColor.Green); break;
             case Core.Kind.OldVersion:
-                Line(L.T("状态：  已装 Overtime " + st.InstalledTag + "（旧版，本程序是 " + Core.ModTag() + "）",
+                Line(L.T("State:    Overtime installed " + st.InstalledTag + " (old version, this program is " + Core.ModTag() + ")",
                          "State:    Overtime " + st.InstalledTag + " installed (this program is " + Core.ModTag() + ")"), ConsoleColor.Yellow);
-                Console.WriteLine(L.T("        直接运行本程序即可升级。", "        Just run this program to upgrade."));
+                Console.WriteLine(L.T("        Just run this program to upgrade.", "        Just run this program to upgrade."));
                 break;
             case Core.Kind.Missing:
-                Line(L.T("状态：  找不到数据包", "State:    PCK not found"), ConsoleColor.Red); break;
+                Line(L.T("State:    can't find the PCK", "State:    PCK not found"), ConsoleColor.Red); break;
             default:
-                Line(L.T("状态：  认不出来", "State:    unrecognised"), ConsoleColor.Yellow);
+                Line(L.T("State:    can't recognise it", "State:    unrecognised"), ConsoleColor.Yellow);
                 if (st.Note.Length > 0) Console.WriteLine("        " + st.Note);
                 break;
         }
-        Console.WriteLine(L.T("还原数据：", "Restore:  ") + (st.HasRestore ? Path.GetFileName(Core.FindRes(gameDir)) : "-"));
-        Console.WriteLine(L.T("旧版备份：", "Legacy:   ") + (st.HasLegacy ? Core.BakName + " (605 MB)" : "-"));
-        Console.WriteLine(L.T("日志：  ", "Log:      ") + Core.LogPath);
+        Console.WriteLine(L.T("Restore data: ", "Restore:  ") + (st.HasRestore ? Path.GetFileName(Core.FindRes(gameDir)) : "-"));
+        Console.WriteLine(L.T("Old backup: ", "Legacy:   ") + (st.HasLegacy ? Core.BakName + " (605 MB)" : "-"));
+        Console.WriteLine(L.T("Log:      ", "Log:      ") + Core.LogPath);
     }
 
     static void Say(string s) { Console.WriteLine(s); Core.Log(s); }
@@ -1210,14 +1211,14 @@ static class Installer
         return Done(1);
     }
 
-    // 双击运行时窗口会一闪而过，所以停一下让人看得见结果
+    // When run by double-clicking the window flashes past, so pause to let people see the result
     static int Done(int code)
     {
         Core.FlushLog();
         if (pause && !Console.IsOutputRedirected)
         {
             Console.WriteLine();
-            Console.WriteLine(L.T("（按任意键关闭）", "(press any key to close)"));
+            Console.WriteLine(L.T("(press any key to close)", "(press any key to close)"));
             try { Console.ReadKey(true); } catch { }
         }
         return code;
@@ -1226,20 +1227,20 @@ static class Installer
     static void Usage()
     {
         Console.WriteLine();
-        Console.WriteLine(L.T("用法：", "Usage:"));
-        Console.WriteLine(L.T("  mp8_install.exe                 安装（自动找 Steam 里的游戏）",
+        Console.WriteLine(L.T("Usage:", "Usage:"));
+        Console.WriteLine(L.T("  mp8_install.exe                 install (automatically finds the game in Steam)",
                               "  mp8_install.exe                 install (auto-detects the game)"));
-        Console.WriteLine(L.T("  mp8_install.exe --uninstall     还原成原版",
+        Console.WriteLine(L.T("  mp8_install.exe --uninstall     restore to vanilla",
                               "  mp8_install.exe --uninstall     revert to vanilla"));
-        Console.WriteLine(L.T("  mp8_install.exe --status        只看当前状态，不改任何东西",
+        Console.WriteLine(L.T("  mp8_install.exe --status        only show the current state, don't change anything",
                               "  mp8_install.exe --status        show current state, change nothing"));
-        Console.WriteLine(L.T("  mp8_install.exe --game \"<目录>\"  手动指定游戏目录",
+        Console.WriteLine(L.T("  mp8_install.exe --game \"<folder>\"  specify the game folder manually",
                               "  mp8_install.exe --game \"<dir>\"   set the game folder manually"));
-        Console.WriteLine(L.T("  mp8_install.exe --validate      让 Steam 校验游戏文件（拿回原版）",
+        Console.WriteLine(L.T("  mp8_install.exe --validate      have Steam verify the game files (gets vanilla back)",
                               "  mp8_install.exe --validate      ask Steam to verify game files"));
-        Console.WriteLine(L.T("  mp8_install.exe --lang en|zh    界面语言",
+        Console.WriteLine(L.T("  mp8_install.exe --lang en|zh    interface language",
                               "  mp8_install.exe --lang en|zh    interface language"));
-        Console.WriteLine(L.T("  mp8_install.exe --force         跳过原版校验（后果自负）",
+        Console.WriteLine(L.T("  mp8_install.exe --force         skip the vanilla check (at your own risk)",
                               "  mp8_install.exe --force         skip the vanilla check (at your own risk)"));
     }
 }
@@ -1247,13 +1248,13 @@ static class Installer
 
 #if GUI
 // ═════════════════════════════════════════════════════════════════════════
-// 窗口版：一个开关在「原版 ⇄ MP8」之间切
+// Windowed version, a single switch that toggles between "vanilla ⇄ MP8"
 //
-// 为什么值得做：本 mod 最大的体验代价是「装了就不能跟没装的朋友玩」
-// （版本握手是故意这么设计的）。既然还原只要写几 KB，切换就该是一秒钟一个按钮的事。
+// Why it's worth doing. This mod's biggest cost to the experience is "once it's installed you can't play with friends who don't have it"
+// (the version handshake is deliberately designed that way). Since restoring only writes a few KB, switching should take one second and one button.
 //
-// 界面刻意用固定浅色配色，不跟随系统深色模式 —— WinForms 没有原生深色支持，
-// 半吊子跟随只会做出黑底黑字。
+// The UI deliberately uses a fixed light colour scheme and doesn't follow system dark mode — WinForms has no native dark mode support,
+// and following it halfway would only produce black text on a black background.
 // ═════════════════════════════════════════════════════════════════════════
 static class Launcher
 {
@@ -1269,7 +1270,7 @@ static class Launcher
 
 class MainForm : Form
 {
-    // ── 配色 ────────────────────────────────────────────────────────────
+    // ── Colours ────────────────────────────────────────────────────────────
     static readonly Color Ink      = Color.FromArgb( 24,  26,  33);
     static readonly Color InkSub   = Color.FromArgb(150, 156, 168);
     static readonly Color Muted    = Color.FromArgb(110, 118, 132);
@@ -1296,7 +1297,7 @@ class MainForm : Form
 
     static Font F(float size, FontStyle style)
     {
-        // Segoe UI 在 Win10/11 一定有，中文会自动回退到微软雅黑
+        // Segoe UI is always present on Win10/11, and Chinese text automatically falls back to Microsoft YaHei
         return new Font("Segoe UI", size, style);
     }
 
@@ -1318,7 +1319,7 @@ class MainForm : Form
 
     public MainForm()
     {
-        Text = "Machine Party-Overtime";   // 品牌名，两种语言下一致
+        Text = "Machine Party-Overtime";   // Brand name, the same in both languages
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -1326,7 +1327,7 @@ class MainForm : Form
         BackColor = Color.White;
         Font = F(9f, FontStyle.Regular);
 
-        // ── 顶栏 ───────────────────────────────────────────────────────
+        // ── Header bar ───────────────────────────────────────────────────────
         var header = new Panel();
         header.SetBounds(0, 0, 580, 78);
         header.BackColor = Ink;
@@ -1341,7 +1342,7 @@ class MainForm : Form
         header.Controls.Add(title);
 
         var sub = new Label();
-        sub.Text = L.T("Machine Party　·　人数上限 4 → 8", "Machine Party  ·  8 players & rebalance");
+        sub.Text = L.T("Machine Party  ·  player cap 4 → 8", "Machine Party  ·  8 players & rebalance");
         sub.Font = F(8.5f, FontStyle.Regular);
         sub.ForeColor = InkSub;
         sub.AutoSize = false;
@@ -1349,22 +1350,22 @@ class MainForm : Form
         header.Controls.Add(sub);
 
         var ver = new Label();
-        // 三行：mod 版本 / 安装器发布号 / 游戏版本。安装器那行是给排障用的 ——
-        // 只修安装器的发布（如 1.3.1）ModTag() 不变，没有这一行就分不出玩家手上
-        // 是修好的那版还是出事的那版，而我们能拿到的往往只有一张截图。
+        // Three lines, mod version / installer release number / game version. The installer line is for troubleshooting —
+        // an installer-only release (such as 1.3.1) doesn't change ModTag(), and without this line there's no telling whether a player has
+        // the fixed build or the broken one, when often all we can get is a single screenshot.
         ver.Text = Core.ModTag() + "\n"
-                 + L.T("安装器 ", "installer ") + Core.ReleaseNum + "\n"
-                 + L.T("游戏 ", "game ") + Core.GameVersion;
+                 + L.T("installer ", "installer ") + Core.ReleaseNum + "\n"
+                 + L.T("game ", "game ") + Core.GameVersion;
         ver.Font = F(8.5f, FontStyle.Regular);
         ver.ForeColor = InkSub;
         ver.TextAlign = ContentAlignment.MiddleRight;
         ver.AutoSize = false;
-        ver.SetBounds(370, 14, 186, 52);   // 三行；顶栏高 78，到 66 为止还有余量
+        ver.SetBounds(370, 14, 186, 52);   // Three lines. The header bar is 78 tall, so ending at 66 still leaves some margin
         header.Controls.Add(ver);
 
-        // ── 游戏目录 ───────────────────────────────────────────────────
+        // ── Game folder ───────────────────────────────────────────────────
         var dirLab = new Label();
-        dirLab.Text = L.T("游戏目录", "Game folder");
+        dirLab.Text = L.T("Game folder", "Game folder");
         dirLab.ForeColor = Muted;
         dirLab.AutoSize = false;
         dirLab.SetBounds(26, 94, 300, 18);
@@ -1377,12 +1378,12 @@ class MainForm : Form
         dirBox.SelectedIndexChanged += delegate { Refresh2(); };
         Controls.Add(dirBox);
 
-        var browse = FlatBtn(L.T("浏览…", "Browse"), Ghost, GhostHot, Ink, 9f, FontStyle.Regular);
+        var browse = FlatBtn(L.T("Browse…", "Browse"), Ghost, GhostHot, Ink, 9f, FontStyle.Regular);
         browse.SetBounds(462, 113, 92, 26);
         browse.Click += delegate { Browse(); };
         Controls.Add(browse);
 
-        // ── 状态卡片 ───────────────────────────────────────────────────
+        // ── Status card ───────────────────────────────────────────────────
         var card = new Panel();
         card.SetBounds(26, 152, 528, 92);
         card.BackColor = CardBg;
@@ -1408,41 +1409,41 @@ class MainForm : Form
         noteLabel.SetBounds(22, 42, 492, 44);
         card.Controls.Add(noteLabel);
 
-        // ── 动作按钮 ───────────────────────────────────────────────────
+        // ── Action buttons ───────────────────────────────────────────────────
         toggleBtn = FlatBtn("", Amber, AmberHot, Color.White, 11f, FontStyle.Bold);
         toggleBtn.SetBounds(26, 260, 268, 48);
         toggleBtn.Click += delegate { Toggle(); };
         Controls.Add(toggleBtn);
 
-        // 比主按钮更深一档：主按钮（琥珀/石板）→ 启动游戏（近黑）→ Steam 修复（浅灰），
-        // 三级色阶把「这次该点哪个」一眼分开。同色会让主次失效（第一版就是这样）。
-        launchBtn = FlatBtn(L.T("启动游戏", "Play"), Ink, Color.FromArgb(44, 47, 58), Color.White, 10f, FontStyle.Regular);
+        // One shade darker than the main button. Main button (amber/slate) → Launch game (near black) → Steam repair (light grey),
+        // a three-step colour scale that makes "which one to click this time" obvious at a glance. The same colour kills the hierarchy (the first version did that).
+        launchBtn = FlatBtn(L.T("Launch game", "Play"), Ink, Color.FromArgb(44, 47, 58), Color.White, 10f, FontStyle.Regular);
         launchBtn.SetBounds(306, 260, 122, 48);
         launchBtn.Click += delegate { Core.LaunchGame(); };
         Controls.Add(launchBtn);
 
-        validateBtn = FlatBtn(L.T("Steam 修复", "Steam repair"), Ghost, GhostHot, Ink, 9f, FontStyle.Regular);
+        validateBtn = FlatBtn(L.T("Steam repair", "Steam repair"), Ghost, GhostHot, Ink, 9f, FontStyle.Regular);
         validateBtn.SetBounds(440, 260, 114, 48);
         validateBtn.Click += delegate { Core.OpenSteamValidate(); };
         Controls.Add(validateBtn);
 
-        // 两个日志入口，一个是安装器自己的、一个是游戏的 —— 标签必须分得开。
-        // 原来只有一个叫「打开日志」，加了第二个之后那个名字就有歧义了，一并改掉。
-        logBtn = FlatBtn(L.T("安装日志", "Install log"), Color.White, Ghost, Muted, 8.5f, FontStyle.Regular);
+        // Two log entry points, one for the installer itself and one for the game — the labels have to be clearly distinct.
+        // There used to be just one, called "Open log". Once the second was added that name became ambiguous, so it was renamed as well.
+        logBtn = FlatBtn(L.T("Install log", "Install log"), Color.White, Ghost, Muted, 8.5f, FontStyle.Regular);
         logBtn.SetBounds(24, 318, 100, 24);
         logBtn.Click += delegate {
             try { Core.FlushLog(); Process.Start("notepad.exe", Core.LogPath); } catch { }
         };
         Controls.Add(logBtn);
 
-        // 报 bug 时要交的是这一份。见 Core.OpenGameLogFolder() 上那段说明：
-        // 只开文件夹，不复制不上传。
-        gameLogBtn = FlatBtn(L.T("游戏日志", "Game log"), Color.White, Ghost, Muted, 8.5f, FontStyle.Regular);
+        // This is the one to hand in when reporting a bug. See the notes above Core.OpenGameLogFolder()
+        // — it only opens the folder, with no copying and no uploading.
+        gameLogBtn = FlatBtn(L.T("Game log", "Game log"), Color.White, Ghost, Muted, 8.5f, FontStyle.Regular);
         gameLogBtn.SetBounds(132, 318, 116, 24);
         gameLogBtn.Click += delegate {
             if (Core.OpenGameLogFolder()) return;
             MessageBox.Show(this,
-                L.T("还没有游戏日志 —— 游戏至少要启动过一次。\n\n目录：\n",
+                L.T("No game log yet — the game has to have been launched at least once.\n\nFolder:\n",
                     "No game logs yet — launch the game at least once.\n\nFolder:\n")
                 + Core.GameLogDir,
                 "Machine Party-Overtime",
@@ -1450,8 +1451,8 @@ class MainForm : Form
         };
         Controls.Add(gameLogBtn);
 
-        // ── 免费声明（红色，常驻）──────────────────────────────────────
-        // 社区里有人把同类 mod 闭源收费卖，这条得让人一眼看见。
+        // ── Free notice (red, always visible) ──────────────────────────────────────
+        // Someone in the community sells a similar mod as closed source for money, so this has to be seen at a glance.
         var freeBand = new Panel();
         freeBand.SetBounds(0, 354, 580, 76);
         freeBand.BackColor = FreeBg;
@@ -1472,18 +1473,18 @@ class MainForm : Form
         free.SetBounds(16, 10, 548, 56);
         freeBand.Controls.Add(free);
 
-        // 只探测、不操作就关窗的情况下，缓冲里的日志得有人写出去
+        // If the window is closed after only detecting and doing nothing, the buffered log still has to be written out by someone
         FormClosed += delegate { Core.FlushLog(); };
 
         foreach (string d in Core.FindGameDirs()) dirBox.Items.Add(d);
-        // 给 SelectedIndex 赋值会触发 SelectedIndexChanged → Refresh2()，
-        // 所以只有「一个目录都没找到」时才需要自己补一次。1.3 是两边都调，
-        // 于是每开一次启动器就往日志里记两行一模一样的 detect。
+        // Assigning SelectedIndex triggers SelectedIndexChanged → Refresh2(),
+        // so it only needs calling manually when "no folder was found at all". 1.3 called it in both places,
+        // so every time the launcher opened, the log got two identical detect lines.
         if (dirBox.Items.Count > 0) dirBox.SelectedIndex = 0;
         else Refresh2();
 
-        // 开局别让焦点落在下拉框上：DropDownList 一旦获得焦点，选中项会整行刷成
-        // 系统高亮蓝，界面第一眼就被那条蓝杠抢走。焦点给主按钮，顺便回车即可执行。
+        // Don't let focus land on the dropdown at startup. Once a DropDownList gets focus, the selected item is painted across the whole row in
+        // the system highlight blue, and that blue bar grabs the first glance. Focus goes to the main button instead, and Enter runs it too.
         ActiveControl = toggleBtn;
     }
 
@@ -1492,12 +1493,12 @@ class MainForm : Form
     void Browse()
     {
         var fd = new FolderBrowserDialog();
-        fd.Description = L.T("选中 Machine Party_Windows 这个目录（里面有 Machine Party.pck）",
+        fd.Description = L.T("Select the Machine Party_Windows folder (it contains Machine Party.pck)",
                              "Pick the Machine Party_Windows folder (it contains Machine Party.pck)");
         if (fd.ShowDialog() != DialogResult.OK) return;
         if (!File.Exists(Path.Combine(fd.SelectedPath, Core.PckName)))
         {
-            MessageBox.Show(L.T("这个目录里没有 " + Core.PckName + "。", "No " + Core.PckName + " in that folder."),
+            MessageBox.Show(L.T("There's no " + Core.PckName + " in this folder.", "No " + Core.PckName + " in that folder."),
                             Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
@@ -1518,19 +1519,19 @@ class MainForm : Form
         if (busy) return;
         if (Dir == null)
         {
-            SetState(L.T("没找到游戏", "Game not found"), Bad,
-                     L.T("用「浏览…」手动指定游戏目录（Steam 里右键游戏 → 管理 → 浏览本地文件）。",
+            SetState(L.T("Game not found", "Game not found"), Bad,
+                     L.T("Use 'Browse…' to pick the game folder manually (in Steam, right-click the game → Manage → Browse local files).",
                          "Use Browse to pick the game folder (Steam: right click the game -> Manage -> Browse local files)."));
             toggleBtn.Enabled = false;
-            toggleBtn.Text = L.T("启用 Overtime", "Enable Overtime");
+            toggleBtn.Text = L.T("Enable Overtime", "Enable Overtime");
             toggleBtn.BackColor = Ghost;
             toggleBtn.ForeColor = Muted;
             return;
         }
 
         st = Core.Detect(Dir);
-        // 控制台版不发给玩家了，所以日志是唯一的诊断通道 ——
-        // 每次探测都记一行，「打开日志」在还没装任何东西时也有内容可看。
+        // The console version isn't given to players anymore, so the log is the only diagnostic channel —
+        // log one line on every detect, so "Open log" has something to show even before anything is installed.
         Core.Log(string.Format("detect: {0} | tag={1} | len={2} | restore={3} | legacy={4} | {5}",
             st.Kind, (st.InstalledTag.Length > 0 ? st.InstalledTag : "-"),
             st.Length, st.HasRestore, st.HasLegacy, Dir));
@@ -1540,56 +1541,56 @@ class MainForm : Form
         switch (st.Kind)
         {
             case Core.Kind.OursInstalled:
-                SetState(L.T("Overtime 已启用", "Overtime enabled"), Good,
-                         L.T("主菜单右下角的版本号会带 +" + Core.ModTag() + "。\n" +
-                             "一起玩的人必须装同一版，否则会被房主拒绝进房。",
+                SetState(L.T("Overtime enabled", "Overtime enabled"), Good,
+                         L.T("The version number in the bottom right of the main menu will have +" + Core.ModTag() + ".\n" +
+                             "Everyone playing together must install the same version, or the host will refuse to let them into the lobby.",
                              "The main menu version ends with +" + Core.ModTag() + ".\n" +
                              "Everyone in the lobby needs this same version, or the host will refuse them."));
-                toggleBtn.Text = L.T("切回原版", "Switch to vanilla");
+                toggleBtn.Text = L.T("Switch back to vanilla", "Switch to vanilla");
                 toggleBtn.BackColor = Slate;
                 toggleBtn.FlatAppearance.MouseOverBackColor = SlateHot;
                 break;
 
             case Core.Kind.OldVersion:
-                SetState(L.T("已装 Overtime " + st.InstalledTag + "（旧版）", "Overtime " + st.InstalledTag + " installed (outdated)"), Caution,
-                         L.T("本程序是 " + Core.ModTag() + "。点下面的按钮升级（会先还原再装新版）。"
-                             + "一起玩的人都要升到同一版，否则互相进不了房。",
+                SetState(L.T("Overtime installed " + st.InstalledTag + " (old version)", "Overtime " + st.InstalledTag + " installed (outdated)"), Caution,
+                         L.T("This program is " + Core.ModTag() + ". Click the button below to upgrade (it restores first, then installs the new version). "
+                             + "Everyone playing together has to upgrade to the same version, or you can't join each other's lobbies.",
                              "This program is " + Core.ModTag() + ". The button below upgrades it "
                              + "(revert, then install). Everyone you play with needs the same version."));
-                toggleBtn.Text = L.T("升级到 " + Core.ModTag(), "Upgrade to " + Core.ModTag());
+                toggleBtn.Text = L.T("Upgrade to " + Core.ModTag(), "Upgrade to " + Core.ModTag());
                 toggleBtn.BackColor = Amber;
                 toggleBtn.FlatAppearance.MouseOverBackColor = AmberHot;
                 break;
 
             case Core.Kind.Vanilla:
-                SetState(L.T("当前是原版", "Currently vanilla"), Slate,
-                         L.T("点下面的按钮启用 Overtime。随时可以再切回来。",
+                SetState(L.T("Currently vanilla", "Currently vanilla"), Slate,
+                         L.T("Click the button below to enable Overtime. You can switch back any time.",
                              "Press the button below to enable Overtime. You can switch back at any time."));
-                toggleBtn.Text = L.T("启用 Overtime", "Enable Overtime");
+                toggleBtn.Text = L.T("Enable Overtime", "Enable Overtime");
                 toggleBtn.BackColor = Amber;
                 toggleBtn.FlatAppearance.MouseOverBackColor = AmberHot;
                 break;
 
             case Core.Kind.Missing:
-                SetState(L.T("找不到数据包", "PCK not found"), Bad, st.Note);
+                SetState(L.T("Can't find the PCK", "PCK not found"), Bad, st.Note);
                 toggleBtn.Enabled = false;
                 toggleBtn.BackColor = Ghost;
                 toggleBtn.ForeColor = Muted;
                 break;
 
             default:
-                SetState(L.T("认不出当前的游戏数据", "Unrecognised game data"), Caution,
+                SetState(L.T("Can't recognise the current game data", "Unrecognised game data"), Caution,
                          st.Note.Length > 0 ? st.Note
-                                            : L.T("既不是原版，也不是本 mod。", "Neither vanilla nor this mod."));
+                                            : L.T("It's neither vanilla nor this mod.", "Neither vanilla nor this mod."));
                 if (st.CanUninstall)
                 {
-                    toggleBtn.Text = L.T("切回原版", "Switch to vanilla");
+                    toggleBtn.Text = L.T("Switch back to vanilla", "Switch to vanilla");
                     toggleBtn.BackColor = Slate;
                     toggleBtn.FlatAppearance.MouseOverBackColor = SlateHot;
                 }
                 else
                 {
-                    toggleBtn.Text = L.T("启用 Overtime", "Enable Overtime");
+                    toggleBtn.Text = L.T("Enable Overtime", "Enable Overtime");
                     toggleBtn.BackColor = Amber;
                     toggleBtn.FlatAppearance.MouseOverBackColor = AmberHot;
                 }
@@ -1600,27 +1601,27 @@ class MainForm : Form
     void Toggle()
     {
         if (Dir == null) return;
-        // 别叫 busy：MainForm 已经有个 bool busy 字段（「处理中」标志），
-        // 局部同名会把它遮住，后面那句 busy = true 就直接编译不过。
+        // Don't call it busy. MainForm already has a bool busy field (the "working" flag),
+        // and a local with the same name would shadow it, so the later busy = true wouldn't even compile.
         string blocked = Core.BusyReason(Dir);
         if (blocked != null)
         {
-            // 拦下的理由（PID / 路径）刚写进缓冲，立刻落盘 —— 玩家点「安装日志」
-            // 时得看得见，否则又是一份只有 detect、看不出所以然的日志。
+            // The block reason (PID / path) was just written to the buffer, so flush it to disk right away — when the player clicks "Install log"
+            // they need to be able to see it, otherwise it's yet another log with only detect lines that explains nothing.
             Core.FlushLog();
             MessageBox.Show(blocked, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        // OldVersion 走安装（Install 会先用还原数据回到原版再打新补丁），不是卸载
+        // OldVersion goes through install (Install first uses the restore data to go back to vanilla, then applies the new patches), not uninstall
         bool remove = (st.Kind == Core.Kind.OursInstalled) || (st.Kind == Core.Kind.Unknown && st.CanUninstall);
         string dir = Dir;
 
         busy = true;
         toggleBtn.Enabled = false; launchBtn.Enabled = false; dirBox.Enabled = false;
-        SetState(L.T("处理中…", "Working..."), Caution, "");
+        SetState(L.T("Working…", "Working..."), Caution, "");
 
-        // 校验哈希要十几秒，不能卡死界面
+        // Verifying the hash takes over ten seconds, so it mustn't freeze the UI
         var th = new Thread(delegate ()
         {
             string err = null;

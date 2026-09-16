@@ -6,36 +6,36 @@ diff --git a/minigames/disco_dodge/scrips/disco_dodge.gd b/minigames/disco_dodge
  var ach_tile_limit: int = 10
  
 +# ═══════════════════════════════════════════════════════════════════════════
-+# [MP8] 立足之本 8 人适配 —— **只摊开出生点，别的一个字不动**（用户 2026-08-17 定）
++# [MP8] Disco Dodge 8-player support — **only spread out the spawn points, nothing else changes** (user decision, 2026-08-17)
 +# ═══════════════════════════════════════════════════════════════════════════
 +#
-+# 侦察结论（probe50 + 读码）：**这个小游戏几乎天然支持 8 人。**
-+#   · 砖阵是 `spawn_tiles()` 按 `tile_rows × tile_columns` 现摆的，**自动以原点居中**；
-+#     符号分配、抽砖、算分全是遍历 `tiles`，与人数无关；
-+#   · 算分是纯 A 名次族（`player_scores[dead_players[i]] = i`，幸存者拿 `player_count`），
-+#     随人数自动放大；
-+#   · 全文件没有按玩家下标索引的定长数组（出生点那处是容器式，取 `get_children()`）。
++# Diagnostic findings (probe50 + code reading) — **this minigame supports 8 players almost out of the box.**
++#   · The tile grid is laid out at runtime by `spawn_tiles()` from `tile_rows × tile_columns` and is **automatically centered on the origin**.
++#     Symbol assignment, tile picking and scoring all iterate over `tiles` and don't depend on player count.
++#   · Scoring is pure family-A placement scoring (`player_scores[dead_players[i]] = i`, the survivor gets `player_count`),
++#     so it scales with player count automatically.
++#   · No fixed-size array in the whole file is indexed by player (the spawn points are container-style, read via `get_children()`).
 +#
-+# ⚠️ **场地真值和脚本默认值差 5 倍**（这个项目第六次被字面量骗）：
-+#   脚本写 `tile_rows=20 / tile_columns=12`，**场景覆盖成 8 / 6** → 只有 48 块砖。
-+#   每块 4.0 单位 → 场地 x∈[-16,+16]、z∈[-12,+12]。
++# ⚠️ **The real arena size and the script defaults differ by 5x** (the sixth time a literal has fooled this project).
++#   The script says `tile_rows=20 / tile_columns=12`, but **the scene overrides them to 8 / 6** → only 48 tiles.
++#   Each tile is 4.0 units → arena x∈[-16,+16], z∈[-12,+12].
 +#
-+# 唯一一眼就是 8 人缺陷的：**原版 4 个出生点全挤在 (±2, ±2) 的 4×4 米方框里**，
-+# 而场地有 32×24。8 个人叠在中央那一小块开局。
++# The one obvious 8-player flaw is that **the 4 vanilla spawn points are all crammed into a 4×4 m box at (±2, ±2)**,
++# while the arena is 32×24. 8 players would start stacked on that small central patch.
 +#
-+# **改法**：出生点一律落在**砖心**上，一人一块砖，从中央往两侧摊开。
-+#   砖心格点：x = -14,-10,-6,-2,2,6,10,14   z = -10,-6,-2,2,6,10
-+#   原版那 4 个正好就是中央 2×2 四块砖的砖心（局部 ±2, ±2）——
-+#   8 人只是把它延成 **4×2 = 8 块**：x∈{-6,-2,2,6} × z∈{-2,2}，间距仍是一块砖。
++# **The fix** — every spawn point sits on a **tile center**, one player per tile, spreading out from the middle.
++#   Tile center grid is x = -14,-10,-6,-2,2,6,10,14   z = -10,-6,-2,2,6,10
++#   The 4 vanilla points are exactly the centers of the central 2×2 tiles (local ±2, ±2) —
++#   for 8 players we just extend that to **4×2 = 8 tiles**, x∈{-6,-2,2,6} × z∈{-2,2}, still one tile apart.
 +#
-+# ⚠️ **场地没有放大**（用户 2026-08-17 选的就是"只摊出生点"）。
-+#   放大砖阵这条路查过：相机在 (0,14.25,+17.92)、俯角 39.1°、fov 67.8，
-+#   视锥下缘打到地面约 z=+13.6，而砖阵近边已经在 z=+12 —— **近侧只剩 1.6 个单位余量**，
-+#   `tile_columns` 一加，最近一排就掉出画面下缘。要放大**必须连相机一起动**。
++# ⚠️ **The arena was not enlarged** (on 2026-08-17 the user chose "only spread the spawn points").
++#   Enlarging the tile grid was looked into. The camera sits at (0,14.25,+17.92), pitched down 39.1°, fov 67.8,
++#   and the bottom edge of the view frustum hits the ground around z=+13.6 while the grid's near edge is already at z=+12 — **only 1.6 units of margin on the near side**.
++#   Add to `tile_columns` and the nearest row drops off the bottom of the screen. Enlarging it **means moving the camera too**.
 +const MP8_MAX_PLAYERS: int = 8
 +
-+# ⚠️ 让 network_manager 的通用补位让开：出生点从这里起由本小游戏自己管。
-+# 声明处就设 true —— 通用补位可能比 _ready() 先跑，写在 _ready() 里就晚了。
++# ⚠️ Makes network_manager's generic spawn top-up stand aside. From here on this minigame manages its own spawn points.
++# Set to true at declaration — the generic top-up may run before _ready(), so setting it in _ready() would be too late.
 +var mp8_owns_spawns: bool = true
 +var mp8_player_count: int = 0
 +
@@ -43,9 +43,9 @@ diff --git a/minigames/disco_dodge/scrips/disco_dodge.gd b/minigames/disco_dodge
  func _ready() -> void :
  	super._ready()
  
-+	# [MP8] 必须在 spawn_players() 之前 —— 它是 `player_spawn_positions[counter]`
-+	# 按下标发人的。_ready() 比 initialize() 早，而且这里只用 @export 的
-+	# tile_rows/columns/size 算格点，不依赖砖节点（砖是 spawn_players 之后才摆的）。
++	# [MP8] Must run before spawn_players(), which hands out players by index via `player_spawn_positions[counter]`.
++	# _ready() runs earlier than initialize(), and this only uses the @export
++	# tile_rows/columns/size to compute grid points, not the tile nodes (tiles are placed after spawn_players).
 +	_mp8_setup_spawns()
 +
  	if multiplayer.is_server():
@@ -55,39 +55,39 @@ diff --git a/minigames/disco_dodge/scrips/disco_dodge.gd b/minigames/disco_dodge
  
  		counter += 1
  
-+# [MP8] 把出生点摊到砖心上，一人一块砖。
++# [MP8] Spread the spawn points onto tile centers, one player per tile.
 +#
-+# **原版那 4 个节点一个字节不碰** —— 只在它们没占的砖心上补新的。
-+# ≤4 人整段不跑，与原版逐值一致。
++# **The 4 vanilla nodes are not touched at all** — new ones only go on tile centers they don't already occupy.
++# With ≤4 players none of this runs, so it matches vanilla value for value.
 +func _mp8_setup_spawns() -> void :
 +
-+	var args := Array(OS.get_cmdline_args())
++	var args := NetworkManager.mp8_args()
 +	mp8_player_count = PlayerManager.player_presences.size()
 +
 +	if player_spawn_positions_node == null:
-+		push_warning("[MP8] 立足之本：没有出生点容器，没法摊开")
++		push_warning("[MP8] Disco Dodge: no spawn point container, cannot spread out")
 +		return
 +
 +	var have: int = player_spawn_positions_node.get_child_count()
 +
-+	print("[MP8] 立足之本：运行时真值 —— 砖阵 %d×%d（%d 块）/ 每块 %.1f / 每轮抽 %d 块 / 出生点 %d 个；本局 %d 人" % [
++	print("[MP8] Disco Dodge: runtime values — tile grid %d×%d (%d tiles) / tile size %.1f / %d tiles removed per round / %d spawn points; %d players this match" % [
 +		tile_rows, tile_columns, tile_rows * tile_columns, tile_size,
 +		tiles_to_remove, have, mp8_player_count,
 +	])
 +
 +	if args.has("mp8noexpand"):
-+		print("[MP8] 立足之本：mp8noexpand，出生点一个字不改（纯原版对照组，⚠️ 必须配 4 人）")
++		print("[MP8] Disco Dodge: mp8noexpand, spawn points left unchanged (pure vanilla control group, ⚠️ must be run with 4 players)")
 +		return
 +
 +	if mp8_player_count <= 4:
-+		print("[MP8] 立足之本：%d 人，用原版 %d 个出生点，一个字不改" % [mp8_player_count, have])
++		print("[MP8] Disco Dodge: %d players, using the %d vanilla spawn points unchanged" % [mp8_player_count, have])
 +		return
 +
 +	var want: int = mini(maxi(mp8_player_count, 5), MP8_MAX_PLAYERS)
 +	if have >= want:
 +		return
 +
-+	# 已经被原版占掉的砖心（按局部坐标认，容差半块砖）
++	# Tile centers already taken by vanilla spawns (matched by local coordinates, tolerance of half a tile)
 +	var taken: Array[Vector2] = []
 +	for c in player_spawn_positions_node.get_children():
 +		if c is Node3D:
@@ -111,17 +111,17 @@ diff --git a/minigames/disco_dodge/scrips/disco_dodge.gd b/minigames/disco_dodge
 +		taken.append(p)
 +		added.append("(%.0f,%.0f)" % [p.x, p.y])
 +
-+	print("[MP8] 立足之本：出生点 %d → %d，新增落在砖心 %s" % [
++	print("[MP8] Disco Dodge: spawn points %d → %d, new ones placed on tile centers %s" % [
 +		have, player_spawn_positions_node.get_child_count(), " ".join(added)
 +	])
 +
 +
-+# 所有砖心的**局部**坐标（和原版出生点同一套：父节点带 0.03 的 z 偏移，
-+# 用局部坐标就自动继承，新旧点偏差一致）。
++# **Local** coordinates of every tile center (same space as the vanilla spawn points. The parent has a 0.03 z offset,
++# and local coordinates inherit it automatically, so old and new points share the same offset).
 +#
-+# 排序 = 先 |z| 再 |x| → **优先贴着中央那两排、往两侧摊**。
-+# 这样 8 人正好铺成中央 4×2 一块，而不是摊成十字或不规则形状；
-+# 也和场地形状对得上（x 有 8 块、z 只有 6 块，横向本来就更宽裕）。
++# Sort order = |z| first, then |x| → **prefer hugging the two central rows and spreading sideways**.
++# That way 8 players fill exactly a central 4×2 block instead of a cross or an irregular shape.
++# It also suits the arena shape (8 tiles along x and only 6 along z, so there is more room sideways anyway).
 +func _mp8_tile_centers() -> Array[Vector2] :
 +
 +	var out: Array[Vector2] = []
@@ -155,43 +155,43 @@ diff --git a/minigames/disco_dodge/scrips/disco_dodge.gd b/minigames/disco_dodge
  
  		break
  
-+	# [MP8] 只读日志，**一分钱都不改**（用户 2026-08-17 定案：算分保持原版）
++	# [MP8] Read-only logging, **not a single point changes** (user decision 2026-08-17 — scoring stays vanilla)
 +	_mp8_log_scores()
 +
  	player_scores_finalized.emit(player_scores)
  
 +
-+# [MP8] 结算时把名次/名字/得分打进日志，纯为事后对账，不动任何分数。
++# [MP8] Logs placement/name/score at results time, purely for reconciling afterwards. No scores are touched.
 +#
-+# ② 得分**用户 2026-08-17 定案：保持原版，一个字不改**（和凿刻考验那次同样的选择）。
-+# 原版机制只有两处：
-+#   `player_scores[dead_players[i]] = i`   —— 第 i 个掉下去的拿 i 分
-+#   `player_scores[幸存者] = player_count` —— 活到最后的拿总人数
-+# 于是 4 人 = 0/1/2/**4**、8 人 = 0/1/2/3/4/5/6/**8**，
-+# **冠亚之间恒跳 2 分**，其余步长 1。用户判定这一分是"活到最后"应得的奖励，不压平。
++# ② Scoring — **user decision 2026-08-17: keep vanilla, change nothing** (the same choice as for Chisel Gauntlet).
++# Vanilla scoring comes down to just two rules.
++#   `player_scores[dead_players[i]] = i`   — the i-th player to fall gets i points
++#   `player_scores[survivor] = player_count` — the last one standing gets the total player count
++# So 4 players = 0/1/2/**4** and 8 players = 0/1/2/3/4/5/6/**8**,
++# **there is always a 2-point jump between 1st and 2nd**, every other step is 1. The user judged that extra point a fair reward for "surviving to the end" and did not flatten it.
 +#
-+# ⚠️ **已知未修的原版 bug（用户同一次一并选择不动）**：
-+# `player_count` 是 `spawn_players()` 里记的**开局人数**，不随掉线更新。
-+# 有人中途掉线时，幸存者拿的分比实际参与结算的人数多 —— 凭空多几分。
-+# 残骸平台当初刻意用 `dead_players.size()` 而不是 `player_count`，躲的就是这条。
-+# 要修就把 `:431` 换成 `dead_players.size() + 1`（无人掉线时与原版逐值相同）。
++# ⚠️ **Known unfixed vanilla bug (the user chose to leave it in the same decision)**
++# `player_count` is the **starting player count** recorded in `spawn_players()` and is not updated on disconnect.
++# If someone disconnects mid-match, the survivor gets more points than the number of players actually in the results — a few free points.
++# Junk Platform deliberately used `dead_players.size()` instead of `player_count` to dodge exactly this.
++# To fix it, replace `:431` with `dead_players.size() + 1` (identical to vanilla when nobody disconnects).
 +#
-+# ⚠️ 顺带记一条：`scoring_players` 是**死代码** —— 声明了、`remove_player` 里有一处
-+# `erase`，但全文件从没 append 过。和枪械工厂的 `finished_players` 一模一样的形状。
-+# 不影响算分，但别被它误导成"这里还有一套顺序数组能用"。
++# ⚠️ Side note — `scoring_players` is **dead code**. It is declared and `remove_player` has one
++# `erase` on it, but nothing in the file ever appends to it. Exactly the same shape as Manufacture Gun's `finished_players`.
++# It doesn't affect scoring, but don't be misled into thinking "there's another ordered array here to use".
 +func _mp8_log_scores() -> void :
 +
 +	var rows := PackedStringArray()
 +
 +	for i in dead_players.size():
 +		var id: int = dead_players[i]
-+		rows.append("第%d个掉 %s %d分" % [i + 1, _mp8_name(id), i])
++		rows.append("fell #%d %s %d pts" % [i + 1, _mp8_name(id), i])
 +
 +	for network_id in active_players.keys():
-+		rows.append("幸存 %s %d分" % [_mp8_name(network_id), player_count])
++		rows.append("survivor %s %d pts" % [_mp8_name(network_id), player_count])
 +		break
 +
-+	print("[MP8] 立足之本结算（开局 %d 人 / %d 人掉下去）：%s" % [
++	print("[MP8] Disco Dodge results (%d players at start / %d fell): %s" % [
 +		player_count, dead_players.size(), " | ".join(rows)
 +	])
 +
